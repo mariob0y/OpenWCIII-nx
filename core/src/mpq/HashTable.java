@@ -12,6 +12,24 @@ public class HashTable {
 		bucketArray = entries;
 	}
 	
+	/**
+	 * warsmash-nx: lookupBlock's answer without the exception: whether it would return. A miss
+	 * threw, and on the console every exception records its stack, while most asset lookups miss
+	 * the map's archive.
+	 */
+	public boolean hasBlock(HashLookup what){
+		int mask = bucketArray.length-1;
+		int index = what.index & mask;
+		for(int pos = index ; ; ){
+			Entry temp = bucketArray[pos];
+			if(temp.blockIndex == BLOCK_EMPTY_ALWAYS) break;
+			if(temp.getHash() == what.hash) return true;
+			pos = ( pos + 1 ) & mask;
+			if(pos == index) break;
+		}
+		return false;
+	}
+
 	public int lookupBlock(HashLookup what) throws MPQException{
 		int mask = bucketArray.length-1;
 		int index = what.index & mask;

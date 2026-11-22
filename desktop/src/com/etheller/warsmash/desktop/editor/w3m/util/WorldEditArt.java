@@ -7,6 +7,7 @@ import javax.swing.ImageIcon;
 
 import com.etheller.warsmash.datasources.DataSource;
 import com.etheller.warsmash.units.DataTable;
+import com.etheller.warsmash.desktop.util.AwtImages;
 import com.etheller.warsmash.util.ImageUtils;
 
 public class WorldEditArt {
@@ -27,14 +28,14 @@ public class WorldEditArt {
 		}
 		BufferedImage gameTex;
 		try {
-			gameTex = ImageUtils
+			gameTex = AwtImages.toBufferedImage(ImageUtils
 					.getAnyExtensionImageFixRGB(gameDataSource, iconTexturePath, "AbstractWorldEditorPanel.getIcon")
-					.getRGBCorrectImageData();
+					.getRGBCorrectImageData());
 		}
 		catch (final IOException e) {
 			try {
-				gameTex = ImageUtils.getAnyExtensionImageFixRGB(gameDataSource, UNTITLED_DOODAD_ICON_PATH,
-						"AbstractWorldEditorPanel.getIcon").getRGBCorrectImageData();
+				gameTex = AwtImages.toBufferedImage(ImageUtils.getAnyExtensionImageFixRGB(gameDataSource, UNTITLED_DOODAD_ICON_PATH,
+						"AbstractWorldEditorPanel.getIcon").getRGBCorrectImageData());
 			}
 			catch (final IOException exc2) {
 				throw new RuntimeException(exc2);

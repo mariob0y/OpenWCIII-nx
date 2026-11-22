@@ -4087,7 +4087,8 @@ public class Jass2 {
 			jassProgramVisitor.getJassNativeManager().createNative("TriggerExecute",
 					(arguments, globalScope, triggerScope) -> {
 						final Trigger whichTrigger = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
-						whichTrigger.execute(globalScope, new CommonTriggerExecutionScope(whichTrigger, triggerScope));
+						// warsmash-nx: at once, as Warcraft III (see Trigger.executeNow)
+						whichTrigger.executeNow(globalScope, new CommonTriggerExecutionScope(whichTrigger, triggerScope));
 						return null;
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("TriggerExecuteWait",
@@ -4296,8 +4297,17 @@ public class Jass2 {
 						}
 						final CAbility ability = whichWidget
 								.getAbility(GetAbilityByRawcodeVisitor.getInstance().reset(new War3ID(rawcode)));
-						// TODO below code is very stupid!!
-						return IntegerJassValue.of(ability == null ? 0 : 1);
+						// warsmash-nx: the ability's real level (was always 1); campaign scripts test hero skill
+						// levels with it
+						if (ability == null) {
+							return IntegerJassValue.ZERO;
+						}
+						if (ability instanceof com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CLevelingAbility) {
+							return IntegerJassValue.of(Math.max(1,
+									((com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.CLevelingAbility) ability)
+											.getLevel()));
+						}
+						return IntegerJassValue.of(1);
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("IncUnitAbilityLevel",
 					(arguments, globalScope, triggerScope) -> {
@@ -9142,6 +9152,10 @@ public class Jass2 {
 			jassProgramVisitor.getJassNativeManager().createNative("FourCC", string2Rawcode);
 
 			registerRandomNatives(jassProgramVisitor, this.simulation);
+			// warsmash-nx: game cache, ChangeLevel, hero/selection/shop/quest natives a campaign needs
+			NxCampaignNatives.register(jassProgramVisitor, war3MapViewer, meleeUI);
+			// warsmash-nx: computer-player AI (StartCampaignAI; common.ai natives in an AI player's program)
+			NxAI.onEnvironment(jassProgramVisitor, dataSource, uiViewport, uiScene, war3MapViewer, meleeUI);
 		}
 
 		private static void registerAbilityUserDataHandleNatives(final JassProgram jassProgramVisitor,

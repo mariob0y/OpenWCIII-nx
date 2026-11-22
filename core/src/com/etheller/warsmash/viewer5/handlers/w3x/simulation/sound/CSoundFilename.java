@@ -23,6 +23,7 @@ public class CSoundFilename implements CSound {
 	private final float distanceCutoff = 99999;
 	private final String eaxSetting;
 	private long lastStartTimestamp;
+	private long lastSoundId = -1; // warsmash-nx: for stop()
 
 	public CSoundFilename(final Sound sound, final AudioContext audioContext, final boolean looping,
 			final boolean stopWhenOutOfRange, final int fadeInRate, final int fadeOutRate, final String eaxSetting) {
@@ -60,9 +61,17 @@ public class CSoundFilename implements CSound {
 		source.connect(panner);
 
 		// Make a sound.
-		source.start(0, this.volume, this.pitch, this.looping);
+		this.lastSoundId = source.start(0, this.volume, this.pitch, this.looping);
 
 		this.lastStartTimestamp = TimeUtils.millis();
+	}
+
+	@Override
+	public void stop() {
+		if ((this.sound != null) && (this.lastSoundId != -1)) {
+			this.sound.stop(this.lastSoundId);
+			this.lastSoundId = -1;
+		}
 	}
 
 	@Override

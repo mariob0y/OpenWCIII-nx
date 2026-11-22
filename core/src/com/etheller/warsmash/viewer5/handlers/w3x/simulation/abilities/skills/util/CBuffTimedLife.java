@@ -27,7 +27,16 @@ public class CBuffTimedLife extends CBuffTimed {
 	}
 
 	@Override
+	public void onTick(final CSimulation game, final CUnit caster) {
+		// warsmash-nx: duration 0 means "no time limit" in Warcraft III (Rexxar's Summon Misha is built
+		// on Feral Spirit with Dur 0); it used to expire on the next tick, so Misha died as she appeared
+		if (getDurationMax() > 0) {
+			super.onTick(game, caster);
+		}
+	}
+
+	@Override
 	public boolean isTimedLifeBar() {
-		return true;
+		return getDurationMax() > 0;
 	}
 }

@@ -239,6 +239,18 @@ public class Camera {
 		this.dirty = true;
 	}
 
+	private static boolean nxInvertWarned;
+
+	private static void nxInvert(final Matrix4 out, final Matrix4 in) {
+		if (in.det() != 0) {
+			out.set(in).inv();
+		}
+		else if (!nxInvertWarned) {
+			nxInvertWarned = true;
+			System.err.println("warsmash-nx: singular camera matrix, keeping the previous inverse");
+		}
+	}
+
 	public void update() {
 		if (this.dirty) {
 			final Vector3 location = this.location;
@@ -273,7 +285,9 @@ public class Camera {
 
 			// Inverse world matrix
 			// Camera space -> world space
-			this.inverseViewMatrix.set(viewMatrix).inv();
+			// warsmash-nx: a degenerate camera (a script camera blending from an all-zero setup) used to
+			// throw "non-invertible matrix" and end the game; keep the last good inverse instead
+			nxInvert(this.inverseViewMatrix, viewMatrix);
 
 			this.directionX.set(RenderMathUtils.VEC3_UNIT_X);
 			inverseRotation.transform(this.directionX);
@@ -284,8 +298,7 @@ public class Camera {
 
 			// Inverse world projection matrix
 			// NDC space -> World space
-			this.inverseViewProjectionMatrix.set(viewProjectionMatrix);
-			this.inverseViewProjectionMatrix.inv();
+			nxInvert(this.inverseViewProjectionMatrix, viewProjectionMatrix);
 
 			for (int i = 0; i < 7; i++) {
 				billboardedVectors[i].set(billboardedVectorsBase[i]);

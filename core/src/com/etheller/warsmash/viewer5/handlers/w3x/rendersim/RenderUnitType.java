@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.util.EnumSet;
 
 import com.badlogic.gdx.math.Vector3;
@@ -13,7 +13,7 @@ public class RenderUnitType implements RenderWidgetType {
 	private final MdxModel model;
 	private final MdxModel portraitModel;
 	private final MdxModel specialArtModel;
-	private final BufferedImage buildingPathingPixelMap;
+	private final PixelImage buildingPathingPixelMap;
 	private final float maxPitch;
 	private final float maxRoll;
 	private final float sampleRadius;
@@ -36,7 +36,7 @@ public class RenderUnitType implements RenderWidgetType {
 	private final float blendTime;
 
 	public RenderUnitType(MdxModel model, MdxModel portraitModel, MdxModel specialArtModel,
-			BufferedImage buildingPathingPixelMap, final float maxPitch, final float maxRoll, final float sampleRadius,
+			PixelImage buildingPathingPixelMap, final float maxPitch, final float maxRoll, final float sampleRadius,
 			final boolean allowCustomTeamColor, final int teamColor, final float animationRunSpeed,
 			final float animationWalkSpeed, final float scalingValue, final String buildingShadow,
 			final String uberSplat, final float uberSplatScaleValue,
@@ -82,7 +82,7 @@ public class RenderUnitType implements RenderWidgetType {
 		return this.specialArtModel;
 	}
 
-	public BufferedImage getBuildingPathingPixelMap() {
+	public PixelImage getBuildingPathingPixelMap() {
 		return this.buildingPathingPixelMap;
 	}
 

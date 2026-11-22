@@ -118,7 +118,11 @@ public final class GameCameraManager extends CameraManager {
 		this.position = this.position.add(this.target);
 		this.fov = applyAtRate(this.fov, (float) Math.toRadians(cameraPreset.getFov() / 2),
 				(float) Math.toRadians(cameraRate.fov));
-		this.camera.perspective(this.fov, this.camera.getAspect(), cameraPreset.getNearZ(), cameraPreset.getFarZ());
+		// warsmash-nx: CreateCameraSetup starts at fov 0 / farZ 0 (Jass2), and a camera blending from such
+		// a setup gave a singular projection; keep the projection valid
+		final float nearZ = Math.max(1f, cameraPreset.getNearZ());
+		final float farZ = Math.max(nearZ + 100f, cameraPreset.getFarZ());
+		this.camera.perspective(Math.max(this.fov, 0.01f), this.camera.getAspect(), nearZ, farZ);
 
 		this.camera.moveToAndFace(this.position, this.target, this.worldUp);
 	}

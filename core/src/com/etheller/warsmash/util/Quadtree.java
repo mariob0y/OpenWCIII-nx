@@ -33,9 +33,12 @@ public class Quadtree<T> {
 	}
 
 	public void translate(final T object, final Rectangle prevBoundsToUpdate, final float xShift, final float yShift) {
-		final Node<T> node = remove(object, prevBoundsToUpdate, null);
+		Node<T> node = remove(object, prevBoundsToUpdate, null);
 		prevBoundsToUpdate.x += xShift;
 		prevBoundsToUpdate.y += yShift;
+		if (node == null) {
+			node = new Node<T>(object, prevBoundsToUpdate); // warsmash-nx: was lost: re-add, not NPE
+		}
 		add(node, 0);
 	}
 
@@ -142,7 +145,17 @@ public class Quadtree<T> {
 			overlapsAny = true;
 		}
 		if (!overlapsAny) {
-			throw new IllegalStateException("Does not overlap anything! " + node.bounds);
+			// warsmash-nx: a unit standing past the map rectangle's edge (the south edge of OrcX03b, units
+			// spawned in the boundary) used to throw here and crash the game when this node split. It goes
+			// to the child nearest its clamped centre; remove() looks it up the same way.
+			final float cx = Math.max(this.bounds.x,
+					Math.min(this.bounds.x + this.bounds.width, node.bounds.x + (node.bounds.width / 2)));
+			final float cy = Math.max(this.bounds.y,
+					Math.min(this.bounds.y + this.bounds.height, node.bounds.y + (node.bounds.height / 2)));
+			final boolean east = cx >= (this.bounds.x + (this.bounds.width / 2));
+			final boolean north = cy >= (this.bounds.y + (this.bounds.height / 2));
+			(north ? (east ? this.northeast : this.northwest) : (east ? this.southeast : this.southwest)).add(node,
+					depth + 1);
 		}
 	}
 
@@ -174,17 +187,39 @@ public class Quadtree<T> {
 			}
 		}
 		else {
+			// warsmash-nx: keep a node found in one child (an empty overlapping child used to overwrite it
+			// with null), and look outside-the-map nodes up where add() put them
+			boolean overlapsAny = false;
+			Node<T> found;
 			if (this.northeast.bounds.overlaps(bounds)) {
-				returnValue = this.northeast.remove(object, bounds, this);
+				overlapsAny = true;
+				found = this.northeast.remove(object, bounds, this);
+				returnValue = found != null ? found : returnValue;
 			}
 			if (this.northwest.bounds.overlaps(bounds)) {
-				returnValue = this.northwest.remove(object, bounds, this);
+				overlapsAny = true;
+				found = this.northwest.remove(object, bounds, this);
+				returnValue = found != null ? found : returnValue;
 			}
 			if (this.southwest.bounds.overlaps(bounds)) {
-				returnValue = this.southwest.remove(object, bounds, this);
+				overlapsAny = true;
+				found = this.southwest.remove(object, bounds, this);
+				returnValue = found != null ? found : returnValue;
 			}
 			if (this.southeast.bounds.overlaps(bounds)) {
-				returnValue = this.southeast.remove(object, bounds, this);
+				overlapsAny = true;
+				found = this.southeast.remove(object, bounds, this);
+				returnValue = found != null ? found : returnValue;
+			}
+			if (!overlapsAny) {
+				final float cx = Math.max(this.bounds.x,
+						Math.min(this.bounds.x + this.bounds.width, bounds.x + (bounds.width / 2)));
+				final float cy = Math.max(this.bounds.y,
+						Math.min(this.bounds.y + this.bounds.height, bounds.y + (bounds.height / 2)));
+				final boolean east = cx >= (this.bounds.x + (this.bounds.width / 2));
+				final boolean north = cy >= (this.bounds.y + (this.bounds.height / 2));
+				returnValue = (north ? (east ? this.northeast : this.northwest)
+						: (east ? this.southeast : this.southwest)).remove(object, bounds, this);
 			}
 			mergeIfNecessary();
 		}

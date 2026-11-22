@@ -74,8 +74,9 @@ project(":core") {
         api "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
         api "com.google.guava:guava:23.5-jre"
         api "org.apache.commons:commons-compress:1.20"
-        api "net.nikr:dds:1.0.0"
-        api files(fileTree(dir:'../jars', includes: ['*.jar']))
+        // No net.nikr:dds or blp-iio-plugin: core decodes BLP/DDS/TGA itself
+        // (com.etheller.warsmash.util.image) so it needs no AWT/ImageIO.
+        api files('../jars/gson-2.10.jar')
     }
 }
 

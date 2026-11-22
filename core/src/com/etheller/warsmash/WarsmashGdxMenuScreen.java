@@ -28,6 +28,7 @@ import com.etheller.warsmash.parsers.fdf.GameUI;
 import com.etheller.warsmash.parsers.jass.Jass2.RootFrameListener;
 import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.units.Element;
+import com.etheller.warsmash.util.LoadingStatus;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.util.WarsmashUtils;
 import com.etheller.warsmash.viewer5.Camera;
@@ -99,6 +100,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 			System.err.println("Renderer: " + renderer);
 
 			this.codebase = WarsmashGdxMapScreen.parseDataSources(this.warsmashIni);
+			LoadingStatus.report("Starting the model viewer");
 			this.viewer = new MdxViewer(this.codebase, this.game);
 
 			this.viewer.addHandler(new MdxHandler());
@@ -177,6 +179,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 //		singleModelScene(scene, "Units\\Orc\\KotoBeast\\KotoBeast.mdx", "spell slam");
 
 			System.out.println("Loaded");
+			LoadingStatus.report("Loading the main menu");
 			Gdx.gl30.glClearColor(0.0f, 0.0f, 0.0f, 1);
 
 			String server;
@@ -214,6 +217,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 		Gdx.input.setInputProcessor(this);
 		this.menuUI.show();
+		LoadingStatus.done("main menu");
 
 	}
 

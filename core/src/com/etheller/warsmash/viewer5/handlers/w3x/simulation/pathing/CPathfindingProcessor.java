@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.pathing;
 
-import java.awt.geom.Point2D;
+import com.etheller.warsmash.util.geom.Point2D;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
@@ -22,8 +22,8 @@ public class CPathfindingProcessor {
 	private final CWorldCollision worldCollision;
 	private final LinkedList<PathfindingJob> moveQueue = new LinkedList<>();
 	// things with modified state per current job:
-	private final Node[][] nodes;
-	private final Node[][] cornerNodes;
+	private Node[][] nodes;
+	private Node[][] cornerNodes;
 	private final Node[] goalSet = new Node[4];
 	private int goals = 0;
 	private int pathfindJobId = 0;
@@ -34,20 +34,42 @@ public class CPathfindingProcessor {
 	public CPathfindingProcessor(final PathingGrid pathingGrid, final CWorldCollision worldCollision) {
 		this.pathingGrid = pathingGrid;
 		this.worldCollision = worldCollision;
-		this.nodes = new Node[pathingGrid.getHeight()][pathingGrid.getWidth()];
-		this.cornerNodes = new Node[pathingGrid.getHeight() + 1][pathingGrid.getWidth() + 1];
-		for (int i = 0; i < this.nodes.length; i++) {
-			for (int j = 0; j < this.nodes[i].length; j++) {
-				this.nodes[i][j] = new Node(new Point2D.Float(pathingGrid.getWorldX(j), pathingGrid.getWorldY(i)));
-			}
-		}
-		for (int i = 0; i < this.cornerNodes.length; i++) {
-			for (int j = 0; j < this.cornerNodes[i].length; j++) {
-				this.cornerNodes[i][j] = new Node(
-						new Point2D.Float(pathingGrid.getWorldXFromCorner(j), pathingGrid.getWorldYFromCorner(i)));
-			}
-		}
 		this.pathingGridCellCount = pathingGrid.getWidth() * pathingGrid.getHeight();
+	}
+
+	/**
+	 * warsmash-nx: the search graphs are built on this processor's first job, not in the constructor.
+	 * CSimulation makes one processor per player slot (28), each with two Node + Point2D per pathing
+	 * cell: tens of millions of objects at map load, which the console spent minutes allocating
+	 * (boot 8). Only the slots that ever move a unit need them. Same graphs, built later.
+	 */
+	private Node[][] cellGraph() {
+		if (this.nodes == null) {
+			final PathingGrid pathingGrid = this.pathingGrid;
+			final Node[][] graph = new Node[pathingGrid.getHeight()][pathingGrid.getWidth()];
+			for (int i = 0; i < graph.length; i++) {
+				for (int j = 0; j < graph[i].length; j++) {
+					graph[i][j] = new Node(new Point2D.Float(pathingGrid.getWorldX(j), pathingGrid.getWorldY(i)));
+				}
+			}
+			this.nodes = graph;
+		}
+		return this.nodes;
+	}
+
+	private Node[][] cornerGraph() {
+		if (this.cornerNodes == null) {
+			final PathingGrid pathingGrid = this.pathingGrid;
+			final Node[][] graph = new Node[pathingGrid.getHeight() + 1][pathingGrid.getWidth() + 1];
+			for (int i = 0; i < graph.length; i++) {
+				for (int j = 0; j < graph[i].length; j++) {
+					graph[i][j] = new Node(
+							new Point2D.Float(pathingGrid.getWorldXFromCorner(j), pathingGrid.getWorldYFromCorner(i)));
+				}
+			}
+			this.cornerNodes = graph;
+		}
+		return this.cornerNodes;
 	}
 
 	/**
@@ -82,6 +104,7 @@ public class CPathfindingProcessor {
 			final PathfindingJob job = iterator.next();
 			if (job.queueItem == behaviorMove) {
 				iterator.remove();
+				NxPathFallback.forget(job); // warsmash-nx
 			}
 		}
 
@@ -136,7 +159,8 @@ public class CPathfindingProcessor {
 				bestDistance = possibleDistance; // always overestimate
 			}
 		}
-		return bestDistance;
+		// warsmash-nx: mildly weighted A* (paths at most 20% longer, far fewer cells searched on long trips)
+		return bestDistance * 1.2f;
 	}
 
 	public static final class Node {
@@ -222,6 +246,7 @@ public class CPathfindingProcessor {
 				this.totalIterations = 0;
 				this.totalJobLoops = 0;
 				job.jobStarted = true;
+				NxPathFallback.forget(job);
 				System.out.println("starting job with smoothing=" + job.allowSmoothing);
 				workIterations += 5; // setup of job predicted cost
 				job.goalX = job.goal.x;
@@ -241,12 +266,12 @@ public class CPathfindingProcessor {
 				}
 				tempRect.set(0, 0, job.collisionSize * 2, job.collisionSize * 2);
 				if (isCollisionSizeBetterSuitedForCorners(job.collisionSize)) {
-					job.searchGraph = this.cornerNodes;
+					job.searchGraph = cornerGraph();
 					job.gridMapping = GridMapping.CORNERS;
 					System.out.println("using corners");
 				}
 				else {
-					job.searchGraph = this.nodes;
+					job.searchGraph = cellGraph();
 					job.gridMapping = GridMapping.CELLS;
 					System.out.println("using cells");
 				}
@@ -275,7 +300,8 @@ public class CPathfindingProcessor {
 				job.openSet = new PriorityQueue<>(new Comparator<Node>() {
 					@Override
 					public int compare(final Node a, final Node b) {
-						return Double.compare(f(a), f(b));
+						// warsmash-nx: the stored f (g + h), not h recomputed on every heap comparison
+						return Double.compare(a.f, b.f);
 					}
 				});
 
@@ -338,7 +364,22 @@ public class CPathfindingProcessor {
 			while (!job.openSet.isEmpty()) {
 				Node current = job.openSet.poll();
 				current.touch(this.pathfindJobId);
+				// warsmash-nx: expand each cell once (stale duplicate heap entries are skipped)
+				final java.util.BitSet closedCells = NxPathFallback.closed(job);
+				final int currentCell = (job.gridMapping.getY(this.pathingGrid, current.point.y)
+						* job.searchGraph[0].length) + job.gridMapping.getX(this.pathingGrid, current.point.x);
+				if (closedCells.get(currentCell)) {
+					continue;
+				}
+				closedCells.set(currentCell);
+				// warsmash-nx: other units are only obstacles near the walker; far away they will have moved
+				final boolean nearStart = current.point.distance(job.startX, job.startY) < 640;
+				if (current.g < 1.0E8) {
+					// warsmash-nx: remember the closest node reached without crossing a wall
+					NxPathFallback.offer(job, current, h(current));
+				}
 				if (isGoal(current)) {
+					NxPathFallback.forget(job);
 					final LinkedList<Point2D.Float> totalPath = new LinkedList<>();
 					Direction lastCameFromDirection = null;
 
@@ -421,9 +462,26 @@ public class CPathfindingProcessor {
 							turnCost = 0;
 						}
 						double tentativeScore = current.g + ((direction.length + turnCost) * 32);
-						if (!pathableBetween(job.ignoreIntersectionsWithThisUnit,
-								job.ignoreIntersectionsWithThisSecondUnit, current.point.x, current.point.y,
-								job.movementType, job.collisionSize, x, y)) {
+						final boolean passable = nearStart
+								? pathableBetween(job.ignoreIntersectionsWithThisUnit,
+										job.ignoreIntersectionsWithThisSecondUnit, current.point.x, current.point.y,
+										job.movementType, job.collisionSize, x, y)
+								: (NxPathFallback.staticPathable(job,
+										(job.gridMapping.getY(this.pathingGrid, y) * job.searchGraph[0].length)
+												+ job.gridMapping.getX(this.pathingGrid, x),
+										this.pathingGrid, x, y, job.movementType, job.collisionSize)
+										&& NxPathFallback.staticPathable(job,
+												(job.gridMapping.getY(this.pathingGrid, y) * job.searchGraph[0].length)
+														+ job.gridMapping.getX(this.pathingGrid, current.point.x),
+												this.pathingGrid, current.point.x, y, job.movementType,
+												job.collisionSize)
+										&& NxPathFallback.staticPathable(job,
+												(job.gridMapping.getY(this.pathingGrid, current.point.y)
+														* job.searchGraph[0].length)
+														+ job.gridMapping.getX(this.pathingGrid, x),
+												this.pathingGrid, x, current.point.y, job.movementType,
+												job.collisionSize));
+						if (!passable) {
 							tentativeScore += (direction.length) * job.weightForHittingWalls;
 						}
 						final Node neighbor = job.searchGraph[job.gridMapping.getY(this.pathingGrid, y)][job.gridMapping
@@ -434,9 +492,9 @@ public class CPathfindingProcessor {
 							neighbor.cameFromDirection = direction;
 							neighbor.g = tentativeScore;
 							neighbor.f = tentativeScore + h(neighbor);
-							if (!job.openSet.contains(neighbor)) {
-								job.openSet.add(neighbor);
-							}
+							// warsmash-nx: re-add (a heap with a changed key is not re-sorted; the closed set
+							// skips the stale entry) instead of an O(n) contains scan
+							job.openSet.add(neighbor);
 						}
 					}
 				}
@@ -450,10 +508,23 @@ public class CPathfindingProcessor {
 					break JobsLoop;
 				}
 			}
-			job.queueItem.pathFound(Collections.emptyList(), simulation);
+			// warsmash-nx: no path to the goal (unreachable, or the iteration cap on a long trip): walk to the
+			// closest point the search reached, as Warcraft III does, instead of not moving at all
+			final LinkedList<Point2D.Float> partialPath = new LinkedList<>();
+			Node closest = (Node) NxPathFallback.take(job, job.start == null ? 0 : h(job.start));
+			Direction partialDirection = null;
+			int partialSteps = 0;
+			while ((closest != null) && (closest.cameFrom != null) && (partialSteps++ < this.pathingGridCellCount)) {
+				if (partialPath.isEmpty() || (closest.cameFromDirection != partialDirection)) {
+					partialPath.addFirst(closest.point);
+					partialDirection = closest.cameFromDirection;
+				}
+				closest = closest.cameFrom;
+			}
+			job.queueItem.pathFound(partialPath, simulation);
 			this.moveQueue.poll();
 			System.out.println("Task " + this.pathfindJobId + " took " + this.totalIterations + " iterations and "
-					+ this.totalJobLoops + " job loops!");
+					+ this.totalJobLoops + " job loops! (partial path " + partialPath.size() + ")");
 		}
 	}
 

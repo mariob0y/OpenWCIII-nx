@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.data;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Map;
@@ -56,9 +56,9 @@ public class CDestructableData {
 	private CDestructableType getUnitTypeInstance(final War3ID typeId, final GameObject unitType) {
 		CDestructableType unitTypeInstance = this.unitIdToUnitType.get(typeId);
 		if (unitTypeInstance == null) {
-			final BufferedImage buildingPathingPixelMap = this.simulationRenderController
+			final PixelImage buildingPathingPixelMap = this.simulationRenderController
 					.getDestructablePathingPixelMap(typeId);
-			final BufferedImage buildingPathingDeathPixelMap = this.simulationRenderController
+			final PixelImage buildingPathingDeathPixelMap = this.simulationRenderController
 					.getDestructablePathingDeathPixelMap(typeId);
 			final String name = unitType.getFieldAsString(NAME, 0);
 			final float life = unitType.getFieldAsFloat(HIT_POINT_MAXIMUM, 0);

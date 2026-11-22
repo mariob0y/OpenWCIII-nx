@@ -1,8 +1,8 @@
 package com.etheller.warsmash.viewer5;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
+import com.etheller.warsmash.util.ImageUtils;
 
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.GL30;
@@ -20,7 +20,6 @@ import com.etheller.warsmash.viewer5.handlers.ResourceHandler;
  * therefore it should work here as well.
  */
 public abstract class RawOpenGLTextureResource extends Texture {
-	private static final int BYTES_PER_PIXEL = 4;
 	private final int target;
 	protected int handle;
 	private int width;
@@ -91,34 +90,12 @@ public abstract class RawOpenGLTextureResource extends Texture {
 		final GL20 gl = this.viewer.gl;
 	}
 
-	public void update(final BufferedImage image, final boolean sRGBFix) {
+	public void update(final PixelImage image, final boolean sRGBFix) {
 		final GL20 gl = this.viewer.gl;
 
 		final int imageWidth = image.getWidth();
 		final int imageHeight = image.getHeight();
-		final int[] pixels = new int[imageWidth * imageHeight];
-		image.getRGB(0, 0, imageWidth, imageHeight, pixels, 0, imageWidth);
-
-		final ByteBuffer buffer = ByteBuffer.allocateDirect(imageWidth * imageHeight * BYTES_PER_PIXEL)
-				.order(ByteOrder.nativeOrder());
-		// 4
-		// for
-		// RGBA,
-		// 3
-		// for
-		// RGB
-
-		for (int y = 0; y < imageHeight; y++) {
-			for (int x = 0; x < imageWidth; x++) {
-				final int pixel = pixels[(y * imageWidth) + x];
-				buffer.put((byte) ((pixel >> 16) & 0xFF)); // Red component
-				buffer.put((byte) ((pixel >> 8) & 0xFF)); // Green component
-				buffer.put((byte) (pixel & 0xFF)); // Blue component
-				buffer.put((byte) ((pixel >> 24) & 0xFF)); // Alpha component.
-				// Only for RGBA
-			}
-		}
-
+		final ByteBuffer buffer = ImageUtils.toRgbaBuffer(image);
 		buffer.flip();
 		this.data = buffer;
 

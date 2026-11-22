@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.build;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
@@ -50,7 +50,7 @@ public class CBehaviorUndeadBuild extends CAbstractRangedBehavior {
 			return true;
 		}
 		final CUnitType unitType = simulation.getUnitData().getUnitType(this.orderId);
-		final BufferedImage buildingPathingPixelMap = unitType.getBuildingPathingPixelMap();
+		final PixelImage buildingPathingPixelMap = unitType.getBuildingPathingPixelMap();
 		if (buildingPathingPixelMap == null) {
 			return this.unit.canReach(this.target.getX(), this.target.getY(), unitType.getCollisionSize());
 		}
@@ -73,7 +73,7 @@ public class CBehaviorUndeadBuild extends CAbstractRangedBehavior {
 		else if (!this.unitCreated) {
 			this.unitCreated = true;
 			final CUnitType unitTypeToCreate = simulation.getUnitData().getUnitType(this.orderId);
-			final BufferedImage buildingPathingPixelMap = unitTypeToCreate.getBuildingPathingPixelMap();
+			final PixelImage buildingPathingPixelMap = unitTypeToCreate.getBuildingPathingPixelMap();
 			final boolean canBeBuiltOnThem = unitTypeToCreate.isCanBeBuiltOnThem();
 			boolean buildLocationObstructed = AbstractCAbilityBuild.isBuildLocationObstructed(simulation, unitTypeToCreate, buildingPathingPixelMap, canBeBuiltOnThem, this.target.getX(), this.target.getY(), this.unit, this.buildOnBuildingIntersector);
 			final int playerIndex = this.unit.getPlayerIndex();

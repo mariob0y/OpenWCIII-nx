@@ -34,6 +34,14 @@ public class CSoundFromLabel implements CSound {
 	}
 
 	@Override
+	public void stop() {
+		final com.badlogic.gdx.audio.Sound last = this.sound.getLastPlayedSound();
+		if (last != null) {
+			last.stop();
+		}
+	}
+
+	@Override
 	public float getPredictedDuration() {
 		return Extensions.audio.getDuration(this.sound.getLastPlayedSound());
 	}

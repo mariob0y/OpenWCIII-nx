@@ -609,6 +609,31 @@ public final class GlobalScope {
 		this.currentThread = parentThread;
 	}
 
+	/**
+	 * warsmash-nx: runs a new thread at once, inside the current one, until it ends or sleeps (as
+	 * Warcraft III's TriggerExecute does); one that sleeps is queued to carry on later, and the caller
+	 * goes on meanwhile. A yield inside it is the new thread's own: it is queued awake and the
+	 * caller's yield state is left as it was.
+	 */
+	public void runThreadNow(final JassThread thread) {
+		final boolean callerYielded = this.yieldedCurrentThread;
+		final JassThread caller = this.currentThread;
+		this.yieldedCurrentThread = false;
+		try {
+			runThreadUntilCompletion(thread);
+			if (thread.instructionPtr != -1) {
+				if (this.yieldedCurrentThread) {
+					thread.setSleeping(false);
+				}
+				queueThread(thread);
+			}
+		}
+		finally {
+			this.yieldedCurrentThread = callerYielded;
+			this.currentThread = caller;
+		}
+	}
+
 	public JassValue runThreadUntilCompletionAndReadReturnValue(final JassThread thread,
 			final String contextNameForError, final JassValue defaultValue) {
 		JassValue jassReturnValue;
@@ -651,8 +676,16 @@ public final class GlobalScope {
 			}
 			catch (final Exception exc) {
 				final JassException jassException = new JassException(this, "runThreads() encountered exception", exc);
-				JassLog.report(jassException);
-				throw jassException;
+				if (!JassSettings.CONTINUE_EXECUTING_ON_ERROR) {
+					JassLog.report(jassException);
+					throw jassException;
+				}
+				// warsmash-nx: the failing thread ends (as a crashed thread does in Warcraft III); the game and
+				// the other threads go on
+				JassLog.reportRecovered("thread", jassException);
+				this.threads.remove(threadIndex);
+				this.yieldedCurrentThread = false;
+				continue;
 			}
 			if (this.yieldedCurrentThread) {
 				this.currentThread.setSleeping(false);

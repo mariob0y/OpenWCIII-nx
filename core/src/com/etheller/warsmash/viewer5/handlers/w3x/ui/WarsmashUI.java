@@ -25,6 +25,22 @@ public interface WarsmashUI extends CommandErrorListener, WarsmashBaseUI {
 
 	GameCameraManager getCameraManager();
 
+	// warsmash-nx: SelectUnit / ClearSelection / IsUnitSelected / GroupEnumUnitsSelected (local player)
+	default void nxSelectUnit(final com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit unit,
+			final boolean flag) {
+	}
+
+	default void nxClearSelection() {
+	}
+
+	default boolean nxIsUnitSelected(final com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit unit) {
+		return false;
+	}
+
+	default java.util.List<com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit> nxSelectedUnits() {
+		return java.util.Collections.emptyList();
+	}
+
 	Music playMusic(String musicField, boolean random, int index);
 
 	Music setMapMusic(String musicField, boolean random, int index);

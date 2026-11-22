@@ -26,7 +26,15 @@ public enum CPlayerColor implements CHandle {
 	COAL,
 	SNOW,
 	EMERALD,
-	PEANUT;
+	PEANUT,
+	// warsmash-nx: the four neutral slots (24-27). common.j names no constant for them, but WC3 gives
+	// their players these colours (GetPlayerColor, ConvertPlayerColor) and ships TeamColor24-27; without
+	// them GetPlayerColor(neutral passive) was null and a transmission from a neutral unit (OrcX01's
+	// Mogrin) threw in MeleeUI.setCinematicScene.
+	NEUTRAL_24,
+	NEUTRAL_25,
+	NEUTRAL_26,
+	NEUTRAL_27;
 
 	public static CPlayerColor[] VALUES = values();
 

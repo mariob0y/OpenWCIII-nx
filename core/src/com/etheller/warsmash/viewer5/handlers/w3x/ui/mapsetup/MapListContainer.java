@@ -12,6 +12,7 @@ import com.etheller.warsmash.parsers.fdf.frames.ListBoxFrame;
 import com.etheller.warsmash.parsers.fdf.frames.SimpleFrame;
 import com.etheller.warsmash.parsers.fdf.frames.ListBoxFrame.ListBoxSelelectionListener;
 import com.etheller.warsmash.util.ListItemEnum;
+import com.etheller.warsmash.util.LoadingStatus;
 
 public class MapListContainer {
 	private final SimpleFrame mapListContainer;
@@ -32,7 +33,9 @@ public class MapListContainer {
 				displayItemPaths.add(file);
 			}
 		}
+		int mapsRead = 0;
 		for (final String displayItemPath : displayItemPaths) {
+			LoadingStatus.report("Reading maps", (++mapsRead) + " / " + displayItemPaths.size() + ": " + displayItemPath);
 			this.mapListBox.addItem(displayItemPath, ListItemEnum.ITEM_MAP, rootFrame, uiViewport);
 		}
 		this.mapListBox.sortItems();

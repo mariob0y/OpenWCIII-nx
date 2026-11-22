@@ -12,6 +12,7 @@ import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.units.StandardObjectData;
 import com.etheller.warsmash.units.manager.MutableObjectData.MutableGameObject;
 import com.etheller.warsmash.units.manager.MutableObjectData.WorldEditorDataType;
+import com.etheller.warsmash.desktop.util.AwtImages;
 import com.etheller.warsmash.util.ImageUtils;
 import com.etheller.warsmash.util.War3ID;
 
@@ -109,14 +110,14 @@ public final class IconUtils {
 		}
 		BufferedImage gameTex;
 		try {
-			gameTex = ImageUtils.getAnyExtensionImageFixRGB(dataSource, iconPath, "IconUtils.getIcon()")
-					.getRGBCorrectImageData();
+			gameTex = AwtImages.toBufferedImage(ImageUtils.getAnyExtensionImageFixRGB(dataSource, iconPath, "IconUtils.getIcon()")
+					.getRGBCorrectImageData());
 		}
 		catch (final IOException e) {
 			try {
-				gameTex = ImageUtils
+				gameTex = AwtImages.toBufferedImage(ImageUtils
 						.getAnyExtensionImageFixRGB(dataSource, ImageUtils.DEFAULT_ICON_PATH, "IconUtils.getIcon()")
-						.getRGBCorrectImageData();
+						.getRGBCorrectImageData());
 			}
 			catch (final IOException e2) {
 				throw new RuntimeException(e2);

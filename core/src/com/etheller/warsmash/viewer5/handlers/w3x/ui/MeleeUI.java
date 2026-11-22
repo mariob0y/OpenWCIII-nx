@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.ui;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayDeque;
@@ -329,7 +329,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	private RenderUnit activeCommandUnit;
 	private MdxComplexInstance cursorModelInstance = null;
 	private MdxComplexInstance rallyPointInstance = null;
-	private BufferedImage cursorModelPathing;
+	private PixelImage cursorModelPathing;
 	private Pixmap cursorModelUnderneathPathingRedGreenPixmap;
 	private Texture cursorModelUnderneathPathingRedGreenPixmapTexture;
 	private PixmapTextureData cursorModelUnderneathPathingRedGreenPixmapTextureData;
@@ -2084,6 +2084,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			font.draw(batch, fpsString, (this.uiViewport.getMinWorldWidth() - glyphLayout.width) / 2,
 					1100 * this.heightRatioCorrection);
 		}
+		// warsmash-nx: cinematic filter (fades) over the world, under the UI frames
+		NxCineFilter.render(batch, this.rootFrame, this.uiViewport.getWorldWidth(), this.uiViewport.getWorldHeight());
 		this.rootFrame.render(batch, this.rootFrame.getFont20(), glyphLayout);
 		if (this.selectedUnit != null) {
 			this.rootFrame.getFont20().setColor(Color.WHITE);
@@ -4422,6 +4424,52 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		}
 	}
 
+	// warsmash-nx: selection from triggers (SelectUnit, ClearSelection, ...)
+	@Override
+	public void nxSelectUnit(final CUnit unit, final boolean flag) {
+		final RenderUnit peer = unit == null ? null : this.war3MapViewer.getRenderPeer(unit);
+		if (peer == null) {
+			return;
+		}
+		final List<RenderWidget> selection = new ArrayList<>(this.selectedUnits);
+		if (flag) {
+			if (!selection.contains(peer)) {
+				selection.add(peer);
+			}
+		}
+		else {
+			selection.remove(peer);
+		}
+		selectWidgets(selection);
+		this.war3MapViewer.doSelectUnit(selection);
+	}
+
+	@Override
+	public void nxClearSelection() {
+		final List<RenderWidget> selection = new ArrayList<>();
+		selectWidgets(selection);
+		this.war3MapViewer.doSelectUnit(selection);
+	}
+
+	@Override
+	public boolean nxIsUnitSelected(final CUnit unit) {
+		for (final RenderUnit selected : this.selectedUnits) {
+			if (selected.getSimulationUnit() == unit) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	@Override
+	public List<CUnit> nxSelectedUnits() {
+		final List<CUnit> units = new ArrayList<>();
+		for (final RenderUnit selected : this.selectedUnits) {
+			units.add(selected.getSimulationUnit());
+		}
+		return units;
+	}
+
 	private void selectWidgets(final List<RenderWidget> selectedUnits) {
 		if ((selectedUnits.size() == 1) && (selectedUnits.get(0) instanceof RenderItem)) {
 			final RenderItem selectedItem = (RenderItem) selectedUnits.get(0);
@@ -5323,7 +5371,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			this.rootFrame.setText(this.cinematicDialogueText, text);
 			this.cinematicPortrait.setCinematicTalkingHead(
 					unitTypeData == null ? null : unitTypeData.getPortraitModel(), color.getHandleId(),
-					unitTypeData.getRequiredAnimationNames(), sceneDuration);
+					unitTypeData == null ? null : unitTypeData.getRequiredAnimationNames(), sceneDuration);
 			this.cinematicPortrait.talk(null, voiceoverDuration);
 		}
 		else {

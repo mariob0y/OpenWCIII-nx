@@ -256,6 +256,26 @@ public class MeleeToggleUI implements WarsmashUI {
 	}
 
 	@Override
+	public void nxSelectUnit(final CUnit unit, final boolean flag) {
+		this.meleeUI.nxSelectUnit(unit, flag);
+	}
+
+	@Override
+	public void nxClearSelection() {
+		this.meleeUI.nxClearSelection();
+	}
+
+	@Override
+	public boolean nxIsUnitSelected(final CUnit unit) {
+		return this.meleeUI.nxIsUnitSelected(unit);
+	}
+
+	@Override
+	public List<CUnit> nxSelectedUnits() {
+		return this.meleeUI.nxSelectedUnits();
+	}
+
+	@Override
 	public void endCinematicScene() {
 		this.meleeUI.endCinematicScene();
 	}

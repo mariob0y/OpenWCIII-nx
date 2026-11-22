@@ -119,18 +119,9 @@ public class MpqDataSource implements DataSource {
 
 	@Override
 	public boolean has(final String filepath) {
-		try {
-			this.archive.lookupPath(filepath);
-			return true;
-		}
-		catch (final MPQException exc) {
-			if (exc.getMessage().equals("lookup not found")) {
-				return false;
-			}
-			else {
-				throw new RuntimeException(exc);
-			}
-		}
+		// warsmash-nx: was lookupPath + catching its "lookup not found" (the only MPQException it
+		// throws): same answer without an exception per miss (see HashTable.hasBlock)
+		return this.archive.hasPath(filepath);
 	}
 
 	@Override

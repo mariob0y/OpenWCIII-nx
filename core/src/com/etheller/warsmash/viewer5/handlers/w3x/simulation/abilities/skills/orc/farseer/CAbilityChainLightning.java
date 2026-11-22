@@ -41,7 +41,7 @@ public class CAbilityChainLightning extends CAbilityTargetSpellBase {
 
 	@Override
 	public int getBaseOrderId() {
-		return OrderIds.manaburn;
+		return OrderIds.chainlightning;
 	}
 
 	@Override

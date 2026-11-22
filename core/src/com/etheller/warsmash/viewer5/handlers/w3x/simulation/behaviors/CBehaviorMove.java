@@ -1,7 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors;
 
-import java.awt.geom.Point2D;
-import java.awt.geom.Point2D.Float;
+import com.etheller.warsmash.util.geom.Point2D;
+import com.etheller.warsmash.util.geom.Point2D.Float;
 import java.util.List;
 
 import com.badlogic.gdx.math.Rectangle;

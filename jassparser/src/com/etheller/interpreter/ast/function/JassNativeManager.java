@@ -19,6 +19,16 @@ public class JassNativeManager {
 		this.nameToNativeCode = new HashMap<>();
 	}
 
+	/** warsmash-nx: whether a native body is registered (and not yet bound to a declaration). */
+	public boolean hasNative(final String name) {
+		return this.nameToNativeCode.containsKey(name);
+	}
+
+	/** warsmash-nx: a registered native body that no script declared (e.g. LoadScriptFile), or null. */
+	public JassFunction getUnboundNative(final String name) {
+		return this.nameToNativeCode.get(name);
+	}
+
 	public void createNative(final String name, final JassFunction nativeCode) {
 		this.nameToNativeCode.put(name, nativeCode);
 	}

@@ -115,7 +115,7 @@ public class JSONObject {
          * @return NULL.
          */
         @Override
-        protected final Object clone() {
+        public final Object clone() { // nx-port: Clearwing's Object.clone is public
             return this;
         }
 

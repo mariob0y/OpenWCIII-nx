@@ -1,7 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation;
 
-import java.awt.geom.Point2D;
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.geom.Point2D;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -290,7 +290,7 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 	}
 
 	public CUnit internalCreateUnit(final War3ID typeId, final int playerIndex, final float x, final float y,
-			final float facing, final BufferedImage buildingPathingPixelMap) {
+			final float facing, final PixelImage buildingPathingPixelMap) {
 		final CUnit unit = this.unitData.create(this, playerIndex, typeId, x, y, facing, buildingPathingPixelMap,
 				this.handleIdAllocator);
 		this.newUnits.add(unit);
@@ -595,6 +595,8 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 		this.removedOnTickTriggers.clear();
 
 		this.globalScope.runThreads();
+		// warsmash-nx: the computer players' AI scripts (StartCampaignAI)
+		com.etheller.warsmash.parsers.jass.NxAI.tick(this);
 
 		this.runningPostUpdateCallbacks.clear();
 		this.runningPostUpdateCallbacks.addAll(this.postUpdateCallbacks);
@@ -1117,7 +1119,7 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 		this.unitData.addDefaultAbilitiesToUnit(this, this.handleIdAllocator, unitTypeInstance, true, manaInitial,
 				speed, unit);
 		this.unitData.applyPlayerUpgradesToUnit(this, unit.getPlayerIndex(), unitTypeInstance, unit);
-		final BufferedImage buildingPathingPixelMap = unitTypeInstance.getBuildingPathingPixelMap();
+		final PixelImage buildingPathingPixelMap = unitTypeInstance.getBuildingPathingPixelMap();
 		if (buildingPathingPixelMap != null) {
 			unit.regeneratePathingInstance(this, buildingPathingPixelMap);
 		}

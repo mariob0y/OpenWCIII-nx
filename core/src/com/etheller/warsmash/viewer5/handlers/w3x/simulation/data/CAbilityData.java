@@ -1,5 +1,13 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.data;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.human.paladin.CAbilityHolyLight;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.human.paladin.CAbilityDivineShield;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.human.paladin.CAbilityResurrect;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.human.archmage.CAbilitySummonWaterElemental;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.human.archmage.CAbilityBlizzard;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.human.archmage.CAbilityMassTeleport;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.human.mountainking.CAbilityThunderClap;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.human.mountainking.CAbilityAvatar;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -106,30 +114,32 @@ public class CAbilityData {
 	private void registerCodes() {
 		// ----Human----
 		// Paladin:
-//		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHhb"),
-//				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityHolyLight(handleId, alias)));
-//		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHds"),
-//				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityDivineShield(handleId, alias)));
-//		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHre"),
-//				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityResurrect(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHhb"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityHolyLight(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHds"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityDivineShield(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHre"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityResurrect(handleId, alias)));
 		// Archmage
-//		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHwe"), new CAbilityTypeDefinitionSpellBase(
-//				(handleId, alias) -> new CAbilitySummonWaterElemental(handleId, alias)));
-//		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHbz"),
-//				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityBlizzard(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHwe"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new CAbilitySummonWaterElemental(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHbz"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityBlizzard(handleId, alias)));
 //		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHab"), new CAbilityTypeDefinitionSpellBase(
 //				(handleId, alias) -> new CAbilityBrilliance(handleId, alias, alias)));
-//		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHmt"),
-//				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityMassTeleport(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHmt"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityMassTeleport(handleId, alias)));
 		// Mountain King:
-//		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHtb"),
-//				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityThunderBolt(handleId, alias)));
-//		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHtc"),
-//				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityThunderClap(handleId, alias)));
+		// warsmash-nx: Storm Bolt (the Mountain King's, Rexxar's ANsb) had no implementation unless the
+		// experimental JASS ability scripts were loaded; it is the same spell as Firebolt below
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHtb"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityThunderBolt(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHtc"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityThunderClap(handleId, alias)));
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ANfb"),
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityThunderBolt(handleId, alias)));
-//		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHav"),
-//				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityAvatar(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AHav"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityAvatar(handleId, alias)));
 
 		// Blood Mage:
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("Apxf"), new CAbilityTypeDefinitionPhoenixFire());
@@ -141,6 +151,17 @@ public class CAbilityData {
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityFeralSpirit(handleId, alias)));
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOcl"),
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityChainLightning(handleId, alias)));
+		// warsmash-nx: wards (Serpent Ward: Shadow Hunter, Rokhan's Arsw; Healing Ward; Sentry Ward)
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOwd"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.shadowhunter.CAbilityWard(handleId, alias, com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds.ward)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("Ahwd"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.shadowhunter.CAbilityWard(handleId, alias, com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds.healingward)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("Aeye"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.shadowhunter.CAbilityWard(handleId, alias, com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds.evileye)));
+		// warsmash-nx: Shadow Hunter (and Rokhan, ANhw) Healing Wave
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOhw"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.shadowhunter.CAbilityHealingWave(
+						handleId, alias)));
 
 		// Tauren Chieftain
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOws"),
@@ -210,6 +231,19 @@ public class CAbilityData {
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("Asds"),
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityKaboom(handleId, alias)));
 
+		// warsmash-nx: Beastmaster (Rexxar's Arsp) Stampede, and the Attribute Bonus hero skill (Rexxar's Aamk)
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ANst"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.neutral.beastmaster.CAbilityStampede(
+						handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("Aamk"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.neutral.beastmaster.CAbilityAttributeBonus(
+						handleId, alias)));
+
+		// warsmash-nx: Brewmaster (Chen's Acef) Storm, Earth and Fire
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ANef"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.neutral.brewmaster.CAbilityStormEarthFire(
+						handleId, alias)));
+
 		// Beastmaster
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ANsg"),
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilitySummonGrizzly(handleId, alias)));
@@ -277,6 +311,16 @@ public class CAbilityData {
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityWayGate(handleId, alias)));
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOww"),
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityWhirlWind(handleId, alias)));
+
+		// warsmash-nx: the human heroes' Java spells above were commented out upstream (in favour of
+		// experimental JASS versions that are not loaded); creep spells with their own codes; the campaign's
+		// missing spells (NxSpells)
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ACtc"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityThunderClap(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ACtb"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityThunderBolt(handleId, alias)));
+		com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.nx.NxSpells
+				.register(this.codeToAbilityTypeDefinition);
 
 		System.err.println("========================================================================");
 		System.err.println("Starting to load ability builder");

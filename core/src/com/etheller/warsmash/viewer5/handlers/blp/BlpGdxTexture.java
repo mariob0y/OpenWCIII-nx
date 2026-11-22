@@ -1,10 +1,10 @@
 package com.etheller.warsmash.viewer5.handlers.blp;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.io.IOException;
 import java.io.InputStream;
 
-import javax.imageio.ImageIO;
+import com.etheller.warsmash.util.image.ImageDecoders;
 
 import com.etheller.warsmash.util.ImageUtils;
 import com.etheller.warsmash.viewer5.GdxTextureResource;
@@ -26,9 +26,9 @@ public class BlpGdxTexture extends GdxTextureResource {
 
 	@Override
 	protected void load(final InputStream src, final Object options) {
-		BufferedImage img;
+		PixelImage img;
 		try {
-			img = ImageIO.read(src);
+			img = ImageDecoders.read(src);
 			setGdxTexture(ImageUtils.getTexture(img, true));
 		}
 		catch (final IOException e) {
