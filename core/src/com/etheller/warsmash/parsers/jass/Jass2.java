@@ -4321,11 +4321,15 @@ public class Jass2 {
 								ObjectJassValueVisitor.getInstance());
 						// doEyecandy arg[2] – visual-only; ignored
 						if (whichLocation == null) {
+							System.out.println("ReviveHeroLoc: no location (hero " + whichHero + ")");
 							return BooleanJassValue.FALSE;
 						}
-						return BooleanJassValue.of(
-								reviveHeroAt(CommonEnvironment.this.simulation, whichHero,
-										whichLocation.getX(), whichLocation.getY()));
+						final boolean revived = reviveHeroAt(CommonEnvironment.this.simulation, whichHero,
+								whichLocation.getX(), whichLocation.getY());
+						// warsmash-nx: rare, and the console has no other way to see it
+						System.out.println("ReviveHeroLoc: " + whichHero + " at " + whichLocation.getX() + ","
+								+ whichLocation.getY() + " -> " + revived);
+						return BooleanJassValue.of(revived);
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("IsUnitType",
 					(arguments, globalScope, triggerScope) -> {

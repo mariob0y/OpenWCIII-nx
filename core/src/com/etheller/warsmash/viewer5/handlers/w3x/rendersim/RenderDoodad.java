@@ -123,7 +123,8 @@ public class RenderDoodad {
 
 	private byte lastFogStateColor = 0;
 
-	public void updateFog(final War3MapViewer war3MapViewer) {
+	/** @return whether this doodad's colour is still fading toward its fog state (warsmash-nx) */
+	public boolean updateFog(final War3MapViewer war3MapViewer) {
 		final CPlayerFogOfWar fogOfWar = war3MapViewer.getFogOfWar();
 		final PathingGrid pathingGrid = war3MapViewer.simulation.getPathingGrid();
 		final int fogOfWarIndexX = pathingGrid.getFogOfWarIndexX(this.x);
@@ -139,6 +140,7 @@ public class RenderDoodad {
 			}
 			((MdxComplexInstance) this.instance).setVertexColor(VERTEX_COLOR_HEAP);
 		}
+		return newFogState.getMask() != this.lastFogStateColor;
 	}
 
 	public float[] getVertexColor() {

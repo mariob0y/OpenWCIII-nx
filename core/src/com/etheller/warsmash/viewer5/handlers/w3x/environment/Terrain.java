@@ -1779,19 +1779,56 @@ public class Terrain {
 		reloadFogOfWarDataToGPU(fogMaskSettings);
 	}
 
-	public void reloadFogOfWarDataToGPU(CFogMaskSettings fogMaskSettings) {
+	/** warsmash-nx: scratch for reloadFogOfWarDataToGPU (render thread only). */
+	private byte[] fogScratchState = new byte[0];
+	private byte[] fogScratchVisual = new byte[0];
+	private boolean fogUploaded;
+
+	/**
+	 * Steps the visible fog one fade step toward the simulation's and uploads it. warsmash-nx: in
+	 * arrays rather than three checked ByteBuffer calls per cell (it runs ~33 times a second), and
+	 * nothing is uploaded once every cell has finished fading.
+	 *
+	 * @return whether any cell changed (false: the visible fog has caught up)
+	 */
+	public boolean reloadFogOfWarDataToGPU(CFogMaskSettings fogMaskSettings) {
 		final GL30 gl = Gdx.gl30;
-		final ByteBuffer fogOfWarBuffer = this.fogOfWarData.getFogOfWarBuffer();
-		for (int i = 0; i < this.visualFogData.capacity(); i++) {
-			this.visualFogData.put(i, War3MapViewer.fadeLineOfSightColor(this.visualFogData.get(i),
-					fogMaskSettings.getFogStateFromSettings(fogOfWarBuffer.get(i))));
+		final int count = this.visualFogData.capacity();
+		if (this.fogScratchState.length < count) {
+			this.fogScratchState = new byte[count];
+			this.fogScratchVisual = new byte[count];
 		}
+		final byte[] state = this.fogScratchState;
+		final byte[] visual = this.fogScratchVisual;
+		final ByteBuffer fogOfWarBuffer = this.fogOfWarData.getFogOfWarBuffer().duplicate();
+		fogOfWarBuffer.clear();
+		fogOfWarBuffer.get(state, 0, count);
+		final ByteBuffer visualFog = this.visualFogData.duplicate();
+		visualFog.clear();
+		visualFog.get(visual, 0, count);
+		boolean changed = false;
+		for (int i = 0; i < count; i++) {
+			final byte old = visual[i];
+			final byte faded = War3MapViewer.fadeLineOfSightColor(old,
+					fogMaskSettings.getFogStateFromSettings(state[i]));
+			if (faded != old) {
+				visual[i] = faded;
+				changed = true;
+			}
+		}
+		if (!changed && this.fogUploaded) {
+			return false;
+		}
+		this.fogUploaded = true;
+		visualFog.clear();
+		visualFog.put(visual, 0, count);
 		gl.glBindTexture(GL30.GL_TEXTURE_2D, Terrain.this.fogOfWarMap);
 		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_MAG_FILTER, GL30.GL_LINEAR);
 		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_MIN_FILTER, GL30.GL_LINEAR);
 		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_WRAP_S, GL30.GL_CLAMP_TO_EDGE);
 		gl.glTexParameteri(GL30.GL_TEXTURE_2D, GL30.GL_TEXTURE_WRAP_T, GL30.GL_CLAMP_TO_EDGE);
 		this.fogTextureUpload.upload(gl, this.fogOfWarData.getWidth(), this.fogOfWarData.getHeight(), this.visualFogData);
+		return changed;
 	}
 
 	public int getFogOfWarMap() {

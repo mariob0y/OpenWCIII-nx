@@ -198,13 +198,36 @@ public class CPlayerFogOfWar {
 		}
 	}
 
+	/** warsmash-nx: scratch for convertVisibleToFogged (the simulation runs on one thread). */
+	private static byte[] scratchCells = new byte[0];
+	private static byte[] scratchZeros = new byte[0];
+
+	/**
+	 * warsmash-nx: copies the grid out, changes it in an array and copies it back, instead of three
+	 * checked ByteBuffer calls per cell; it runs for every player (28) every second, and on the console
+	 * it was ~200 ms a run (OrcX01 profile, 2026-11-22). Same result. Through duplicates, so the
+	 * buffers' own position and limit are left alone.
+	 */
 	public void convertVisibleToFogged() {
-		for (int i = 0; i < this.fogOfWarBuffer.capacity(); i++) {
-			if (this.fogOfWarBuffer.get(i) == 0) {
-				this.fogOfWarBuffer.put(i, (byte) 127);
-			}
-			this.detectionBuffer.put(i, (byte) 0);
+		final int count = this.fogOfWarBuffer.capacity();
+		if (scratchCells.length < count) {
+			scratchCells = new byte[count];
+			scratchZeros = new byte[count];
 		}
+		final byte[] cells = scratchCells;
+		final ByteBuffer fog = this.fogOfWarBuffer.duplicate();
+		fog.clear();
+		fog.get(cells, 0, count);
+		for (int i = 0; i < count; i++) {
+			if (cells[i] == 0) {
+				cells[i] = (byte) 127;
+			}
+		}
+		fog.clear();
+		fog.put(cells, 0, count);
+		final ByteBuffer detection = this.detectionBuffer.duplicate();
+		detection.clear();
+		detection.put(scratchZeros, 0, count);
 	}
 
 	public void setFogStateRadius(PathingGrid pathingGrid, float myX, float myY, float radius, CFogState state) {
