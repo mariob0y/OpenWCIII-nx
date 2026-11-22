@@ -177,7 +177,7 @@ public final class NxUnitAI {
 			NEXT_CAST.remove(u);
 		}
 		final int t = now();
-		RECAST.values().removeIf(expiry -> expiry < t);
+		com.etheller.warsmash.util.JavaCompat.removeIf(RECAST.values(), expiry -> expiry < t);
 	}
 
 	private static void firstSight(final CUnit u, final int owner) {

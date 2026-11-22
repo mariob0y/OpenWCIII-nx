@@ -2582,7 +2582,7 @@ public class MenuUI {
 		if (!this.hideUI) {
 			final BitmapFont font = this.rootFrame.getFont();
 			final BitmapFont font20 = this.rootFrame.getFont20();
-			if (Boolean.getBoolean("warsmash.showMenuFps")) {
+			if (com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.showMenuFps")) {
 				final float previousColor = font.getColor().toFloatBits();
 				font.setColor(Color.YELLOW);
 				final String fpsString = "FPS: " + Gdx.graphics.getFramesPerSecond();

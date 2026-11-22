@@ -22,13 +22,13 @@ public final class MissionStateFingerprint {
 	private final MessageDigest digest;
 	private final IdentityHashMap<Object, Integer> seen = new IdentityHashMap<>();
 	private final StringBuilder trace = System.getProperty("warsmash.missionResumeAudit", "").isEmpty() ? null : new StringBuilder();
-	private static final Set<String> SIMULATION_FIELDS = Set.of("units", "newUnits", "removedUnits", "destructables",
+	private static final Set<String> SIMULATION_FIELDS = com.etheller.warsmash.util.JavaCompat.setOf("units", "newUnits", "removedUnits", "destructables",
 			"removedDestructables", "items", "players", "projectiles", "newProjectiles", "handleIdAllocator",
 			"gameTurnTick", "currentGameDayTimeElapsed", "handleIdToAbility", "activeTimers", "addedTimers",
 			"removedTimers", "onTickTriggers", "addedOnTickTriggers", "removedOnTickTriggers", "globalScope",
 			"aiGlobalScopes", "aiEnvironments", "pathfindingProcessors", "pathingGrid", "worldCollision", "eventTypeToEvents", "ownedTreeSet", "postUpdateCallbacks", "runningPostUpdateCallbacks", "timeOfDaySuspended", "timeOfDayScale", "gamePaused", "nextGameTime", "falseTimeOfDay",
 			"daytime", "fogMaskEnabled", "fogEnabled", "unitInRangeEvents", "playerStateEvents", "timeOfDayVariableEvents", "seededRandom");
-	private static final Set<String> GLOBAL_FIELDS = Set.of("indexedGlobals", "triggerQueue", "runningTriggerQueue", "threads", "newThreads");
+	private static final Set<String> GLOBAL_FIELDS = com.etheller.warsmash.util.JavaCompat.setOf("indexedGlobals", "triggerQueue", "runningTriggerQueue", "threads", "newThreads");
 
 	private MissionStateFingerprint() {
 		try { this.digest = MessageDigest.getInstance("SHA-256"); }
@@ -61,7 +61,7 @@ public final class MissionStateFingerprint {
 		if (value instanceof com.etheller.warsmash.viewer5.handlers.w3x.simulation.pathing.CPathfindingProcessor.Node) {
 			try {
 				final Field pointField = value.getClass().getDeclaredField("point"); pointField.setAccessible(true);
-				final java.awt.geom.Point2D point = (java.awt.geom.Point2D) pointField.get(value);
+				final com.etheller.warsmash.util.geom.Point2D point = (com.etheller.warsmash.util.geom.Point2D) pointField.get(value);
 				return point.getX() + ":" + point.getY();
 			}
 			catch (final ReflectiveOperationException error) { throw new IllegalStateException(error); }
@@ -81,7 +81,9 @@ public final class MissionStateFingerprint {
 				if (this.trace != null) this.trace.append("random:").append(MissionCheckpoint.hex(bytes.toByteArray())).append('\n');
 				this.digest.update(bytes.toByteArray()); return;
 			}
-			catch (final java.io.IOException error) { throw new IllegalStateException(error); }
+			// warsmash-nx: Exception, as Clearwing's ObjectOutputStream declares no IOException; where Random
+			// cannot be serialized (console) its state is left out of the fingerprint
+			catch (final Exception error) { token("random"); return; }
 		}
 		if (value instanceof Number || value instanceof String || value instanceof Boolean || value instanceof Character || type.isEnum()) {
 			token(type.getName()); token(value); return;
@@ -138,9 +140,9 @@ public final class MissionStateFingerprint {
 			for (final Field field : fields) {
 				if (name.equals("com.etheller.warsmash.util.Quadtree") && (field.getName().equals("nodeAdder") || field.getName().equals("uniqueNodeAdder"))) continue;
 				if (name.equals("com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWorldCollision") && !field.getName().endsWith("Collision") && !field.getName().endsWith("ForEnum") && !field.getName().equals("maxCollisionRadius")) continue;
-				if (name.contains("simulation.pathing.CPathfindingProcessor") && Set.of("nodes", "cornerNodes", "searchGraph", "worldCollision", "pathingGrid").contains(field.getName())) continue;
-				if (name.contains("environment.PathingGrid") && !Set.of("pathingGrid", "dynamicPathingOverlay", "pathingGridSizes", "centerOffset").contains(field.getName())) continue;
-				if (value instanceof com.etheller.warsmash.parsers.jass.JassAIEnvironment && !Set.of("aiPlayerIndex", "captainHomeX", "captainHomeY", "captainX", "captainY", "captainAtHome", "assaultGroup", "nextExpansionX", "nextExpansionY", "guardPosts").contains(field.getName())) continue;
+				if (name.contains("simulation.pathing.CPathfindingProcessor") && com.etheller.warsmash.util.JavaCompat.setOf("nodes", "cornerNodes", "searchGraph", "worldCollision", "pathingGrid").contains(field.getName())) continue;
+				if (name.contains("environment.PathingGrid") && !com.etheller.warsmash.util.JavaCompat.setOf("pathingGrid", "dynamicPathingOverlay", "pathingGridSizes", "centerOffset").contains(field.getName())) continue;
+				if (value instanceof com.etheller.warsmash.parsers.jass.JassAIEnvironment && !com.etheller.warsmash.util.JavaCompat.setOf("aiPlayerIndex", "captainHomeX", "captainHomeY", "captainX", "captainY", "captainAtHome", "assaultGroup", "nextExpansionX", "nextExpansionY", "guardPosts").contains(field.getName())) continue;
 				if (Modifier.isStatic(field.getModifiers()) || Modifier.isTransient(field.getModifiers())) continue;
 				if (value instanceof CSimulation && !SIMULATION_FIELDS.contains(field.getName())) continue;
 				if (value instanceof GlobalScope && !GLOBAL_FIELDS.contains(field.getName())) continue;

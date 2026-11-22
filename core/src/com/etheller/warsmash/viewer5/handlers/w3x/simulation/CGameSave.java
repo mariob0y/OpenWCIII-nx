@@ -578,7 +578,7 @@ public final class CGameSave {
 			out.writeBoolean(this.checkpoint != null);
 			if (this.checkpoint != null) this.checkpoint.write(out);
 			out.flush();
-			stream.getFD().sync();
+			com.etheller.warsmash.util.FileSync.sync(stream);
 		}
 	}
 

@@ -40,9 +40,9 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.PointAbilityTa
 
 /** Opt-in retail Human02 audit: validated player orders and actual cinematic/menu input. */
 public final class Human02PlaythroughProbe {
-    private static final boolean INTERLUDE_ONLY = Boolean.getBoolean("warsmash.human02InterludeAudit");
-    private static final boolean ENABLED = Boolean.getBoolean("warsmash.human02PlaythroughAudit") || INTERLUDE_ONLY;
-    private static final boolean FULL = Boolean.getBoolean("warsmash.humanCampaignAudit") || Boolean.getBoolean("warsmash.human02OptionalAudit");
+    private static final boolean INTERLUDE_ONLY = com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.human02InterludeAudit");
+    private static final boolean ENABLED = com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.human02PlaythroughAudit") || INTERLUDE_ONLY;
+    private static final boolean FULL = com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.humanCampaignAudit") || com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.human02OptionalAudit");
     private static final String PHASE = System.getProperty("warsmash.human02PlaythroughPhase", "");
     private static final float[][] ROUTE = { {-2000, -2400}, {-896, -1376}, {384, -512},
             {1536, 512}, {2400, 1344}, {3104, 2112} };
@@ -335,7 +335,7 @@ public final class Human02PlaythroughProbe {
             System.out.println("[Human02PlaythroughProbe] captured " + pendingCapture);
             pendingCapture = null;
         }
-        if (stage == 5 && pendingCapture == null && !Boolean.getBoolean("warsmash.humanCampaignAudit")) Gdx.app.exit();
+        if (stage == 5 && pendingCapture == null && !com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.humanCampaignAudit")) Gdx.app.exit();
     }
     private static boolean completed(final GlobalScope globals, final String name) { final CQuest q = object(globals, name); return q != null && q.isCompleted(); }
     private static boolean flag(final GlobalScope globals, final String name) { return globals.getGlobal(name).visit(BooleanJassValueVisitor.getInstance()); }

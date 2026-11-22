@@ -5,7 +5,6 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 
 import com.badlogic.gdx.Preferences;
 
@@ -120,8 +119,7 @@ public final class CampaignProgressStore {
 	}
 
 	private static String profilePrefix(final String profile) {
-		return "CampaignProgress." + Base64.getUrlEncoder().withoutPadding()
-				.encodeToString(profile.getBytes(StandardCharsets.UTF_8)) + ".";
+		return "CampaignProgress." + com.etheller.warsmash.util.JavaCompat.base64UrlNoPadding(profile.getBytes(StandardCharsets.UTF_8)) + ".";
 	}
 
 	public String getProfileName() {

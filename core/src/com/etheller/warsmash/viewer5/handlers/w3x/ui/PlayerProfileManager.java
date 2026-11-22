@@ -34,7 +34,11 @@ public class PlayerProfileManager {
 			preferences.flush();
 		}
 		final String savedProfile = currentProfile;
-		if (profiles.stream().noneMatch(profile -> profile.getName().equals(savedProfile))) {
+		boolean savedExists = false;
+		for (final PlayerProfile profile : profiles) {
+			savedExists |= profile.getName().equals(savedProfile);
+		}
+		if (!savedExists) {
 			currentProfile = profiles.get(0).getName();
 			preferences.putString(CURRENT_PROFILE, currentProfile);
 			preferences.flush();

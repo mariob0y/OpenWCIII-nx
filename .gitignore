@@ -144,3 +144,6 @@ core/assets/warsmash.local.ini
 /core/Logs/
 /Logs/
 warsmash.ini
+
+# warsmash-nx: NX_DEBUG screenshots
+core/assets/nxshots/

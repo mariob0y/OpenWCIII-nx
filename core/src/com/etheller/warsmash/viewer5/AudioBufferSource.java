@@ -26,7 +26,7 @@ public class AudioBufferSource {
 		return -1;
 	}
 	public static float effectiveVolume(final float volume) {
-		if (!Float.isFinite(volume)) return 0;
+		if (!com.etheller.warsmash.util.JavaCompat.isFinite(volume)) return 0;
 		return Math.max(0, Math.min(1, volume)) * OptionsSettingsStore.get().getEffectiveSoundVolume() / 100f;
 	}
 }

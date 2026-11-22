@@ -138,7 +138,7 @@ public final class MissionReplayLog {
 		int previous = 0;
 		for (final Entry entry : this.entries) {
 			if (entry.tick < previous || entry.tick > this.targetTick || entry.kind < 0 || entry.kind > GAME_EVENT) throw new IOException("Invalid checkpoint input");
-			if (!Float.isFinite(entry.x) || !Float.isFinite(entry.y)) throw new IOException("Invalid checkpoint coordinates");
+			if (!com.etheller.warsmash.util.JavaCompat.isFinite(entry.x) || !com.etheller.warsmash.util.JavaCompat.isFinite(entry.y)) throw new IOException("Invalid checkpoint coordinates");
 			if (entry.kind == GAME_EVENT && (entry.a < 0 || entry.a >= com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.JassGameEventsWar3.values().length)) throw new IOException("Invalid checkpoint game event");
 			if (entry.kind == CACHE_READ && !this.initialCaches.containsKey("read-" + entry.a)) throw new IOException("Missing checkpoint cache data");
 			previous = entry.tick;

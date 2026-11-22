@@ -42,7 +42,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.PointAbilityTa
 
 /** Objective-driven retail Human campaign audit. All gameplay changes use validated player orders. */
 public final class HumanCampaignPlaythroughProbe {
-    private static final boolean ENABLED = Boolean.getBoolean("warsmash.humanCampaignAudit");
+    private static final boolean ENABLED = com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.humanCampaignAudit");
     private static final String STOP = System.getProperty("warsmash.humanCampaignStop", "human04").toLowerCase();
     private static final float[][] HUMAN03 = {
         {3360,-3200}, {3000,-1800}, {4300,-700}, {6400,700}, // Discover the Fountain quest.

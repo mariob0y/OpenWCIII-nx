@@ -399,7 +399,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen {
 			this.startupProbeElapsed += delta;
 			if (this.startupProbeElapsed >= this.startupProbeReport) {
 				this.startupProbeReport += 5;
-				if (Boolean.getBoolean("warsmash.graphicsProbe")) {
+				if (com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.graphicsProbe")) {
 					final com.etheller.warsmash.viewer5.handlers.w3x.ui.OptionsSettingsStore graphics =
 							com.etheller.warsmash.viewer5.handlers.w3x.ui.OptionsSettingsStore.get();
 					final int quality = this.startupProbeReport == 5 ? graphics.getTextureQuality() : 2;

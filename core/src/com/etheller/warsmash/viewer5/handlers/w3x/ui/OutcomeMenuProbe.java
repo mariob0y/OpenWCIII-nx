@@ -25,7 +25,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.CScriptDialogButton;
 
 /** Bounded desktop audit for result choices, keyboard modality, and rendered layout. */
 public final class OutcomeMenuProbe {
-	private static final boolean ENABLED = Boolean.getBoolean("warsmash.outcomeMenuAudit");
+	private static final boolean ENABLED = com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.outcomeMenuAudit");
 	private static int stage;
 	private static long started;
 	private static War3MapViewer defeatedViewer;

@@ -358,12 +358,12 @@ public class CAbilityData {
 
 	public void registerJassType(final War3ID war3id, final CAbilityTypeJassDefinition whichAbilityType) {
 		this.codeToAbilityTypeDefinition.put(war3id, whichAbilityType);
-		this.aliasToAbilityType.entrySet().removeIf(entry -> entry.getValue().getCode().equals(war3id));
+		com.etheller.warsmash.util.JavaCompat.removeIf(this.aliasToAbilityType.entrySet(), entry -> entry.getValue().getCode().equals(war3id));
 	}
 
 	public void registerAbilityBuilderType(final War3ID war3id, final AbilityBuilderConfiguration configuration) {
 		this.codeToAbilityTypeDefinition.put(war3id, configuration.createDefinition());
-		this.aliasToAbilityType.entrySet().removeIf(entry -> entry.getValue().getCode().equals(war3id));
+		com.etheller.warsmash.util.JavaCompat.removeIf(this.aliasToAbilityType.entrySet(), entry -> entry.getValue().getCode().equals(war3id));
 	}
 
 	public CAbilityType<?> getAbilityType(final War3ID alias) {

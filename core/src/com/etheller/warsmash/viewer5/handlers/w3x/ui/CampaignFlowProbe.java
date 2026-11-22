@@ -25,8 +25,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.CScriptDialog;
 
 /** Opt-in retail transition checks. World-event fixtures are not normal gameplay. */
 public final class CampaignFlowProbe {
-	private static final boolean ENABLED = Boolean.getBoolean("warsmash.campaignFlowAudit");
-	private static final boolean OBJECTIVE_EVENTS = Boolean.getBoolean("warsmash.campaignObjectiveEvents");
+	private static final boolean ENABLED = com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.campaignFlowAudit");
+	private static final boolean OBJECTIVE_EVENTS = com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.campaignObjectiveEvents");
 	private static int stage;
 	private static int objectiveStage;
 	private static int remainingCrewTick;
@@ -159,8 +159,11 @@ public final class CampaignFlowProbe {
 			check(restored.items[4] != null && restored.items[4].charges == 3
 					&& restored.items[4].typeId.equals(War3ID.fromString("phea")), "Hero inventory changed");
 			check(expectedHero.strengthBase == restored.strengthBase, "Hero stats changed");
-			check(java.util.Arrays.stream(restored.abilities).anyMatch(ability ->
-					ability.abilityId.equals(War3ID.fromString("AHhb")) && ability.level >= 1), "Learned skill lost");
+			boolean learned = false;
+			for (final com.etheller.warsmash.viewer5.handlers.w3x.simulation.StoredUnitData.StoredAbilityData ability : restored.abilities) {
+				learned |= ability.abilityId.equals(War3ID.fromString("AHhb")) && (ability.level >= 1);
+			}
+			check(learned, "Learned skill lost");
 			PlayerProfileManager.loadFromGdx();
 			CampaignProgressStore.get().seedCampaignEntries(1, 9);
 			check(CampaignProgressStore.get().isMissionAvailable(1, 1), "Unlock lost after profile reload");

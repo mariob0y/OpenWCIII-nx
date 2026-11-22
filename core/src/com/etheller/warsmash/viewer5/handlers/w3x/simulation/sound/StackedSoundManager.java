@@ -41,7 +41,7 @@ public final class StackedSoundManager {
 		if (sound == null) {
 			return;
 		}
-		this.registrations.removeIf(reg -> reg.sound == sound);
+		com.etheller.warsmash.util.JavaCompat.removeIf(this.registrations, reg -> reg.sound == sound);
 	}
 
 	public boolean isRegistered(final CSound sound) {

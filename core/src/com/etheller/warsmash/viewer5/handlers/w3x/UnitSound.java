@@ -184,7 +184,7 @@ public final class UnitSound {
 			final int fadeIn, final int fadeOut) {
 		if (this.sounds.isEmpty()) return null;
 		final Sound buffer = this.sounds.get((int) (Math.random() * this.sounds.size()));
-		final var playback = new com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename(
+		final com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename playback = new com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename(
 				buffer, context, loop, stopOutOfRange, fadeIn, fadeOut, "");
 		playback.setNormalizedVolume(this.volume);
 		playback.setPitch(this.pitch + ((float) Math.random() * 2 - 1) * this.pitchVariance);

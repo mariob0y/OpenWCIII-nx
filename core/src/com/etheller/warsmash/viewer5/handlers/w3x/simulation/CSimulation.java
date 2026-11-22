@@ -1311,7 +1311,7 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 	public int getActiveProjectileCount() { return this.projectiles.size() + this.newProjectiles.size(); }
 
 	public void removeAiGlobalScope(final GlobalScope aiScope) {
-		this.aiEnvironments.values().removeIf(environment -> environment.getGlobalScope() == aiScope);
+		com.etheller.warsmash.util.JavaCompat.removeIf(this.aiEnvironments.values(), environment -> environment.getGlobalScope() == aiScope);
 		this.aiGlobalScopes.remove(aiScope);
 	}
 

@@ -32,8 +32,8 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.PointAbilityTa
 
 /** Opt-in Human01 playthrough. Only ordinary player orders and UI input mutate gameplay. */
 public final class CampaignPlaythroughProbe {
-    private static final boolean ENABLED = Boolean.getBoolean("warsmash.campaignPlaythroughAudit");
-    private static final boolean FULL = Boolean.getBoolean("warsmash.campaignPlaythroughFull");
+    private static final boolean ENABLED = com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.campaignPlaythroughAudit");
+    private static final boolean FULL = com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.campaignPlaythroughFull");
     private static final String PHASE = System.getProperty("warsmash.campaignPlaythroughPhase", "");
     private static final float[][] ROUTE = { {-2400, 1480}, {-896, -32}, {240, 1984}, {2048, 560}, {80, 3856} };
     private static final float[][] CAMP_ROAD = { {-768, -3328}, {384, -1408}, {1632, -2656}, {2912, -2656}, {3616, -3360}, {3616, -4192} };
@@ -213,7 +213,7 @@ public final class CampaignPlaythroughProbe {
                     && !CampaignProgressStore.get().isMissionAvailable(1, 3), "Unlock persistence is wrong");
             System.out.println("[CampaignPlaythroughProbe] complete: Human01 " + (FULL ? "main and optional objectives" : "main objectives")
                     + " through normal orders, victory menus, earned carryover, Human02 and persistent unlock; phase=" + PHASE);
-            if (!Boolean.getBoolean("warsmash.human02PlaythroughAudit")) Gdx.app.exit();
+            if (!com.etheller.warsmash.util.JavaCompat.getBoolean("warsmash.human02PlaythroughAudit")) Gdx.app.exit();
             stage = 5;
         }
     }

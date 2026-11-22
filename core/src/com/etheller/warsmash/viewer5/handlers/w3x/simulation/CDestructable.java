@@ -27,7 +27,7 @@ public class CDestructable extends CWidget {
 	private UnitAnimationListenerImpl unitAnimationListenerImpl;
 	private float occluderHeight;
 	public float getOccluderHeight() { return this.occluderHeight; }
-	public void setOccluderHeight(final float height) { this.occluderHeight = Float.isFinite(height) ? Math.max(0, height) : 0; }
+	public void setOccluderHeight(final float height) { this.occluderHeight = com.etheller.warsmash.util.JavaCompat.isFinite(height) ? Math.max(0, height) : 0; }
 	private boolean invulnerable;
 	private float maxLifeOverride = -1;
 	private boolean blighted;

@@ -112,40 +112,22 @@ public final class MissionCheckpoint {
             }
             for (final String path : scripts) {
                 digest.update(path.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                try (InputStream stream = source.getResourceAsStream(path)) { if (stream != null) stream.transferTo(new java.security.DigestOutputStream(java.io.OutputStream.nullOutputStream(), digest)); }
+                try (InputStream stream = source.getResourceAsStream(path)) { if (stream != null) com.etheller.warsmash.util.JavaCompat.digest(stream, digest); }
             }
             if (this.viewer != null) {
                 final File map = new File(this.viewer.getCurrentMapPath());
                 try (InputStream stream = map.isFile() ? Files.newInputStream(map.toPath()) : this.viewer.dataSource.getResourceAsStream(this.viewer.getCurrentMapPath())) {
-                    if (stream != null) stream.transferTo(new java.security.DigestOutputStream(java.io.OutputStream.nullOutputStream(), digest));
+                    if (stream != null) com.etheller.warsmash.util.JavaCompat.digest(stream, digest);
                 }
             }
-            final java.util.Set<java.nio.file.Path> sources = new java.util.HashSet<>();
-            for (final Class<?> type : new Class<?>[] { CSimulation.class, com.etheller.interpreter.ast.scope.GlobalScope.class }) {
-                final java.nio.file.Path binary = java.nio.file.Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI());
-                if (!sources.add(binary)) continue;
-                if (Files.isDirectory(binary)) {
-                    try (java.util.stream.Stream<java.nio.file.Path> files = Files.walk(binary)) {
-                        for (final java.nio.file.Path file : files.filter(path -> path.toString().endsWith(".class")).sorted().toList()) {
-                            digest.update(binary.relativize(file).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                            digest.update(Files.readAllBytes(file));
-                        }
-                    }
-                }
-                else try (java.util.zip.ZipFile archive = new java.util.zip.ZipFile(binary.toFile())) {
-                    for (final java.util.zip.ZipEntry entry : archive.stream().filter(item -> item.getName().endsWith(".class")).sorted(java.util.Comparator.comparing(java.util.zip.ZipEntry::getName)).toList()) {
-                        digest.update(entry.getName().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                        try (InputStream stream = archive.getInputStream(entry)) { stream.transferTo(new java.security.DigestOutputStream(java.io.OutputStream.nullOutputStream(), digest)); }
-                    }
-                }
-            }
+            // warsmash-nx: the engine's own class files, in a class of its own (the console has no class files)
+            EngineBinaryDigest.update(digest, CSimulation.class, com.etheller.interpreter.ast.scope.GlobalScope.class);
 			final String fingerprint = hex(digest.digest());
 			if (this.loading && !fingerprint.equals(this.log.scriptFingerprint)) {
 				throw new IOException("The saved mission uses different scripts or engine binaries");
 			}
 			this.log.scriptFingerprint = fingerprint;
 		}
-		catch (final java.net.URISyntaxException error) { throw new IOException(error); }
 		catch (final java.security.NoSuchAlgorithmException error) { throw new AssertionError(error); }
 	}
 
@@ -153,7 +135,7 @@ public final class MissionCheckpoint {
 	public void verifyAsset(final DataSource source, final String path) throws IOException {
 		if (!source.has(path)) return;
 		try (InputStream stream = source.getResourceAsStream(path)) {
-			final String actual = hex(MessageDigest.getInstance("SHA-256").digest(stream.readAllBytes()));
+			final String actual = hex(MessageDigest.getInstance("SHA-256").digest(com.etheller.warsmash.util.JavaCompat.readAllBytes(stream)));
 			final String expected = ((com.etheller.interpreter.ast.value.StringJassValue) hostRead("Asset:" + path,
 					() -> com.etheller.interpreter.ast.value.StringJassValue.of(actual))).getValue();
 			if (!actual.equals(expected)) throw new IOException("The saved mission uses a different AI script: " + path);

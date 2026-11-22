@@ -593,7 +593,7 @@ public final class GameCameraManager extends CameraManager {
 
 	private static float readFinite(final java.io.DataInputStream in) throws java.io.IOException {
 		final float value = in.readFloat();
-		if (!Float.isFinite(value)) throw new java.io.IOException("Invalid saved camera value");
+		if (!com.etheller.warsmash.util.JavaCompat.isFinite(value)) throw new java.io.IOException("Invalid saved camera value");
 		return value;
 	}
 	private static float readRate(final java.io.DataInputStream in) throws java.io.IOException {

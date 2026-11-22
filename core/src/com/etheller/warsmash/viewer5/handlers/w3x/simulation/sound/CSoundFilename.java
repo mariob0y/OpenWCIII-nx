@@ -87,7 +87,7 @@ public class CSoundFilename implements CSound {
 	}
 
 	public void setNormalizedVolume(final float volume) {
-		this.volume = Float.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 0;
+		this.volume = com.etheller.warsmash.util.JavaCompat.isFinite(volume) ? Math.max(0, Math.min(1, volume)) : 0;
 		if (this.sound != null && this.lastSoundInstanceId != -1) {
 			this.sound.setVolume(this.lastSoundInstanceId, AudioBufferSource.effectiveVolume(this.volume));
 		}
@@ -95,7 +95,7 @@ public class CSoundFilename implements CSound {
 
 	@Override
 	public void setPitch(final float pitch) {
-		this.pitch = Float.isFinite(pitch) ? Math.max(0.01f, Math.min(4, pitch)) : 1;
+		this.pitch = com.etheller.warsmash.util.JavaCompat.isFinite(pitch) ? Math.max(0.01f, Math.min(4, pitch)) : 1;
 		if (this.sound != null && this.lastSoundInstanceId != -1) {
 			this.sound.setPitch(this.lastSoundInstanceId, this.pitch);
 		}
@@ -128,7 +128,7 @@ public class CSoundFilename implements CSound {
 		if (master == lastMasterVolume && positional == lastPositionalAudio) return;
 		lastMasterVolume = master;
 		lastPositionalAudio = positional;
-		final var entries = ACTIVE.keySet().iterator();
+		final java.util.Iterator<CSoundFilename> entries = ACTIVE.keySet().iterator();
 		while (entries.hasNext()) {
 			final CSoundFilename sound = entries.next();
 			if (!sound.isPlaying()) entries.remove();

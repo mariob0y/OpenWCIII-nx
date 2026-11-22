@@ -1360,7 +1360,7 @@ public class JassAIEnvironment {
 		final CAbility ability = this.simulation.getAbility(unit.getCurrentOrder().getAbilityHandleId());
 		if (ability instanceof CAbilityMove && unit.getCurrentOrder().getOrderId() == OrderIds.smart
 				&& unit.getFirstAbilityOfType(CAbilityWispHarvest.class) != null) {
-			final var target = unit.getCurrentOrder().getTarget(this.simulation);
+			final com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget target = unit.getCurrentOrder().getTarget(this.simulation);
 			if (target instanceof CUnit && ((CUnit) target).getOverlayedGoldMineData() instanceof CAbilityEntangledMine
 					&& (unit.isHidden() || !isIdle(unit))) return ResourceType.GOLD;
 		}

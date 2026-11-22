@@ -710,7 +710,7 @@ public class Jass2 {
 
         private void installCheckpointObservations() {
             if (this.simulation.getMissionCheckpoint() == null) return;
-            final java.util.Set<String> fileWrites = java.util.Set.of("CopySaveGame", "RemoveSaveDirectory", "RenameSaveDirectory");
+            final java.util.Set<String> fileWrites = com.etheller.warsmash.util.JavaCompat.setOf("CopySaveGame", "RemoveSaveDirectory", "RenameSaveDirectory");
             for (final String name : new String[] { "GetCameraField", "GetCameraTargetPositionX", "GetCameraTargetPositionY", "GetCameraTargetPositionZ", "GetCameraTargetPositionLoc", "GetCameraEyePositionX", "GetCameraEyePositionY", "GetCameraEyePositionZ", "GetCameraEyePositionLoc", "GetSoundIsPlaying", "IsUnitSelected", "GetSaveBasicFilename", "SaveGameExists", "CopySaveGame", "RemoveSaveDirectory", "RenameSaveDirectory" }) {
                 final com.etheller.interpreter.ast.function.JassFunction original = this.jassProgramVisitor.getJassNativeManager().getNative(name);
                 if (original == null) continue;

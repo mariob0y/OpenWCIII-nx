@@ -1759,7 +1759,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public void update(float deltaTime) {
-		final var checkpoint = this.war3MapViewer.simulation.getMissionCheckpoint();
+		final com.etheller.warsmash.viewer5.handlers.w3x.simulation.save.MissionCheckpoint checkpoint = this.war3MapViewer.simulation.getMissionCheckpoint();
 		if (checkpoint != null && (checkpoint.isRestoring() || checkpoint.shouldDiscardFrameTime())) deltaTime = 0;
 		this.portrait.update(deltaTime);
 		if (this.portrait.isResetNeeded()) {
@@ -7050,7 +7050,12 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
     }
 
     public int[] snapshotMissionSelection() {
-        return this.selectedUnits.stream().mapToInt(unit -> unit.getSimulationUnit().getHandleId()).toArray();
+        final int[] handles = new int[this.selectedUnits.size()];
+        int i = 0;
+        for (final RenderUnit unit : this.selectedUnits) {
+            handles[i++] = unit.getSimulationUnit().getHandleId();
+        }
+        return handles;
     }
     public void restoreMissionSelection(final int[] handles) {
         final List<RenderUnit> selection = new ArrayList<>();
@@ -7327,7 +7332,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		final java.io.DataInputStream in = new java.io.DataInputStream(new java.io.ByteArrayInputStream(bytes));
 		this.cameraManager.readCheckpoint(in);
 		final float elapsed = in.readFloat();
-		if (!Float.isFinite(elapsed) || elapsed < 0) throw new java.io.IOException("Invalid saved filter timer");
+		if (!com.etheller.warsmash.util.JavaCompat.isFinite(elapsed) || elapsed < 0) throw new java.io.IOException("Invalid saved filter timer");
 		this.cineFilterElapsed = elapsed;
 		this.cinematicPortrait.sceneTimer.restore(in.readDouble());
 		this.cinematicPortrait.portraitCurrentDuration = in.readLong();
