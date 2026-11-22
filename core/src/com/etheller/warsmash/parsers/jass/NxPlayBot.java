@@ -498,7 +498,9 @@ public final class NxPlayBot {
 			log("buy: " + shopName + " sells nothing");
 			return false;
 		}
-		if (neutral.getSelectedPlayerUnit(0) != hero) {
+		// the shop serves whichever of player 0's heroes it picked nearby (a companion is fine)
+		final CUnit buyer = neutral.getSelectedPlayerUnit(0);
+		if ((buyer == null) || buyer.isDead() || (buyer.getPlayerIndex() != 0)) {
 			order(orders, hero, OrderIds.smart, shop.getX(), shop.getY(), "shop" + shopName, refresh, now);
 			return true;
 		}
