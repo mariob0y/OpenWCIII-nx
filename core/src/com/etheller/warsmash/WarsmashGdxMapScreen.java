@@ -40,6 +40,7 @@ import com.etheller.warsmash.parsers.jass.Jass2.RootFrameListener;
 import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.util.ImageUtils;
+import com.etheller.warsmash.util.LoadingStatus;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.util.WarsmashUtils;
 import com.etheller.warsmash.viewer5.Model;
@@ -110,6 +111,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen {
 	 */
 	@Override
 	public void show() {
+		LoadingStatus.report("Game screen: setup"); // warsmash-nx: each step timed in the console log
 
 		final ByteBuffer tempByteBuffer = ByteBuffer.allocateDirect(4);
 		tempByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -195,6 +197,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen {
 				cameraRatesElement.getFieldFloatValue("FOV"), cameraRatesElement.getFieldFloatValue("Rotation"),
 				cameraRatesElement.getFieldFloatValue("Distance"), cameraRatesElement.getFieldFloatValue("Forward"),
 				cameraRatesElement.getFieldFloatValue("Strafe"));
+		LoadingStatus.report("Game screen: interface data (MeleeUI)");
 		final MeleeUI baseMeleeUI = new MeleeUI(this.viewer.mapMpq, this.uiViewport, this.uiScene, portraitScene,
 				cameraPresets, cameraRates, this.viewer, new RootFrameListener() {
 					@Override
@@ -217,6 +220,7 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen {
 		final MeleeToggleUI toggleUI = new MeleeToggleUI(baseMeleeUI, Arrays.asList(baseMeleeUI));
 		this.baseMeleeUI = baseMeleeUI;
 		this.meleeUI = toggleUI;
+		LoadingStatus.report("Game screen: options");
 		final OptionsSettingsStore options = OptionsSettingsStore.get();
 		options.load(OptionsSettingsStore.optionsFile());
 		baseMeleeUI.setMusicVolume((options.getEffectiveMusicVolume() * 127) / 100);
@@ -226,19 +230,23 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen {
 				this.viewer.mapPathSolver, "").addInstance();
 		libgdxContentInstance.setLocation(0f, 0f, -0.5f);
 		libgdxContentInstance.setScene(this.uiScene);
+		LoadingStatus.report("Game screen: interface (MeleeUI.main)");
 		this.meleeUI.main();
+		LoadingStatus.report("Game screen: after MeleeUI.main");
 		toggleUI.setCurrentUI(0);
 
 		updateUIScene();
 
 		resize(width, height);
 
+		LoadingStatus.report("Game screen: loadAfterUI (triggers, map script)");
 		try {
 			this.viewer.loadAfterUI();
 		}
 		catch (final IOException e) {
 			throw new RuntimeException(e);
 		}
+        LoadingStatus.finished();
         if (this.menuScreen != null && this.menuScreen.getMenuUI() != null) {
             this.pendingSaveFile = this.menuScreen.getMenuUI().consumePendingSaveFile();
         }

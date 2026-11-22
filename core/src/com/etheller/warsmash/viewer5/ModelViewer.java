@@ -139,6 +139,8 @@ public abstract class ModelViewer {
 		return null;
 	}
 
+	private static final java.util.Set<String> REPORTED_MISSING = new java.util.HashSet<>();
+
 	public Resource load(final String src, final PathSolver pathSolver, final Object solverParams) {
 		String finalSrc = src;
 		String extension = "";
@@ -154,7 +156,8 @@ public abstract class ModelViewer {
 				if (this.dataSource.has(ddsPath)) {
 					finalSrc = ddsPath;
 				}
-				else {
+				else if (REPORTED_MISSING.add(finalSrc)) {
+					// warsmash-nx: once per file (OrcX01 asked for "_.mdx" 3,167 times).
 					System.err.println("Attempting to load non-existant file: " + finalSrc);
 				}
 			}

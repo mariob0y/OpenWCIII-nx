@@ -37,6 +37,14 @@ public final class LoadingStatus {
 		report(step, "");
 	}
 
+	/**
+	 * The current step is over and no other follows yet (e.g. the in-game interface layouts, read
+	 * after the map's done): logged with its time, and no longer counted as running.
+	 */
+	public static void finished() {
+		report("", "");
+	}
+
 	public static void done(final String what) {
 		final Listener current = listener;
 		if (current != null) {

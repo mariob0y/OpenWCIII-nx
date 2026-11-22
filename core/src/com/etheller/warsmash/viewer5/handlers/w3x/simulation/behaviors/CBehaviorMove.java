@@ -253,9 +253,9 @@ public class CBehaviorMove implements CBehavior {
 							return this.unit.pollNextOrderBehavior(simulation);
 						}
 						else {
-							System.out.println(this.path);
+							if (WarsmashConstants.ENABLE_DEBUG) System.out.println(this.path);
 							final Float removed = this.path.remove(0);
-							System.out.println(
+							if (WarsmashConstants.ENABLE_DEBUG) System.out.println(
 									"We think we reached  " + removed + " because we are at " + nextX + "," + nextY);
 							final boolean emptyPath = this.path.isEmpty();
 							if (emptyPath) {
@@ -285,8 +285,8 @@ public class CBehaviorMove implements CBehavior {
 								onMoveGiveUp(simulation);
 								return this.unit.pollNextOrderBehavior(simulation);
 							}
-							System.out.println("new target: " + currentTargetX + "," + currentTargetY);
-							System.out.println("new delta: " + deltaX + "," + deltaY);
+							if (WarsmashConstants.ENABLE_DEBUG) System.out.println("new target: " + currentTargetX + "," + currentTargetY);
+							if (WarsmashConstants.ENABLE_DEBUG) System.out.println("new delta: " + deltaX + "," + deltaY);
 							goalAngleRad = Math.atan2(deltaY, deltaX);
 							goalAngle = (float) Math.toDegrees(goalAngleRad);
 							if (goalAngle < 0) {
@@ -437,7 +437,7 @@ public class CBehaviorMove implements CBehavior {
 		this.path = waypoints;
 		if (this.firstPathfindJob) {
 			this.firstPathfindJob = false;
-			System.out.println("init path " + this.path);
+			if (WarsmashConstants.ENABLE_DEBUG) System.out.println("init path " + this.path);
 			// check for smoothing
 			if (!this.path.isEmpty()) {
 				float lastX = startFloatingX;

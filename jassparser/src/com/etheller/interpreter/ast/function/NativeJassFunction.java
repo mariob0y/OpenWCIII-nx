@@ -82,10 +82,16 @@ public class NativeJassFunction {
 		}
 	}
 
+	/** warsmash-nx: the missing-native line once per native (some are called thousands of times). */
+	private boolean reportedMissing;
+
 	private boolean checkNativeExists() {
 		if (this.implementation == null) {
-			System.err.println(
-					"Call to native function that was declared but had no native implementation: " + this.name);
+			if (!this.reportedMissing) {
+				this.reportedMissing = true;
+				System.err.println(
+						"Call to native function that was declared but had no native implementation: " + this.name);
+			}
 			return false;
 //			throw new UnsupportedOperationException(
 //					"Call to native function that was declared but had no native implementation: " + this.name);

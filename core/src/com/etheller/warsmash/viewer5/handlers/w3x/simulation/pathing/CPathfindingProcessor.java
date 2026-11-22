@@ -1,5 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.pathing;
 
+import com.etheller.warsmash.util.WarsmashConstants;
+
 import com.etheller.warsmash.util.geom.Point2D;
 import java.util.Arrays;
 import java.util.Collections;
@@ -254,7 +256,7 @@ public class CPathfindingProcessor {
 				this.totalJobLoops = 0;
 				job.jobStarted = true;
 				NxPathFallback.forget(job);
-				System.out.println("starting job with smoothing=" + job.allowSmoothing);
+				if (WarsmashConstants.ENABLE_DEBUG) System.out.println("starting job with smoothing=" + job.allowSmoothing);
 				workIterations += 5; // setup of job predicted cost
 				job.goalX = job.goal.x;
 				job.goalY = job.goal.y;
@@ -264,7 +266,7 @@ public class CPathfindingProcessor {
 								job.ignoreIntersectionsWithThisSecondUnit, job.movementType)) {
 					job.weightForHittingWalls = 5E2f;
 				}
-				System.out.println("beginning findNaiveSlowPath for  " + job.startX + "," + job.startY + "," + job.goalX
+				if (WarsmashConstants.ENABLE_DEBUG) System.out.println("beginning findNaiveSlowPath for  " + job.startX + "," + job.startY + "," + job.goalX
 						+ "," + job.goalY);
 				if ((job.startX == job.goalX) && (job.startY == job.goalY)) {
 					job.queueItem.pathFound(Collections.emptyList(), simulation);
@@ -274,12 +276,12 @@ public class CPathfindingProcessor {
 				if (isCollisionSizeBetterSuitedForCorners(job.collisionSize)) {
 					job.searchGraph = this.cornerNodes;
 					job.gridMapping = GridMapping.CORNERS;
-					System.out.println("using corners");
+					if (WarsmashConstants.ENABLE_DEBUG) System.out.println("using corners");
 				}
 				else {
 					job.searchGraph = this.nodes;
 					job.gridMapping = GridMapping.CELLS;
-					System.out.println("using cells");
+					if (WarsmashConstants.ENABLE_DEBUG) System.out.println("using cells");
 				}
 				final int goalCellY = job.gridMapping.getY(this.pathingGrid, job.goalY);
 				final int goalCellX = job.gridMapping.getX(this.pathingGrid, job.goalX);
@@ -451,7 +453,7 @@ public class CPathfindingProcessor {
 					}
 					job.queueItem.pathFound(totalPath, simulation);
 					this.moveQueue.poll();
-					System.out.println("Task " + this.pathfindJobId + " took " + this.totalIterations
+					if (WarsmashConstants.ENABLE_DEBUG) System.out.println("Task " + this.pathfindJobId + " took " + this.totalIterations
 							+ " iterations and " + this.totalJobLoops + " job loops!");
 					continue JobsLoop;
 				}
@@ -529,7 +531,7 @@ public class CPathfindingProcessor {
 			}
 			job.queueItem.pathFound(partialPath, simulation);
 			this.moveQueue.poll();
-			System.out.println("Task " + this.pathfindJobId + " took " + this.totalIterations + " iterations and "
+			if (WarsmashConstants.ENABLE_DEBUG) System.out.println("Task " + this.pathfindJobId + " took " + this.totalIterations + " iterations and "
 					+ this.totalJobLoops + " job loops! (partial path " + partialPath.size() + ")");
 		}
 	}

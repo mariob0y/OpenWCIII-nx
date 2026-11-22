@@ -258,6 +258,7 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 				fdfVisitor.visit(firstFileParser.program());
 				tocLines++;
 			}
+			LoadingStatus.finished();
 			System.out.println("TOC file loaded " + tocLines + " lines");
 		}
 	}

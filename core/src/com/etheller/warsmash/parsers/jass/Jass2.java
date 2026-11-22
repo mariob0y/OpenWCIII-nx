@@ -1956,8 +1956,8 @@ public class Jass2 {
 			jassProgramVisitor.getJassNativeManager().createNative("RemoveRect",
 					(arguments, globalScope, triggerScope) -> {
 						final Rectangle rect = arguments.get(0).visit(ObjectJassValueVisitor.<Rectangle>getInstance());
-						System.err.println(
-								"RemoveRect called but in Java we don't have a destructor, so we need to unregister later when that is implemented");
+						// warsmash-nx: no line per call (the campaign maps call these thousands of times; each
+						// line is an SD-card write on the console). Not unregistering is harmless here.
 						return null;
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("SetRect",
@@ -2117,8 +2117,8 @@ public class Jass2 {
 					(arguments, globalScope, triggerScope) -> {
 						final AbilityPointTarget whichLocation = arguments.get(0)
 								.visit(ObjectJassValueVisitor.<AbilityPointTarget>getInstance());
-						System.err.println(
-								"RemoveRect called but in Java we don't have a destructor, so we need to unregister later when that is implemented");
+						// warsmash-nx: no line per call (the campaign maps call these thousands of times; each
+						// line is an SD-card write on the console). Not unregistering is harmless here.
 						return null;
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("MoveLocation",
