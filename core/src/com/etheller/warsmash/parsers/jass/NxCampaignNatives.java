@@ -1120,6 +1120,20 @@ public final class NxCampaignNatives {
 			final CPlayer p = sim.getPlayer(player.getId());
 			return bool(p.getFogOfWar().isVisible(sim, sim.getPathingGrid(), loc.x, loc.y));
 		});
+		// IsVisibleToPlayer / IsFoggedToPlayer / IsMaskedToPlayer (x, y, player): neither engine had them
+		for (final String[] fog : new String[][] { { "IsVisibleToPlayer", "VISIBLE" }, { "IsFoggedToPlayer", "FOGGED" },
+				{ "IsMaskedToPlayer", "MASKED" } }) {
+			final com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CFogState wanted = com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CFogState
+					.valueOf(fog[1]);
+			define(fog[0], (a, s) -> {
+				final CPlayerJass player = a.obj(2);
+				if (player == null) {
+					return bool(false);
+				}
+				final CPlayer p = sim.getPlayer(player.getId());
+				return bool(p.getFogOfWar().getFogState(sim, sim.getPathingGrid(), a.f(0), a.f(1)) == wanted);
+			});
+		}
 		define("PauseGame", (a, s) -> null);
 		define("SetPlayerHandicap", (a, s) -> {
 			final CPlayerJass player = a.obj(0);
