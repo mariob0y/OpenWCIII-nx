@@ -389,7 +389,7 @@ public final class NxPlayBot {
 			for (final CUnit u : sim.getUnits()) {
 				if ((u.getPlayerIndex() == creeps) && !u.isDead() && !u.isHidden() && !u.isInvulnerable()
 						&& (u.getMovementType() != com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.MovementType.FLY)
-						&& flyers.stream().noneMatch(f -> dist2(f, u) < (1500 * 1500))
+						&& !nearAny(flyers, u, 1500)
 						&& !farmGiveUp.contains(u.getHandleId())) {
 					final float d = dist2(u, hero);
 					if (d < bestD) {
@@ -887,6 +887,16 @@ public final class NxPlayBot {
 				+ u.getMaximumLife() + (u.isDead() ? " DEAD" : "") + (u.isPaused() ? " paused" : "")
 				+ (u.isHidden() ? " hidden" : "") + " order " + (u.getCurrentBehavior() == null ? "-"
 						: u.getCurrentBehavior().getClass().getSimpleName());
+	}
+
+	/** Any of the units is within the distance of u (no streams: the console's Java runtime has none). */
+	private static boolean nearAny(final List<CUnit> units, final CUnit u, final float distance) {
+		for (final CUnit f : units) {
+			if (dist2(f, u) < (distance * distance)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** An enemy is within 600 of the unit (a fight standing still is not a stall). */
