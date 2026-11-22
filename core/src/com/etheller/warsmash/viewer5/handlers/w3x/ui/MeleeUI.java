@@ -2360,7 +2360,13 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 					1100 * this.heightRatioCorrection);
 		}
 		// warsmash-nx: cinematic filter (fades) over the world, under the UI frames
-		NxCineFilter.render(batch, this.rootFrame, this.uiViewport.getWorldWidth(), this.uiViewport.getWorldHeight());
+		// The UI's 4:3 area is at 0..minWorld; an ExtendViewport adds the extra width (16:9) evenly on
+		// both sides, so the whole screen starts at (minWorld - world) / 2 (2026-11-22: the fade only
+		// darkened the middle of a 16:9 screen).
+		final float filterWidth = this.uiViewport.getWorldWidth();
+		final float filterHeight = this.uiViewport.getWorldHeight();
+		NxCineFilter.render(batch, this.rootFrame, (this.uiViewport.getMinWorldWidth() - filterWidth) / 2,
+				(this.uiViewport.getMinWorldHeight() - filterHeight) / 2, filterWidth, filterHeight);
 		this.rootFrame.render(batch, this.rootFrame.getFont20(), glyphLayout);
 		if (this.selectedUnit != null) {
 			this.rootFrame.getFont20().setColor(Color.WHITE);

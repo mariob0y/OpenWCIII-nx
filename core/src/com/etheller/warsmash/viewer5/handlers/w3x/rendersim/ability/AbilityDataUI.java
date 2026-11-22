@@ -150,12 +150,12 @@ public class AbilityDataUI {
 			final int iconNormalY = abilityTypeData.getFieldAsInteger(ICON_NORMAL_XY, 1);
 			final int iconTurnOffX = abilityTypeData.getFieldAsInteger(ICON_TURN_OFF_XY, 0);
 			final int iconTurnOffY = abilityTypeData.getFieldAsInteger(ICON_TURN_OFF_XY, 1);
-			final Texture iconResearch = gameUI.loadTexture(iconResearchPath);
-			final Texture iconResearchDisabled = gameUI.loadTexture(disable(iconResearchPath, this.disabledPrefix));
-			final Texture iconNormal = gameUI.loadTexture(iconNormalPath);
-			final Texture iconNormalDisabled = gameUI.loadTexture(disable(iconNormalPath, this.disabledPrefix));
-			final Texture iconTurnOff = gameUI.loadTexture(iconTurnOffPath);
-			final Texture iconTurnOffDisabled = gameUI.loadTexture(disable(iconTurnOffPath, this.disabledPrefix));
+			final Texture iconResearch = gameUI.loadTextureLazy(iconResearchPath);
+			final Texture iconResearchDisabled = gameUI.loadTextureLazy(disable(iconResearchPath, this.disabledPrefix));
+			final Texture iconNormal = gameUI.loadTextureLazy(iconNormalPath);
+			final Texture iconNormalDisabled = gameUI.loadTextureLazy(disable(iconNormalPath, this.disabledPrefix));
+			final Texture iconTurnOff = gameUI.loadTextureLazy(iconTurnOffPath);
+			final Texture iconTurnOffDisabled = gameUI.loadTextureLazy(disable(iconTurnOffPath, this.disabledPrefix));
 
 			final List<IconUI> turnOffIconUIs = new ArrayList<>();
 			final List<IconUI> normalIconUIs = new ArrayList<>();
@@ -263,8 +263,8 @@ public class AbilityDataUI {
 			final String iconTip = abilityTypeData.getFieldAsString(BUFF_ABILITY_TIP, 0);
 			final String iconUberTip = parseUbertip(allObjectData,
 					abilityTypeData.getFieldAsString(BUFF_ABILITY_UBER_TIP, 0));
-			final Texture iconNormal = gameUI.loadTexture(iconNormalPath);
-			final Texture iconNormalDisabled = gameUI.loadTexture(disable(iconNormalPath, this.disabledPrefix));
+			final Texture iconNormal = gameUI.loadTextureLazy(iconNormalPath);
+			final Texture iconNormalDisabled = gameUI.loadTextureLazy(disable(iconNormalPath, this.disabledPrefix));
 
 			final List<EffectAttachmentUI> targetArt = new ArrayList<>();
 			final List<String> targetArtPaths = abilityTypeData.getFieldAsList(BUFF_TARGET_ART);
@@ -324,8 +324,8 @@ public class AbilityDataUI {
 			final String awakenTip = abilityTypeData.getFieldAsString(UNIT_AWAKEN_TIP, 0);
 			final String iconUberTip = parseUbertip(allObjectData, abilityTypeData.getFieldAsString(UNIT_UBER_TIP, 0));
 			final char iconHotkey = getHotkey(abilityTypeData, UNIT_HOTKEY);
-			final Texture iconNormal = gameUI.loadTexture(iconNormalPath);
-			final Texture iconNormalDisabled = gameUI.loadTexture(disable(iconNormalPath, this.disabledPrefix));
+			final Texture iconNormal = gameUI.loadTextureLazy(iconNormalPath);
+			final Texture iconNormalDisabled = gameUI.loadTextureLazy(disable(iconNormalPath, this.disabledPrefix));
 			this.rawcodeToUnitUI.put(War3ID.fromString(alias), new UnitIconUI(iconNormal, iconNormalDisabled,
 					iconNormalX, iconNormalY, iconTip, iconUberTip, iconHotkey, reviveTip, awakenTip));
 		}
@@ -338,8 +338,8 @@ public class AbilityDataUI {
 			final String iconUberTip = parseUbertip(allObjectData, abilityTypeData.getFieldAsString(ITEM_UBER_TIP, 0));
 			final String iconDescription = abilityTypeData.getFieldAsString(ITEM_DESCRIPTION, 0);
 			final char iconHotkey = getHotkey(abilityTypeData, ITEM_HOTKEY);
-			final Texture iconNormal = gameUI.loadTexture(iconNormalPath);
-			final Texture iconNormalDisabled = gameUI.loadTexture(disable(iconNormalPath, this.disabledPrefix));
+			final Texture iconNormal = gameUI.loadTextureLazy(iconNormalPath);
+			final Texture iconNormalDisabled = gameUI.loadTextureLazy(disable(iconNormalPath, this.disabledPrefix));
 			this.rawcodeToItemUI
 					.put(War3ID.fromString(alias),
 							new ItemUI(
@@ -360,8 +360,8 @@ public class AbilityDataUI {
 				final String iconNormalPath = gameUI
 						.trySkinField(upgradeTypeData.getFieldAsString(UPGRADE_ICON_NORMAL, upgradeLevelValue));
 				final char iconHotkey = getHotkey(upgradeTypeData, UPGRADE_HOTKEY, upgradeLevelValue);
-				final Texture iconNormal = gameUI.loadTexture(iconNormalPath);
-				final Texture iconNormalDisabled = gameUI.loadTexture(disable(iconNormalPath, this.disabledPrefix));
+				final Texture iconNormal = gameUI.loadTextureLazy(iconNormalPath);
+				final Texture iconNormalDisabled = gameUI.loadTextureLazy(disable(iconNormalPath, this.disabledPrefix));
 				upgradeIconsByLevel.add(new IconUI(iconNormal, iconNormalDisabled, iconNormalX, iconNormalY, iconTip,
 						iconUberTip, iconHotkey));
 			}
@@ -445,8 +445,8 @@ public class AbilityDataUI {
 	private IconUI createBuiltInIconUI(final GameUI gameUI, final String key, final String disabledPrefix) {
 		final Element builtInAbility = gameUI.getSkinData().get(key);
 		final String iconPath = gameUI.trySkinField(builtInAbility.getField("Art"));
-		final Texture icon = gameUI.loadTexture(iconPath);
-		final Texture iconDisabled = gameUI.loadTexture(disable(iconPath, disabledPrefix));
+		final Texture icon = gameUI.loadTextureLazy(iconPath);
+		final Texture iconDisabled = gameUI.loadTextureLazy(disable(iconPath, disabledPrefix));
 		final int buttonPositionX = builtInAbility.getFieldValue("Buttonpos", 0);
 		final int buttonPositionY = builtInAbility.getFieldValue("Buttonpos", 1);
 		final String tip = builtInAbility.getField("Tip");
@@ -465,8 +465,8 @@ public class AbilityDataUI {
 		if (worldEditorValue.length() > 0) {
 			iconPath = worldEditorValue;
 		}
-		final Texture icon = gameUI.loadTexture(iconPath);
-		final Texture iconDisabled = gameUI.loadTexture(disable(iconPath, disabledPrefix));
+		final Texture icon = gameUI.loadTextureLazy(iconPath);
+		final Texture iconDisabled = gameUI.loadTextureLazy(disable(iconPath, disabledPrefix));
 		final int buttonPositionX = builtInAbilityFunc.getFieldValue("Buttonpos", 0);
 		final int buttonPositionY = builtInAbilityFunc.getFieldValue("Buttonpos", 1);
 		final String tip = builtInAbility.getField("Tip");

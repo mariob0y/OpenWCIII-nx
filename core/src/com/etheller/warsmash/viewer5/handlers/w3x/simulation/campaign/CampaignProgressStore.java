@@ -166,7 +166,16 @@ public final class CampaignProgressStore {
 		persist("mission." + key(campaign, mission), available);
 	}
 
+	/**
+	 * warsmash-nx: every campaign, mission and cinematic selectable regardless of progress (set by the
+	 * console launcher; progress is still recorded as usual).
+	 */
+	public static boolean UNLOCK_ALL = false;
+
 	public boolean isMissionAvailable(final int campaign, final int mission) {
+		if (UNLOCK_ALL) {
+			return true;
+		}
 		final Boolean value = this.missionAvailable.get(key(campaign, mission));
 		return value == null || value.booleanValue();
 	}
@@ -177,6 +186,9 @@ public final class CampaignProgressStore {
 	}
 
 	public boolean isCampaignAvailable(final int campaign) {
+		if (UNLOCK_ALL) {
+			return true;
+		}
 		final Boolean value = this.campaignAvailable.get(campaign);
 		return value == null || value.booleanValue();
 	}
@@ -187,6 +199,9 @@ public final class CampaignProgressStore {
 	}
 
 	public boolean isOpCinematicAvailable(final int campaign, final int index) {
+		if (UNLOCK_ALL) {
+			return true;
+		}
 		final Boolean value = this.opCinematicAvailable.get(key(campaign, index));
 		return value == null || value.booleanValue();
 	}
@@ -197,6 +212,9 @@ public final class CampaignProgressStore {
 	}
 
 	public boolean isEdCinematicAvailable(final int campaign, final int index) {
+		if (UNLOCK_ALL) {
+			return true;
+		}
 		final Boolean value = this.edCinematicAvailable.get(key(campaign, index));
 		return value == null || value.booleanValue();
 	}

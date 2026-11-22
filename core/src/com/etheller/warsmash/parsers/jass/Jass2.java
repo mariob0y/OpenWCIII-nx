@@ -7311,9 +7311,13 @@ public class Jass2 {
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("EnableUserUI",
 					(arguments, globalScope, triggerScope) -> {
-						final boolean enable = arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
-						meleeUI.enableUserControl(enable);
-						meleeUI.showInterface(enable, 0f);
+						// warsmash-nx: in Warcraft III this only lets the user's clicks reach the UI or not.
+						// It neither shows the interface nor gives control back: blizzard.j's
+						// FinishCinematicFadeBJ calls EnableUserUI(true) after every fade, and doing both
+						// here put the console UI back over every cinematic once its first fade ended
+						// (OrcX01 on the console, 2026-11-22). ShowInterface / CinematicMode /
+						// EnableUserControl do those.
+						arguments.get(0).visit(BooleanJassValueVisitor.getInstance());
 						return null;
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("PingMinimap",

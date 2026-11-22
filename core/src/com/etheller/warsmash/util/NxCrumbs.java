@@ -31,7 +31,7 @@ public final class NxCrumbs {
 
 	public static void crumb(final String what) {
 		if (framesLeft > 0) {
-			System.out.println("crumb r" + frame + " " + what);
+			System.out.println("crumb r" + frame + " t=" + ((System.nanoTime() / 1000000L) % 1000000L) + " ms " + what);
 		}
 	}
 

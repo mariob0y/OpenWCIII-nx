@@ -99,14 +99,7 @@ public final class ImageUtils {
 	}
 
 	public static Texture getTexture(final PixelImage image, final boolean sRGBFix) {
-		final Pixmap pixmap = sRGBFix ? new Pixmap(image.getWidth(), image.getHeight(), Format.RGBA8888) {
-			@Override
-			public int getGLInternalFormat() {
-				return GL30.GL_SRGB8_ALPHA8;
-			}
-		} : new Pixmap(image.getWidth(), image.getHeight(), Format.RGBA8888);
-		fillPixmap(pixmap, image);
-		final Texture texture = new Texture(pixmap);
+		final Texture texture = new Texture(getPixmap(image, sRGBFix));
 		texture.setFilter(TextureFilter.Linear, TextureFilter.Linear);
 		return texture;
 	}
@@ -119,15 +112,42 @@ public final class ImageUtils {
 		return texture;
 	}
 
+	/** The image in a new RGBA8888 pixmap (uploaded as sRGB if sRGBFix), as getTexture uploads it. */
+	public static Pixmap getPixmap(final PixelImage image, final boolean sRGBFix) {
+		final Pixmap pixmap = sRGBFix ? new Pixmap(image.getWidth(), image.getHeight(), Format.RGBA8888) {
+			@Override
+			public int getGLInternalFormat() {
+				return GL30.GL_SRGB8_ALPHA8;
+			}
+		} : new Pixmap(image.getWidth(), image.getHeight(), Format.RGBA8888);
+		fillPixmap(pixmap, image);
+		return pixmap;
+	}
+
+	/**
+	 * warsmash-nx: was a drawPixel per pixel, i.e. a native call per pixel (4,096 for an icon), for
+	 * every texture. Same bytes, copied at once: drawPixel blends (SourceOver) onto the new pixmap,
+	 * which is cleared to 0, so an opaque or partly transparent pixel lands as it is (gdx2d blend:
+	 * dst alpha 0 leaves src's colour and alpha) and a fully transparent one leaves the 0.
+	 */
 	private static void fillPixmap(final Pixmap pixmap, final PixelImage image) {
 		final int[] pixels = image.getRGB();
-		final int width = image.getWidth();
-		for (int y = 0; y < image.getHeight(); y++) {
-			for (int x = 0; x < width; x++) {
-				final int pixel = pixels[(y * width) + x];
-				pixmap.drawPixel(x, y, (pixel << 8) | (pixel >>> 24));
+		final int count = image.getWidth() * image.getHeight();
+		final byte[] rgba = new byte[count * BYTES_PER_PIXEL];
+		for (int i = 0, j = 0; i < count; i++, j += BYTES_PER_PIXEL) {
+			final int pixel = pixels[i];
+			final int alpha = pixel >>> 24;
+			if (alpha != 0) {
+				rgba[j] = (byte) (pixel >> 16);
+				rgba[j + 1] = (byte) (pixel >> 8);
+				rgba[j + 2] = (byte) pixel;
+				rgba[j + 3] = (byte) alpha;
 			}
 		}
+		final ByteBuffer buffer = pixmap.getPixels();
+		buffer.position(0);
+		buffer.put(rgba);
+		buffer.position(0);
 	}
 
 	/** The image as getRGB sees it, packed R, G, B, A per pixel in a direct buffer for glTexImage. */

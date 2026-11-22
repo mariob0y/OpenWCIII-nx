@@ -73,7 +73,8 @@ public final class NxCineFilter {
 		texturePath = null;
 	}
 
-	static void render(final SpriteBatch batch, final GameUI rootFrame, final float width, final float height) {
+	static void render(final SpriteBatch batch, final GameUI rootFrame, final float x, final float y, final float width,
+			final float height) {
 		if (!displayed || (texturePath == null)) {
 			return;
 		}
@@ -115,7 +116,7 @@ public final class NxCineFilter {
 		}
 		final com.badlogic.gdx.graphics.Color previous = batch.getColor().cpy();
 		batch.setColor(r, g, b, a);
-		batch.draw(texture, 0, 0, width, height);
+		batch.draw(texture, x, y, width, height);
 		batch.setColor(previous);
 		batch.setBlendFunction(srcFunc, dstFunc);
 	}

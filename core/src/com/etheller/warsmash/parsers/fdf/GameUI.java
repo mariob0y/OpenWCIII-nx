@@ -1629,6 +1629,32 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 		return (nonFdfY / viewport.getWorldHeight()) * 0.6f;
 	}
 
+	/**
+	 * warsmash-nx: as loadTexture, but read from the data the first time the texture is drawn
+	 * ({@link com.etheller.warsmash.util.LazyTexture}). For the icon tables, which make thousands of
+	 * textures a mission mostly never shows. Null, as loadTexture, if no such file exists.
+	 */
+	public Texture loadTextureLazy(final String path) {
+		Texture texture = this.pathToTexture.get(path);
+		if (texture != null) {
+			return texture;
+		}
+		final int lastDotIndex = path.lastIndexOf('.');
+		final String stem = (lastDotIndex == -1) ? path : path.substring(0, lastDotIndex);
+		final String blpPath = stem + ".blp";
+		texture = this.pathToTexture.get(blpPath);
+		if (texture == null) {
+			if (!this.dataSource.has(blpPath) && !this.dataSource.has(stem + ".tga")
+					&& !this.dataSource.has(stem + ".dds")) {
+				return null;
+			}
+			texture = new com.etheller.warsmash.util.LazyTexture(this.dataSource, blpPath);
+			this.pathToTexture.put(blpPath, texture);
+		}
+		this.pathToTexture.put(path, texture);
+		return texture;
+	}
+
 	public Texture loadTexture(String path) {
 		Texture texture = this.pathToTexture.get(path);
 		if (texture == null) {
