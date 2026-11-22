@@ -83,7 +83,7 @@ public final class GraphicsSettingsRenderAudit {
 			for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) {
 				image.setRGB(x, y, ((x + y) & 1) == 0 ? 0xffff0000 : 0xff0000ff);
 			}
-			texture.update(image, false);
+			texture.update(com.etheller.warsmash.desktop.util.AwtImages.toPixelImage(image), false);
 			for (final int quality : new int[] { 2, 0, 1, 2 }) {
 				options.setTextureQuality(quality);
 				texture.bind(0);
@@ -217,7 +217,7 @@ public final class GraphicsSettingsRenderAudit {
 				for (final int alpha : new int[] { 128, 255 }) {
 					final BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
 					image.setRGB(0, 0, (alpha << 24) | 0x00ff0000);
-					texture.update(image, false);
+					texture.update(com.etheller.warsmash.desktop.util.AwtImages.toPixelImage(image), false);
 					texture.bind(0);
 					GL11.glClearColor(0, 0, 1, 1);
 					GL11.glClear(GL11.GL_COLOR_BUFFER_BIT);
@@ -267,7 +267,7 @@ public final class GraphicsSettingsRenderAudit {
 				for (int y = 0; y < 3; y++) for (int x = 0; x < 3; x++) {
 					image.setRGB(x, y, kind == 2 || (kind == 1 && x == 1 && y == 1) ? 0xffffffff : 0xff000000);
 				}
-				texture.update(image, false);
+				texture.update(com.etheller.warsmash.desktop.util.AwtImages.toPixelImage(image), false);
 				texture.bind(0);
 				GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_LINEAR);
 				GL11.glTexParameteri(GL11.GL_TEXTURE_2D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_LINEAR);

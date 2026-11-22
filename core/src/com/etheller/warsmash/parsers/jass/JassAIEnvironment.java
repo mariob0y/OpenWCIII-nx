@@ -1,6 +1,6 @@
 package com.etheller.warsmash.parsers.jass;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -1165,7 +1165,7 @@ public class JassAIEnvironment {
 	}
 
 	private AbilityPointTarget findBuildLocation(final CUnitType unitType, final float centerX, final float centerY) {
-		final BufferedImage buildingPathingPixelMap = unitType.getBuildingPathingPixelMap();
+		final PixelImage buildingPathingPixelMap = unitType.getBuildingPathingPixelMap();
 		final boolean canBeBuiltOnThem = unitType.isCanBeBuiltOnThem();
 		if (canBeBuiltOnThem) {
 			// Overlays must use the parent's exact center; a radial sample cannot find it.

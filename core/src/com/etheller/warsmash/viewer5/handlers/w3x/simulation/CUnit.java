@@ -1,7 +1,7 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation;
 
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.nightelf.CAbilityUltravision;
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -377,7 +377,7 @@ public class CUnit extends CWidget {
 		beginBehavior(game, this.defaultBehavior);
 	}
 
-	public void regeneratePathingInstance(final CSimulation game, final BufferedImage buildingPathingPixelMap) {
+	public void regeneratePathingInstance(final CSimulation game, final PixelImage buildingPathingPixelMap) {
 		float unitX = getX();
 		float unitY = getY();
 		unitX = (float) Math.floor(unitX / 64f) * 64f;
@@ -3222,7 +3222,7 @@ public class CUnit extends CWidget {
 			final CUnit targetUnit = (CUnit) target;
 			final CUnitType targetUnitType = targetUnit.getUnitType();
 			if (targetUnit.isBuilding() && (targetUnitType.getBuildingPathingPixelMap() != null)) {
-				final BufferedImage buildingPathingPixelMap = targetUnitType.getBuildingPathingPixelMap();
+				final PixelImage buildingPathingPixelMap = targetUnitType.getBuildingPathingPixelMap();
 				final float targetX = target.getX();
 				final float targetY = target.getY();
 				if (canReachToPathing(range, targetUnit.getFacing(), buildingPathingPixelMap, targetX, targetY)) {
@@ -3233,7 +3233,7 @@ public class CUnit extends CWidget {
 		else if (target instanceof CDestructable) {
 			final CDestructable targetDest = (CDestructable) target;
 			final CDestructableType targetDestType = targetDest.getDestType();
-			final BufferedImage pathingPixelMap = targetDest.isDead() ? targetDestType.getPathingDeathPixelMap()
+			final PixelImage pathingPixelMap = targetDest.isDead() ? targetDestType.getPathingDeathPixelMap()
 					: targetDestType.getPathingPixelMap();
 			final float targetX = target.getX();
 			final float targetY = target.getY();
@@ -3256,7 +3256,7 @@ public class CUnit extends CWidget {
 	}
 
 	public boolean canReachToPathing(final float range, final float rotationForPathing,
-			final BufferedImage buildingPathingPixelMap, final float targetX, final float targetY) {
+			final PixelImage buildingPathingPixelMap, final float targetX, final float targetY) {
 		if (buildingPathingPixelMap == null) {
 			return canReach(targetX, targetY, range);
 		}
@@ -3306,7 +3306,7 @@ public class CUnit extends CWidget {
 		return false;
 	}
 
-	private int getRGBFromPixelData(final BufferedImage buildingPathingPixelMap, final int checkX, final int checkY,
+	private int getRGBFromPixelData(final PixelImage buildingPathingPixelMap, final int checkX, final int checkY,
 			final int rotation) {
 
 		// Below: y is downwards (:()
@@ -5665,6 +5665,35 @@ public class CUnit extends CWidget {
 
 	public void removePostDamageListener(final CUnitAttackPostDamageListener listener) {
 		this.postDamageListeners.remove(listener);
+	}
+
+	/** warsmash-nx: ReviveHero(Loc): a dead hero back at x,y with full life and mana (no altar). */
+	public boolean nxReviveHero(final CSimulation game, final float x, final float y) {
+		final com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.hero.CAbilityHero heroData = getHeroData();
+		if ((heroData == null) || !isDead()) {
+			return false;
+		}
+		heroData.setReviving(false);
+		heroData.setAwaitingRevive(false);
+		this.corpse = false;
+		this.boneCorpse = false;
+		this.deathTurnTick = 0;
+		setX(x);
+		setY(y);
+		game.getWorldCollision().addUnit(this);
+		setPoint(x, y, game.getWorldCollision(), game.getRegionManager());
+		setHidden(false);
+		setLife(game, getMaximumLife());
+		setMana(getMaximumMana());
+		game.unitRepositioned(this);
+		return true;
+	}
+
+	/** warsmash-nx: UnitResetCooldown. */
+	public void nxResetCooldowns() {
+		this.rawcodeToCooldownExpireTime.clear();
+		this.rawcodeToCooldownStartTime.clear();
+		fireCooldownsChangedEvent();
 	}
 
 	public void beginCooldown(final CSimulation game, final War3ID abilityId, final float cooldownDuration) {

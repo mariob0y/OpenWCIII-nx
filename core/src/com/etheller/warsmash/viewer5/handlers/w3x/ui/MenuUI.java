@@ -69,6 +69,7 @@ import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.units.custom.WTS;
 import com.etheller.warsmash.util.DataSourceFileHandle;
+import com.etheller.warsmash.util.LoadingStatus;
 import com.etheller.warsmash.util.StringBundle;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.util.WorldEditStrings;
@@ -857,6 +858,7 @@ public class MenuUI {
 		}
 
 		// Create main menu
+		LoadingStatus.report("Building the main menu");
 		this.mainMenuFrame = this.rootFrame.createFrame("MainMenuFrame", this.rootFrame, 0, 0);
 
 		this.warcraftIIILogo = (SpriteFrame) this.rootFrame.getFrameByName("WarCraftIIILogo", 0);
@@ -2000,6 +2002,9 @@ public class MenuUI {
 
 	private void internalStartMap(final String mapFilename, final int localPlayerIndex) {
 		System.out.println("Campaign/map launch: " + mapFilename + " (local player " + localPlayerIndex + ")");
+		LoadingStatus.report("Starting the map", mapFilename);
+		com.etheller.warsmash.parsers.jass.NxCampaignNatives.currentMap = mapFilename;
+		NxCineFilter.reset();
 		this.loadingFrame.setVisible(true);
 		this.loadingBackground.setVisible(true);
 		this.loadingBar.setVisible(true);

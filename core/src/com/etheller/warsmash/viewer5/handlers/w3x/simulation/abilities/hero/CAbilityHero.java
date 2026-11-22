@@ -283,6 +283,16 @@ public class CAbilityHero extends AbstractCAbility {
 		}
 	}
 
+	/** warsmash-nx: RestoreUnit: exactly this XP (and the levels it gives), no handicap, no effects. */
+	public void nxSetXpExact(final CSimulation simulation, final CUnit unit, final int xp) {
+		if (xp > this.xp) {
+			this.xp = xp;
+			levelUpHero(simulation, unit, false);
+			unit.internalPublishHeroStatsChanged();
+		}
+	}
+
+
 	public void addXp(final CSimulation simulation, final CUnit unit, final int xp, boolean showEffect) {
 		if (this.xpSuspended) {
 			return;

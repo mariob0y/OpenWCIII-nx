@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -25,7 +25,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import javax.imageio.ImageIO;
+import com.etheller.warsmash.util.image.ImageDecoders;
 
 import org.apache.commons.compress.utils.IOUtils;
 import org.apache.commons.compress.utils.SeekableInMemoryByteChannel;
@@ -258,7 +258,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	private final Random seededRandom = new Random(1337L);
 
-	private final Map<String, BufferedImage> filePathToPathingMap = new HashMap<>();
+	private final Map<String, PixelImage> filePathToPathingMap = new HashMap<>();
 
 	private final List<SelectionCircleSize> selectionCircleSizes = new ArrayList<>();
 
@@ -797,11 +797,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		}
 	}
 
-	protected BufferedImage getDestructablePathingPixelMap(final GameObject row) {
+	protected PixelImage getDestructablePathingPixelMap(final GameObject row) {
 		return loadPathingTexture(row.getFieldAsString(DESTRUCTABLE_PATHING, 0));
 	}
 
-	protected BufferedImage getDestructablePathingDeathPixelMap(final GameObject row) {
+	protected PixelImage getDestructablePathingDeathPixelMap(final GameObject row) {
 		return loadPathingTexture(row.getFieldAsString(DESTRUCTABLE_PATHING_DEATH, 0));
 	}
 
@@ -892,7 +892,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			final MdxModel model = (MdxModel) load(file, this.mapPathSolver, this.solverParams);
 
 			final String pathingTexture = row.readSLKTag("pathTex");
-			BufferedImage pathingTextureImage;
+			PixelImage pathingTextureImage;
 			if ((pathingTexture != null) && (pathingTexture.length() > 0) && !"_".equals(pathingTexture)) {
 
 				pathingTextureImage = this.filePathToPathingMap.get(pathingTexture.toLowerCase());
@@ -969,7 +969,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			destructableShadow = this.terrain.addShadow(shadowString, location[0], location[1]);
 		}
 
-		final BufferedImage destructablePathingPixelMap = getDestructablePathingPixelMap(row);
+		final PixelImage destructablePathingPixelMap = getDestructablePathingPixelMap(row);
 		if (destructablePathingPixelMap != null) {
 			destructablePathing = this.terrain.pathingGrid.createRemovablePathingOverlayTexture(location[0],
 					location[1], (int) Math.toDegrees(facingRadians), destructablePathingPixelMap);
@@ -977,7 +977,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				destructablePathing.add();
 			}
 		}
-		final BufferedImage destructablePathingDeathPixelMap = getDestructablePathingDeathPixelMap(row);
+		final PixelImage destructablePathingDeathPixelMap = getDestructablePathingDeathPixelMap(row);
 		if (destructablePathingDeathPixelMap != null) {
 			destructablePathingDeath = this.terrain.pathingGrid.createRemovablePathingOverlayTexture(location[0],
 					location[1], (int) Math.toDegrees(facingRadians), destructablePathingDeathPixelMap);
@@ -1155,7 +1155,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			float unitY, final int playerIndex, int customTeamColor, final float unitAngle) {
 		Splat buildingUberSplat = null;
 		SplatMover buildingUberSplatDynamicIngame = null;
-		BufferedImage buildingPathingPixelMap = null;
+		PixelImage buildingPathingPixelMap = null;
 		BuildingShadow buildingShadowInstance = null;
 
 		// Hardcoded?
@@ -1272,8 +1272,8 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	@Override
-	public BufferedImage loadPathingTexture(final String pathingTexture) {
-		BufferedImage buildingPathingPixelMap = null;
+	public PixelImage loadPathingTexture(final String pathingTexture) {
+		PixelImage buildingPathingPixelMap = null;
 		if ((pathingTexture != null) && (pathingTexture.length() > 0) && !"_".equals(pathingTexture)) {
 			buildingPathingPixelMap = this.filePathToPathingMap.get(pathingTexture.toLowerCase());
 			if (buildingPathingPixelMap == null) {
@@ -1284,7 +1284,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 					}
 					else {
 						try (InputStream stream = this.mapMpq.getResourceAsStream(pathingTexture)) {
-							buildingPathingPixelMap = ImageIO.read(stream);
+							buildingPathingPixelMap = ImageDecoders.read(stream);
 							System.out.println("LOADING BLP PATHING: " + pathingTexture);
 						}
 					}
@@ -3093,18 +3093,18 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 							}
 
 							@Override
-							public BufferedImage getBuildingPathingPixelMap(final War3ID rawcode) {
+							public PixelImage getBuildingPathingPixelMap(final War3ID rawcode) {
 								return War3MapViewer.this.renderUnitTypeData.get(rawcode).getBuildingPathingPixelMap();
 							}
 
 							@Override
-							public BufferedImage getDestructablePathingDeathPixelMap(final War3ID rawcode) {
+							public PixelImage getDestructablePathingDeathPixelMap(final War3ID rawcode) {
 								return War3MapViewer.this.getDestructablePathingDeathPixelMap(
 										War3MapViewer.this.allObjectData.getDestructibles().get(rawcode));
 							}
 
 							@Override
-							public BufferedImage getDestructablePathingPixelMap(final War3ID rawcode) {
+							public PixelImage getDestructablePathingPixelMap(final War3ID rawcode) {
 								return War3MapViewer.this.getDestructablePathingPixelMap(
 										War3MapViewer.this.allObjectData.getDestructibles().get(rawcode));
 							}
@@ -3678,7 +3678,15 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			final long frameStart = System.nanoTime();
 			while (!this.loadMapTasks.isEmpty()) {
 				final LoadMapTask nextTask = this.loadMapTasks.pollFirst();
+				// warsmash-nx: each map-loading step in the log, with its time (console boot 7 went
+				// quiet here with no way to tell which step)
+				final int total = Math.max(this.startingTaskCount, 1);
+				com.etheller.warsmash.util.LoadingStatus.report("Loading the map: step "
+						+ (total - this.loadMapTasks.size()) + " / " + total + " " + nextTask.getClass().getName());
 				nextTask.run();
+				if (this.loadMapTasks.isEmpty()) {
+					com.etheller.warsmash.util.LoadingStatus.done("map");
+				}
 				if ((System.nanoTime() - frameStart) >= budgetNanos) {
 					break;
 				}

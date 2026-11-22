@@ -277,6 +277,11 @@ public class MPQArchive {
 		return isOffsetInArchive(position - archiveOffset);
 	}
 	
+	/** warsmash-nx: whether lookupPath would find the path, without throwing on a miss. */
+	public boolean hasPath(String path){
+		return hashTable.hasBlock(new HashLookup(path));
+	}
+
 	public int lookupPath(String path) throws MPQException{
 		return hashTable.lookupBlock(new HashLookup(path));
 	}

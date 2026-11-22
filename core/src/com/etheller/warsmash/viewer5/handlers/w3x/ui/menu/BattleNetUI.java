@@ -1,9 +1,8 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.ui.menu;
 
-import java.awt.Desktop;
+import com.badlogic.gdx.Gdx;
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.CRC32C;
@@ -274,14 +273,13 @@ public class BattleNetUI {
 			@Override
 			public void run() {
 				boolean success = false;
-				if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
-					try {
-						Desktop.getDesktop().browse(new URI("https://www.youtube.com/watch?v=dQw4w9WgXcQ"));
-						success = true;
-					}
-					catch (final Exception e) {
-						e.printStackTrace();
-					}
+				// Gdx.net rather than java.awt.Desktop, so core needs no AWT. Where no
+				// browser can be opened, openURI returns false and the panel closes.
+				try {
+					success = Gdx.net.openURI("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+				}
+				catch (final Exception e) {
+					e.printStackTrace();
 				}
 				if (!success) {
 					BattleNetUI.this.battleNetLoginPanel.setVisible(false);

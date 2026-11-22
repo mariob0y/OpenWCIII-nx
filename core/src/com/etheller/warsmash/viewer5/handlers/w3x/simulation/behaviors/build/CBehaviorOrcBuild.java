@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.build;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
@@ -41,7 +41,7 @@ public class CBehaviorOrcBuild extends CAbstractRangedBehavior {
 	@Override
 	public boolean isWithinRange(final CSimulation simulation) {
 		final CUnitType unitType = simulation.getUnitData().getUnitType(this.orderId);
-		final BufferedImage buildingPathingPixelMap = unitType.getBuildingPathingPixelMap();
+		final PixelImage buildingPathingPixelMap = unitType.getBuildingPathingPixelMap();
 		if (buildingPathingPixelMap != null) {
 			return this.unit.canReachToPathing(0, simulation.getGameplayConstants().getBuildingAngle(),
 					buildingPathingPixelMap, this.target.getX(), this.target.getY());
@@ -61,7 +61,7 @@ public class CBehaviorOrcBuild extends CAbstractRangedBehavior {
 		if (!this.unitCreated) {
 			this.unitCreated = true;
 			final CUnitType unitTypeToCreate = simulation.getUnitData().getUnitType(this.orderId);
-			final BufferedImage buildingPathingPixelMap = unitTypeToCreate.getBuildingPathingPixelMap();
+			final PixelImage buildingPathingPixelMap = unitTypeToCreate.getBuildingPathingPixelMap();
 			final boolean canBeBuiltOnThem = unitTypeToCreate.isCanBeBuiltOnThem();
 			boolean buildLocationObstructed = AbstractCAbilityBuild.isBuildLocationObstructed(simulation,
 					unitTypeToCreate, buildingPathingPixelMap, canBeBuiltOnThem, this.target.getX(),
@@ -82,7 +82,9 @@ public class CBehaviorOrcBuild extends CAbstractRangedBehavior {
 					}
 					if (abilityGoldMine != null) {
 						for (final CAbility ability : constructedStructure.getAbilities()) {
-							if (ability instanceof CAbilityOverlayedMine blightedGoldMine) {
+							if (ability instanceof CAbilityOverlayedMine) {
+								// warsmash-nx: Java 8 form, so the code checks against Clearwing's runtime
+								final CAbilityOverlayedMine blightedGoldMine = (CAbilityOverlayedMine) ability;
 								blightedGoldMine.setParentMine(this.buildOnBuildingIntersector.getUnitToBuildOn(),
 										abilityGoldMine);
 								this.buildOnBuildingIntersector.getUnitToBuildOn().setHidden(true);

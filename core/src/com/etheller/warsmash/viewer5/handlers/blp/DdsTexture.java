@@ -1,10 +1,10 @@
 package com.etheller.warsmash.viewer5.handlers.blp;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.io.IOException;
 import java.io.InputStream;
 
-import javax.imageio.ImageIO;
+import com.etheller.warsmash.util.image.ImageDecoders;
 
 import com.etheller.warsmash.viewer5.ModelViewer;
 import com.etheller.warsmash.viewer5.PathSolver;
@@ -25,9 +25,9 @@ public class DdsTexture extends RawOpenGLTextureResource {
 
 	@Override
 	protected void load(final InputStream src, final Object options) {
-		BufferedImage img;
+		PixelImage img;
 		try {
-			img = ImageIO.read(src);
+			img = ImageDecoders.read(src);
 			update(img, false);
 		}
 		catch (final IOException e) {

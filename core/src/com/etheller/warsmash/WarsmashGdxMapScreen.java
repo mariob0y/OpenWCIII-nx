@@ -363,6 +363,17 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen {
 	@Override
 	public void render(final float delta) {
         if (this.loadFailed) return;
+		// warsmash-nx: ChangeLevel / EndGame / RestartGame from the map script
+		final String nextLevel = com.etheller.warsmash.parsers.jass.NxCampaignNatives.takePendingLevel();
+		if (nextLevel != null) {
+			this.menuScreen.onReturnFromGame();
+			this.screenManager.setScreen(this.menuScreen);
+			if (!nextLevel.isEmpty()) {
+				this.menuScreen.startMap(nextLevel);
+			}
+			return;
+		}
+		com.etheller.warsmash.parsers.jass.NxCampaignNatives.debugTick(this.viewer.simulation);
 		this.uiCamera.update();
 		Gdx.gl30.glEnable(GL30.GL_SCISSOR_TEST);
 		final float deltaTime = Gdx.graphics.getDeltaTime();
@@ -439,6 +450,15 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen {
 		this.viewer.webGL.useShaderProgram(null);
 
 		Gdx.gl30.glActiveTexture(GL30.GL_TEXTURE0);
+		// warsmash-nx: NX_DEBUG "shot" step (PC tests): this frame, from the game's own framebuffer
+		final String shot = com.etheller.warsmash.parsers.jass.NxCampaignNatives.takePendingShot();
+		if (shot != null) {
+			final com.badlogic.gdx.graphics.Pixmap pixmap = com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixmap(0, 0,
+					Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+			com.badlogic.gdx.graphics.PixmapIO.writePNG(Gdx.files.local(shot), pixmap);
+			pixmap.dispose();
+			System.err.println("NXDEBUG saved " + shot);
+		}
 	}
 
 	private void renderLibGDXContent() {

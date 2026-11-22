@@ -119,6 +119,31 @@ public class Trigger implements CHandle {
 		}
 	}
 
+	/**
+	 * warsmash-nx: TriggerExecute as Warcraft III runs it: each action now, inside the calling thread,
+	 * until it ends or sleeps (execute() queues them for later). Campaign maps chain triggers with
+	 * ConditionalTriggerExecute and rely on that: in Frozen Throne's OrcX01, "Init 02 Units" ->
+	 * "Load Heroes" -> "Load Rexxar" -> "Create Default Rexxar" must have made Rexxar before the
+	 * intro, queued earlier, pauses him (a null unit -> NullPointerException in PauseUnit, on the PC
+	 * as on the console).
+	 */
+	public void executeNow(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
+		for (final JassFunction action : this.actions) {
+			try {
+				if (action instanceof JassThreadActionFunc) {
+					globalScope.runThreadNow(
+							globalScope.createThread(((JassThreadActionFunc) action).codeJassValue, triggerScope));
+				}
+				else {
+					action.call(Collections.emptyList(), globalScope, triggerScope);
+				}
+			}
+			catch (final Exception e) {
+				throw new JassException(globalScope, "Exception during Trigger action execute", e);
+			}
+		}
+	}
+
 	public boolean isEnabled() {
 		return this.enabled;
 	}

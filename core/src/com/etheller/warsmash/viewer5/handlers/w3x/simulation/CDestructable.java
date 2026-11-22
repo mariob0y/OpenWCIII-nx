@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -60,8 +60,8 @@ public class CDestructable extends CWidget {
 
 	public Rectangle getOrCreateRegisteredEnumRectangle() {
 		if (this.registeredEnumRectangle == null) {
-			BufferedImage pathingPixelMap = this.destType.getPathingPixelMap();
-			BufferedImage pathingDeathPixelMap = this.destType.getPathingDeathPixelMap();
+			PixelImage pathingPixelMap = this.destType.getPathingPixelMap();
+			PixelImage pathingDeathPixelMap = this.destType.getPathingDeathPixelMap();
 			if (pathingPixelMap == null) {
 				pathingPixelMap = PathingGrid.BLANK_PATHING;
 			}

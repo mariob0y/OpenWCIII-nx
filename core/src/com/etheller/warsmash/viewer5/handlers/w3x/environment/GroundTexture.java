@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.environment;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.io.IOException;
 import java.nio.Buffer;
 
@@ -45,11 +45,11 @@ public class GroundTexture {
 		return this.buildable;
 	}
 
-	private void loadImage(final String path, final GL30 gl, final BufferedImage image, final boolean sRGBFix) {
+	private void loadImage(final String path, final GL30 gl, final PixelImage image, final boolean sRGBFix) {
 		if (image == null) {
 			throw new IllegalStateException(this.tileId + ": Missing ground texture: " + path);
 		}
-		final Buffer buffer = ImageUtils.getTextureBuffer(sRGBFix ? ImageUtils.forceBufferedImagesRGB(image) : image);
+		final Buffer buffer = ImageUtils.getTextureBuffer(sRGBFix ? image.forceSRGB() : image);
 		final int width = image.getWidth();
 		final int height = image.getHeight();
 

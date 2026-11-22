@@ -68,6 +68,7 @@ import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.units.custom.WTS;
 import com.etheller.warsmash.util.ImageUtils;
+import com.etheller.warsmash.util.LoadingStatus;
 import com.etheller.warsmash.util.StringBundle;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.Scene;
@@ -252,6 +253,7 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 			String line;
 			int tocLines = 0;
 			while ((line = reader.readLine()) != null) {
+				LoadingStatus.report("Loading interface layouts", line);
 				final FDFParser firstFileParser = dataSourceFDFParserBuilder.build(line);
 				fdfVisitor.visit(firstFileParser.program());
 				tocLines++;

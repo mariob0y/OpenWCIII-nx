@@ -157,6 +157,17 @@ public class CAbilityData {
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityFeralSpirit(handleId, alias)));
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOcl"),
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityChainLightning(handleId, alias)));
+		// warsmash-nx: wards (Serpent Ward: Shadow Hunter, Rokhan's Arsw; Healing Ward; Sentry Ward)
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOwd"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.shadowhunter.CAbilityWard(handleId, alias, com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds.ward)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("Ahwd"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.shadowhunter.CAbilityWard(handleId, alias, com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds.healingward)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("Aeye"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.shadowhunter.CAbilityWard(handleId, alias, com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds.evileye)));
+		// warsmash-nx: Shadow Hunter (and Rokhan, ANhw) Healing Wave
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOhw"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.orc.shadowhunter.CAbilityHealingWave(
+						handleId, alias)));
 
 		// Tauren Chieftain
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOws"),
@@ -226,6 +237,19 @@ public class CAbilityData {
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("Asds"),
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityKaboom(handleId, alias)));
 
+		// warsmash-nx: Beastmaster (Rexxar's Arsp) Stampede, and the Attribute Bonus hero skill (Rexxar's Aamk)
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ANst"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.neutral.beastmaster.CAbilityStampede(
+						handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("Aamk"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.neutral.beastmaster.CAbilityAttributeBonus(
+						handleId, alias)));
+
+		// warsmash-nx: Brewmaster (Chen's Acef) Storm, Earth and Fire
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ANef"), new CAbilityTypeDefinitionSpellBase(
+				(handleId, alias) -> new com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.neutral.brewmaster.CAbilityStormEarthFire(
+						handleId, alias)));
+
 		// Beastmaster
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ANsg"),
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilitySummonGrizzly(handleId, alias)));
@@ -293,6 +317,16 @@ public class CAbilityData {
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityWayGate(handleId, alias)));
 		this.codeToAbilityTypeDefinition.put(War3ID.fromString("AOww"),
 				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityWhirlWind(handleId, alias)));
+
+		// warsmash-nx: the human heroes' Java spells above were commented out upstream (in favour of
+		// experimental JASS versions that are not loaded); creep spells with their own codes; the campaign's
+		// missing spells (NxSpells)
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ACtc"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityThunderClap(handleId, alias)));
+		this.codeToAbilityTypeDefinition.put(War3ID.fromString("ACtb"),
+				new CAbilityTypeDefinitionSpellBase((handleId, alias) -> new CAbilityThunderBolt(handleId, alias)));
+		com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.nx.NxSpells
+				.register(this.codeToAbilityTypeDefinition);
 
 		System.err.println("========================================================================");
 		System.err.println("Starting to load ability builder");

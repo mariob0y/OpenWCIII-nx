@@ -12637,6 +12637,10 @@ public class Jass2 {
 			jassProgramVisitor.getJassNativeManager().createNative("FourCC", string2Rawcode);
 
 			registerRandomNatives(jassProgramVisitor, this.simulation);
+			// warsmash-nx: game cache, ChangeLevel, hero/selection/shop/quest natives a campaign needs
+			NxCampaignNatives.register(jassProgramVisitor, war3MapViewer, meleeUI);
+			// warsmash-nx: computer-player AI (StartCampaignAI; common.ai natives in an AI player's program)
+			NxAI.onEnvironment(jassProgramVisitor, dataSource, uiViewport, uiScene, war3MapViewer, meleeUI);
 		}
 
 		private static void registerAbilityUserDataHandleNatives(final JassProgram jassProgramVisitor,

@@ -1,6 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -80,9 +80,9 @@ public class RenderUnitTypeData extends RenderWidgetTypeData<RenderUnitType> {
 		return path;
 	}
 
-	private BufferedImage getBuildingPathingPixelMap(final GameObject row) {
+	private PixelImage getBuildingPathingPixelMap(final GameObject row) {
 		final String pathingTexture = row.getFieldAsString(UNIT_PATHING, 0);
-		final BufferedImage buildingPathingPixelMap = this.mapViewer.loadPathingTexture(pathingTexture);
+		final PixelImage buildingPathingPixelMap = this.mapViewer.loadPathingTexture(pathingTexture);
 		return buildingPathingPixelMap;
 	}
 
@@ -106,7 +106,7 @@ public class RenderUnitTypeData extends RenderWidgetTypeData<RenderUnitType> {
 		final MdxModel model = this.mapViewer.loadModelMdx(path);
 		final MdxModel portraitModel = getPortraitModel(path, model);
 
-		final BufferedImage buildingPathingPixelMap = getBuildingPathingPixelMap(row);
+		final PixelImage buildingPathingPixelMap = getBuildingPathingPixelMap(row);
 
 		final String unitShadow = row.getFieldAsString(UNIT_SHADOW, 0);
 		RenderShadowType renderShadowType = null;

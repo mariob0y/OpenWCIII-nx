@@ -1,6 +1,6 @@
 package com.etheller.warsmash.desktop.tools;
 
-import java.awt.image.BufferedImage;
+import com.etheller.warsmash.util.image.PixelImage;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -508,17 +508,17 @@ public final class CampaignSoakTestRunner {
 		}
 
 		@Override
-		public BufferedImage getBuildingPathingPixelMap(final War3ID rawcode) {
+		public PixelImage getBuildingPathingPixelMap(final War3ID rawcode) {
 			return PathingGrid.BLANK_PATHING;
 		}
 
 		@Override
-		public BufferedImage getDestructablePathingPixelMap(final War3ID rawcode) {
+		public PixelImage getDestructablePathingPixelMap(final War3ID rawcode) {
 			return PathingGrid.BLANK_PATHING;
 		}
 
 		@Override
-		public BufferedImage getDestructablePathingDeathPixelMap(final War3ID rawcode) {
+		public PixelImage getDestructablePathingDeathPixelMap(final War3ID rawcode) {
 			return PathingGrid.BLANK_PATHING;
 		}
 

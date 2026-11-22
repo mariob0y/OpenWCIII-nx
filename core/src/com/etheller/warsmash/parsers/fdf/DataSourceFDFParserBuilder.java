@@ -1,9 +1,12 @@
 package com.etheller.warsmash.parsers.fdf;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
+import org.antlr.v4.runtime.ANTLRInputStream;
 import org.antlr.v4.runtime.BaseErrorListener;
-import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.RecognitionException;
 import org.antlr.v4.runtime.Recognizer;
@@ -24,7 +27,11 @@ public class DataSourceFDFParserBuilder implements FDFParserBuilder {
 	public FDFParser build(final String path) {
 		FDFLexer lexer;
 		try {
-			lexer = new FDFLexer(CharStreams.fromStream(this.dataSource.getResourceAsStream(path)));
+			// warsmash-nx: was CharStreams.fromStream, which needs nio's CharsetDecoder and heap
+			// CharBuffer/IntBuffer (missing on the console's Java runtime). The same characters: the
+			// file decoded as UTF-8 with malformed input replaced (as fromStream does), into ANTLR's
+			// char[]-based stream. Differs only in counting a supplementary character as two chars.
+			lexer = new FDFLexer(new ANTLRInputStream(readUtf8(this.dataSource.getResourceAsStream(path))));
 		}
 		catch (final IOException e) {
 			throw new RuntimeException(e);
@@ -44,5 +51,17 @@ public class DataSourceFDFParserBuilder implements FDFParserBuilder {
 		};
 		fdfParser.addErrorListener(errorListener);
 		return fdfParser;
+	}
+
+	private static String readUtf8(final InputStream in) throws IOException {
+		try (InputStream stream = in) {
+			final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+			final byte[] buffer = new byte[8192];
+			int read;
+			while ((read = stream.read(buffer)) != -1) {
+				bytes.write(buffer, 0, read);
+			}
+			return new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+		}
 	}
 }

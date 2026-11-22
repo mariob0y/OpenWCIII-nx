@@ -66,7 +66,20 @@ public class NativeJassFunction {
 		if (!checkNativeExists()) {
 			return this.returnType.getNullValue();
 		}
-		return this.implementation.call(arguments, globalScope, triggerScope);
+		if (!com.etheller.interpreter.ast.util.JassSettings.CONTINUE_EXECUTING_ON_ERROR) {
+			return this.implementation.call(arguments, globalScope, triggerScope);
+		}
+		try {
+			return this.implementation.call(arguments, globalScope, triggerScope);
+		}
+		catch (final RuntimeException e) {
+			// warsmash-nx: as in Warcraft III, a native that cannot do its job (most often a null handle:
+			// a unit that is gone, a player colour, ...) returns its type's null value and the script goes
+			// on. Warsmash's natives throw there instead, and one throw ended the whole game.
+			com.etheller.interpreter.ast.util.JassLog.reportRecovered("native " + this.name,
+					new JassException(globalScope, "native " + this.name + " failed; returned null", e));
+			return this.returnType.getNullValue();
+		}
 	}
 
 	private boolean checkNativeExists() {
