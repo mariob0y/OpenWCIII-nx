@@ -713,6 +713,9 @@ public class MdxShaders {
 	public static final String fsComplex = Shaders.quatTransform + "\r\n\r\n" + //
 			"    uniform sampler2D u_texture;\r\n" + //
 			"    uniform bool u_smoothGlow;\r\n" + //
+			// warsmash-nx: the texture's size from BatchGroup, not textureSize(): this shader has no
+			// #version (GLSL 1.10), where textureSize does not exist; Mesa (the Switch 2) refuses it.
+			"    uniform vec2 u_textureSize;\r\n" + //
 			// Positive cubic B-spline weights avoid ringing/negative light at dark edges.
 			// Four bilinear reads reconstruct a smooth, magnified low-resolution halo.
 			"    vec4 sampleGlow(vec2 uv, vec2 size) {\r\n" +
@@ -749,7 +752,7 @@ public class MdxShaders {
 			"      uv = v_uvScale * (uv - 0.5) + 0.5;\r\n" + //
 			"      vec4 texel = texture2D(u_texture, uv);\r\n" + //
 			"      if (u_smoothGlow) {\r\n" +
-			"        vec2 size = vec2(textureSize(u_texture, 0));\r\n" +
+			"        vec2 size = u_textureSize;\r\n" +
 			"        if (max(length(dFdx(uv * size)), length(dFdy(uv * size))) < 1.0) {\r\n" +
 			"          texel = sampleGlow(uv, size);\r\n" +
 			"        }\r\n" +

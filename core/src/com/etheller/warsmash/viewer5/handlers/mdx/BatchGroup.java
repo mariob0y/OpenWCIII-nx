@@ -277,9 +277,13 @@ public class BatchGroup extends GenericGroup {
 
 					viewer.webGL.bindTexture(texture, 0);
 					if (!DynamicShadowManager.IS_SHADOW_MAPPING) {
-						shader.setUniformi("u_smoothGlow", scene.smoothAdditiveTextures && texture != null
-								&& layer.unshaded != 0 && (layer.filterMode == 3 || layer.filterMode == 4)
-								&& Math.max(texture.getWidth(), texture.getHeight()) <= 64 ? 1 : 0);
+						final boolean smoothGlow = scene.smoothAdditiveTextures && (texture != null)
+								&& (layer.unshaded != 0) && ((layer.filterMode == 3) || (layer.filterMode == 4))
+								&& (Math.max(texture.getWidth(), texture.getHeight()) <= 64);
+						shader.setUniformi("u_smoothGlow", smoothGlow ? 1 : 0);
+						if (smoothGlow) {
+							shader.setUniformf("u_textureSize", texture.getWidth(), texture.getHeight());
+						}
 					}
 
 					if (skinningType == SkinningType.ExtendedVertexGroups) {
