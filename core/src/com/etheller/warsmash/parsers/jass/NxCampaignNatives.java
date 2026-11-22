@@ -104,6 +104,11 @@ public final class NxCampaignNatives {
 	/** "shot" step: the game window's own frame to save at the end of this frame (WarsmashGdxMapScreen). */
 	private static String pendingShot;
 
+	/** Saves the game's own frame to core/assets/nxshots/<name>.png at the end of this frame (PC tests). */
+	public static void requestShot(final String name) {
+		pendingShot = "nxshots/" + name + ".png";
+	}
+
 	public static String takePendingShot() {
 		final String shot = pendingShot;
 		pendingShot = null;

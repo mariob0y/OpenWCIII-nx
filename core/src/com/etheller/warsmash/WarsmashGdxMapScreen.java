@@ -374,6 +374,8 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen {
 			return;
 		}
 		com.etheller.warsmash.parsers.jass.NxCampaignNatives.debugTick(this.viewer.simulation);
+		com.etheller.warsmash.parsers.jass.NxPlayBot.tick(this.viewer.simulation, this.uiOrderListener,
+				com.etheller.warsmash.parsers.jass.NxCampaignNatives.currentMap);
 		this.uiCamera.update();
 		Gdx.gl30.glEnable(GL30.GL_SCISSOR_TEST);
 		final float deltaTime = Gdx.graphics.getDeltaTime();

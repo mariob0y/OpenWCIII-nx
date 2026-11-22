@@ -1685,7 +1685,8 @@ public class Jass2 {
 						if (group != null) {
 							final CodeJassValue callback = arguments.get(1).visit(CodeJassValueVisitor.getInstance());
 							try {
-								for (final CUnit unit : group) {
+								// a copy: WC3 callbacks may remove units from the group being enumerated
+								for (final CUnit unit : new ArrayList<>(group)) {
 									globalScope.runThreadUntilCompletion(globalScope.createThread(callback,
 											CommonTriggerExecutionScope.enumScope(triggerScope, unit)));
 								}
@@ -3594,9 +3595,8 @@ public class Jass2 {
 			jassProgramVisitor.getJassNativeManager().createNative("SetUnitPositionLoc",
 					(arguments, globalScope, triggerScope) -> {
 						final CUnit whichUnit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
-						final AbilityPointTarget positionLoc = arguments.get(1)
-								.visit(ObjectJassValueVisitor.getInstance());
-						if (whichUnit != null) {
+						final AbilityPointTarget positionLoc = nullable(arguments, 1, ObjectJassValueVisitor.getInstance());
+						if ((whichUnit != null) && (positionLoc != null)) { // null location: no-op, as in WC3
 							whichUnit.setPointAndCheckUnstuck(positionLoc.x, positionLoc.y,
 									CommonEnvironment.this.simulation);
 						}
@@ -5134,9 +5134,11 @@ public class Jass2 {
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("PauseUnit",
 					(arguments, globalScope, triggerScope) -> {
-						final CUnit unit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
+						final CUnit unit = nullable(arguments, 0, ObjectJassValueVisitor.getInstance());
 						final boolean flag = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
-						unit.setPaused(flag);
+						if (unit != null) { // PauseUnit(null) is a no-op in WC3 (OrcX01's cinematics do it)
+							unit.setPaused(flag);
+						}
 						return null;
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("IsUnitPaused",
