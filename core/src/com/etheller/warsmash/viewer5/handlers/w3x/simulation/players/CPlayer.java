@@ -546,6 +546,17 @@ public class CPlayer extends CBasePlayer {
 		}
 	}
 
+	/** warsmash-nx: a shop of this player sold an item. */
+	public void fireSellItemEvents(final CUnit sellingUnit, final CUnit buyingUnit, final CItem item) {
+		final List<CPlayerEvent> eventList = getEventList(JassGameEventsWar3.EVENT_PLAYER_UNIT_SELL_ITEM);
+		if (eventList != null) {
+			for (final CPlayerEvent event : new ArrayList<>(eventList)) {
+				event.fire(sellingUnit, CommonTriggerExecutionScope.unitSellItemScope(
+						JassGameEventsWar3.EVENT_PLAYER_UNIT_SELL_ITEM, event.getTrigger(), sellingUnit, buyingUnit, item));
+			}
+		}
+	}
+
 	public void firePickUpItemEvents(final CUnit unit, final CItem item, final CSimulation game) {
 		final List<CPlayerEvent> eventList = getEventList(JassGameEventsWar3.EVENT_PLAYER_UNIT_PICKUP_ITEM);
 		if (eventList != null) {

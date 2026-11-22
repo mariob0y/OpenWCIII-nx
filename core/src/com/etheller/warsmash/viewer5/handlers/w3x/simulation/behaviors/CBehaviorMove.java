@@ -41,6 +41,7 @@ public class CBehaviorMove implements CBehavior {
 	private CUnit followUnit;
 	private CRangedBehavior rangedBehavior;
 	private boolean firstUpdate = true;
+	private static final int NX_MAX_BLOCKED_SEARCHES = 8;
 	private boolean disableCollision = false;
 	private boolean pathfindingActive = false;
 	private boolean firstPathfindJob = false;
@@ -318,6 +319,13 @@ public class CBehaviorMove implements CBehavior {
 						this.target.y = this.followUnit.getY();
 					}
 					if (!this.pathfindingActive) {
+						// warsmash-nx: blocked on the first step of every new path (e.g. a partial path towards an
+						// unreachable target whose first leg clips a blocked cell): stop, as Warcraft III does,
+						// instead of searching again from the same spot forever. searchCycles resets on headway.
+						if (this.searchCycles >= NX_MAX_BLOCKED_SEARCHES) {
+							onMoveGiveUp(simulation);
+							return this.unit.pollNextOrderBehavior(simulation);
+						}
 						simulation.findNaiveSlowPath(this.unit, this.followUnit, startFloatingX, startFloatingY,
 								this.target, movementType, collisionSize, this.searchCycles < 4, this);
 						this.pathfindingActive = true;

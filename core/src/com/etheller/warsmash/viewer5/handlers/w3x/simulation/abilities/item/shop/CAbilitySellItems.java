@@ -175,13 +175,15 @@ public final class CAbilitySellItems extends AbstractCAbility {
 						final CItem newItem = game.createItem(itemTypeId, caster.getX(), caster.getY());
 						purchasingInventoryData.giveItem(game, purchasingHero, newItem, false);
 						recordSale(itemTypeId);
+						caster.fireSellItemEvents(game, purchasingHero, newItem); // warsmash-nx
 					}
 				}
 			}
 			else {
 				if (game.getPlayer(playerIndex).charge(itemType.getGoldCost(), itemType.getLumberCost())) {
-					game.createItem(itemTypeId, caster.getX(), caster.getY());
+					final CItem newItem = game.createItem(itemTypeId, caster.getX(), caster.getY());
 					recordSale(itemTypeId);
+					caster.fireSellItemEvents(game, null, newItem); // warsmash-nx
 				}
 			}
 		}

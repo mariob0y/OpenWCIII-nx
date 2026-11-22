@@ -5227,6 +5227,18 @@ public class CUnit extends CWidget {
 		}
 	}
 
+	/** warsmash-nx: this shop sold an item (EVENT_UNIT_SELL_ITEM, then its owner's EVENT_PLAYER_UNIT_SELL_ITEM). */
+	public void fireSellItemEvents(final CSimulation game, final CUnit buyingUnit, final CItem item) {
+		final List<CWidgetEvent> eventList = getEventList(JassGameEventsWar3.EVENT_UNIT_SELL_ITEM);
+		if (eventList != null) {
+			for (final CWidgetEvent event : new ArrayList<>(eventList)) {
+				event.fire(this, CommonTriggerExecutionScope.unitSellItemScope(JassGameEventsWar3.EVENT_UNIT_SELL_ITEM,
+						event.getTrigger(), this, buyingUnit, item));
+			}
+		}
+		game.getPlayer(this.playerIndex).fireSellItemEvents(this, buyingUnit, item);
+	}
+
 	public void firePickUpItemEvents(final CSimulation game, final CItem item) {
 		final List<CWidgetEvent> eventList = getEventList(JassGameEventsWar3.EVENT_UNIT_PICKUP_ITEM);
 		if (eventList != null) {

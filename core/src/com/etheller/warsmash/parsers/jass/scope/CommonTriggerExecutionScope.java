@@ -66,7 +66,7 @@ public class CommonTriggerExecutionScope extends TriggerExecutionScope {
 	private CUnit sellingUnit;
 	private CUnit soldUnit;
 	private CUnit buyingUnit;
-	private CUnit soldItem;
+	private CItem soldItem;
 	private CUnit changingUnit;
 	private CPlayerJass changingUnitPrevOwner;
 	private CUnit manipulatingUnit;
@@ -352,7 +352,7 @@ public class CommonTriggerExecutionScope extends TriggerExecutionScope {
 		return this.buyingUnit;
 	}
 
-	public CUnit getSoldItem() {
+	public CItem getSoldItem() {
 		return this.soldItem;
 	}
 
@@ -663,6 +663,23 @@ public class CommonTriggerExecutionScope extends TriggerExecutionScope {
 		final CommonTriggerExecutionScope scope = new CommonTriggerExecutionScope(trigger, TriggerExecutionScope.EMPTY);
 		scope.triggeringTrackable = trackable;
 		scope.triggerEventId = triggerEventId;
+		return scope;
+	}
+
+	/**
+	 * warsmash-nx: EVENT_(PLAYER_)UNIT_SELL_ITEM: the triggering unit is the shop (as in Warcraft III), with
+	 * GetSellingUnit, GetBuyingUnit (may be null when nobody was selected) and GetSoldItem.
+	 */
+	public static CommonTriggerExecutionScope unitSellItemScope(final JassGameEventsWar3 triggerEventId,
+			final Trigger trigger, final CUnit sellingUnit, final CUnit buyingUnit, final CItem soldItem) {
+		final CommonTriggerExecutionScope scope = new CommonTriggerExecutionScope(trigger, TriggerExecutionScope.EMPTY);
+		scope.triggerWidget = sellingUnit;
+		scope.triggeringUnit = sellingUnit;
+		scope.triggerEventId = triggerEventId;
+		scope.sellingUnit = sellingUnit;
+		scope.buyingUnit = buyingUnit;
+		scope.soldItem = soldItem;
+		scope.manipulatedItem = soldItem;
 		return scope;
 	}
 
