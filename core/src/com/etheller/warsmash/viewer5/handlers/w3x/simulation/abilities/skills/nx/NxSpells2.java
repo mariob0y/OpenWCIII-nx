@@ -10,7 +10,12 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnitClassification;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentModel;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.hero.CAbilityHero;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilityNoTargetSpellBase;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilityPassiveSpellBase;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.util.CBuffTimedLife;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.listeners.CUnitDeathReplacementEffectPriority;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.listeners.CUnitDeathReplacementStacking;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilityPointTargetSpellBase;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilityTargetSpellBase;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
@@ -49,7 +54,11 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.StateModBuffTy
  * <li>Wander (critters): an idle unit walks to a random nearby spot every few seconds;</li>
  * <li>Spiked Barricades (orc buildings): once the Rosp upgrade is researched, melee attackers take 5 plus
  * 20 % (level 2: 50 %) of the damage they deal (upgradedata.slk rspi/rspp);</li>
- * <li>Abolish Magic (creep casters, autocast): removes the target's buffs; summoned enemies take Data B.</li>
+ * <li>Abolish Magic (creep casters, autocast): removes the target's buffs; summoned enemies take Data B;</li>
+ * <li>Mirror Image (Samuro): Data A images of the hero (same level, no spells, Data B of its damage, Data C
+ * times the damage taken) for Duration, the hero hidden among them; an image that dies or expires just
+ * vanishes (no corpse, no bounty, no revive). Images are units of the hero's type: there is no illusion
+ * flag in the engine, so triggers counting units of that type see them.</li>
  * </ul>
  * Registered from NxSpells.register.
  */
@@ -68,6 +77,7 @@ public final class NxSpells2 {
 		put(map, "Awan", (h, a) -> new Wander(h, a));
 		put(map, "Aspi", (h, a) -> new SpikedBarricades(h, a));
 		put(map, "Aadm", (h, a) -> new AbolishMagic(h, a));
+		put(map, "AOmi", (h, a) -> new MirrorImage(h, a));
 	}
 
 	private static void put(final Map<War3ID, CAbilityTypeDefinition> map, final String code,
@@ -530,6 +540,83 @@ public final class NxSpells2 {
 				NxSpells.spellDamage(game, caster, t, this.summonDamage, CDamageType.MAGIC);
 			}
 			game.createTemporarySpellEffectOnUnit(t, getAlias(), CEffectType.TARGET);
+			return false;
+		}
+	}
+
+	/** Mirror Image: copies of the hero, which vanish when they die or expire. */
+	public static final class MirrorImage extends CAbilityNoTargetSpellBase {
+		private int count;
+		private float dealt, taken;
+		private War3ID buffId;
+
+		public MirrorImage(final int handleId, final War3ID alias) {
+			super(handleId, alias);
+		}
+
+		@Override
+		public int getBaseOrderId() {
+			return OrderIds.mirrorimage;
+		}
+
+		@Override
+		public void populateData(final GameObject go, final int level) {
+			this.count = Math.max(1, (int) NxSpells.data(go, AbilityFields.DATA_A, level));
+			this.dealt = NxSpells.data(go, AbilityFields.DATA_B, level);
+			this.taken = NxSpells.data(go, AbilityFields.DATA_C, level);
+			this.buffId = AbstractCAbilityTypeDefinition.getBuffId(go, level, 0);
+			if (this.buffId == null) {
+				this.buffId = getAlias();
+			}
+		}
+
+		@Override
+		public boolean doEffect(final CSimulation game, final CUnit caster, final AbilityTarget target) {
+			NxBuff.dispel(game, caster);
+			final float seconds = getDuration() > 0 ? getDuration() : 60;
+			final int slots = this.count + 1;
+			final int casterSlot = game.getSeededRandom().nextInt(slots);
+			final float start = game.getSeededRandom().nextFloat() * (float) (StrictMath.PI * 2);
+			final float cx = caster.getX();
+			final float cy = caster.getY();
+			final CAbilityHero heroData = caster.getHeroData();
+			for (int i = 0; i < slots; i++) {
+				final float angle = start + ((float) (StrictMath.PI * 2 * i) / slots);
+				final float x = cx + ((float) StrictMath.cos(angle) * 100);
+				final float y = cy + ((float) StrictMath.sin(angle) * 100);
+				if (i == casterSlot) {
+					caster.setPointAndCheckUnstuck(x, y, game);
+					continue;
+				}
+				final CUnit image = game.createUnit(caster.getTypeId(), caster.getPlayerIndex(), x, y,
+						caster.getFacing());
+				if (image == null) {
+					continue;
+				}
+				if ((heroData != null) && (image.getHeroData() != null)) {
+					image.getHeroData().setHeroLevel(game, image, heroData.getHeroLevel(), false);
+				}
+				image.setLife(game, image.getMaximumLife() * (caster.getLife() / Math.max(1f, caster.getMaximumLife())));
+				image.setMana(0);
+				image.addDeathReplacementEffect(CUnitDeathReplacementEffectPriority.PHOENIXREVIVE,
+						(sim, unit, killer, result) -> {
+							// an image vanishes instead of dying
+							result.setReviving(true);
+							sim.createTemporarySpellEffectOnUnit(unit, getAlias(), CEffectType.SPECIAL);
+							sim.removeUnit(unit);
+							final CUnitDeathReplacementStacking stop = new CUnitDeathReplacementStacking();
+							stop.setAllowStacking(false);
+							stop.setAllowSamePriorityStacking(false);
+							return stop;
+						});
+				NxBuff.apply(game, image, new NxBuff(game.getHandleIdAllocator().createId(), this.buffId, seconds)
+						.state(StateModBuffType.DISABLE_SPELLS)
+						.stat(NonStackingStatBuffType.MELEEATKPCT, this.dealt - 1)
+						.stat(NonStackingStatBuffType.RNGDATKPCT, this.dealt - 1).damageTaken(this.taken));
+				image.add(game, new CBuffTimedLife(game.getHandleIdAllocator().createId(), this.buffId, seconds, false));
+				game.createTemporarySpellEffectOnUnit(image, getAlias(), CEffectType.TARGET);
+			}
+			game.createTemporarySpellEffectOnUnit(caster, getAlias(), CEffectType.CASTER);
 			return false;
 		}
 	}
