@@ -90,16 +90,21 @@ public class Trigger implements CHandle {
 	}
 
 	public void execute(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
-		execute(globalScope, triggerScope, false);
+		execute(globalScope, triggerScope, false, false);
+	}
+
+	/** warsmash-nx: an event's execution: its queued threads do not start if the trigger is disabled first. */
+	public void executeFromEvent(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
+		execute(globalScope, triggerScope, false, true);
 	}
 
 	/** Explicit TriggerExecute calls run their actions before the caller continues, up to a sleep. */
 	public void executeImmediately(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
-		execute(globalScope, triggerScope, true);
+		execute(globalScope, triggerScope, true, false);
 	}
 
 	private void execute(final GlobalScope globalScope, final TriggerExecutionScope triggerScope,
-			final boolean immediate) {
+			final boolean immediate, final boolean fromEvent) {
 		if (!this.enabled) {
 			return;
 		}
@@ -108,6 +113,12 @@ public class Trigger implements CHandle {
 			try {
 				if (immediate && action instanceof JassThreadActionFunc) {
 					((JassThreadActionFunc) action).callImmediately(globalScope, triggerScope);
+				}
+				else if (fromEvent && action instanceof JassThreadActionFunc) {
+					final JassThread triggerThread = globalScope
+							.createThread(((JassThreadActionFunc) action).codeJassValue, triggerScope);
+					triggerThread.startOnlyIfEnabled = this;
+					globalScope.queueThread(triggerThread);
 				}
 				else {
 					action.call(Collections.emptyList(), globalScope, triggerScope);

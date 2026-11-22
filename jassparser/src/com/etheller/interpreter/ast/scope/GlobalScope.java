@@ -675,6 +675,13 @@ public final class GlobalScope {
 	private void runOneThreadLooop() {
 		for (int threadIndex = this.threads.size() - 1; threadIndex >= 0; threadIndex--) {
 			final JassThread thread = this.threads.get(threadIndex);
+			if (thread.startOnlyIfEnabled != null) {
+				if (!thread.startOnlyIfEnabled.isEnabled()) {
+					this.threads.remove(threadIndex);
+					continue;
+				}
+				thread.startOnlyIfEnabled = null;
+			}
 			this.currentThread = thread;
 			try {
 				while (!thread.isSleeping()) {
@@ -748,7 +755,7 @@ public final class GlobalScope {
 					}
 				}
 				if (trigger.evaluate(this, evaluateScope)) {
-					trigger.execute(this, executeScope);
+					trigger.executeFromEvent(this, executeScope);
 				}
 			}
 			catch (final Exception exc) {
@@ -799,7 +806,7 @@ public final class GlobalScope {
 				}
 			}
 			if (this.trigger.evaluate(globalScope, this.evaluateScope)) {
-				this.trigger.execute(globalScope, this.executeScope);
+				this.trigger.executeFromEvent(globalScope, this.executeScope);
 			}
 		}
 	}
