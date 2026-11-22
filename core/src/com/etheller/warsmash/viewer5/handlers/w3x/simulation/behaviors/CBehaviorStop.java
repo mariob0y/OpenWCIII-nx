@@ -21,7 +21,12 @@ public class CBehaviorStop implements CBehavior {
 
 	@Override
 	public CBehavior update(final CSimulation game) {
-		if (this.unit.autoAcquireTargets(game, false)) {
+		// warsmash-nx: an idle unit looks for a target every 4th tick (0.2 s), staggered by handle so
+		// the scans spread over the ticks; each is a quadtree search of its acquisition range, and
+		// every idle unit on the map did one 20 times a second (~10% of the console's game thread,
+		// OrcX01 profile 2026-11-22). Its queued orders are still read every tick.
+		if ((((game.getGameTurnTick() + this.unit.getHandleId()) & 3) == 0)
+				&& this.unit.autoAcquireTargets(game, false)) {
 			return this.unit.getCurrentBehavior();
 		}
 		return this.unit.pollNextOrderBehavior(game);

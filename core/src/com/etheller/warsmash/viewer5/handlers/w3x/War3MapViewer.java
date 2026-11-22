@@ -852,20 +852,17 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		fogUpdateTimer.setRepeats(true);
 		fogUpdateTimer.start(this.simulation);
 		final CTimer fogGpuUpdateTimer = new CTimer() {
-			private boolean doodadsFading = true;
 			private int fires;
 
 			@Override
 			public void onFire(final CSimulation simulation) {
-				// warsmash-nx: the doodad pass (every decal on the map) only while the fog moves, a
-				// doodad is still fading, or once a second; same fade steps as before otherwise.
+				// warsmash-nx: doodads take the terrain's faded fog at their cell, and only when it
+				// moved (or once a second).
 				final boolean terrainChanged = War3MapViewer.this.terrain.reloadFogOfWarDataToGPU(simulation);
-				if (terrainChanged || this.doodadsFading || ((++this.fires % 32) == 0)) {
-					boolean fading = false;
+				if (terrainChanged || ((++this.fires % 32) == 0)) {
 					for (final RenderDoodad doodad : War3MapViewer.this.decals) {
-						fading |= doodad.updateFog(War3MapViewer.this);
+						doodad.updateFogFromTerrain(War3MapViewer.this);
 					}
-					this.doodadsFading = fading;
 				}
 			}
 		};

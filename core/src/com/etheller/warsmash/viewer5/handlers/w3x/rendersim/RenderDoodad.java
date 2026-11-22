@@ -10,6 +10,7 @@ import com.etheller.warsmash.viewer5.handlers.mdx.SequenceLoopMode;
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.PrimaryTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
+import com.etheller.warsmash.viewer5.handlers.w3x.environment.Terrain;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CPlayerFogOfWar;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CFogState;
 
@@ -122,6 +123,33 @@ public class RenderDoodad {
 	}
 
 	private byte lastFogStateColor = 0;
+	private int fogIndex = -1;
+
+	/**
+	 * warsmash-nx: updateFog from the terrain's faded fog at this doodad's cell instead of fading its
+	 * own copy (same start, same steps, so the same value): two array reads instead of a fog lookup
+	 * and the settings for every doodad on the map, 33 times a second.
+	 */
+	public void updateFogFromTerrain(final War3MapViewer war3MapViewer) {
+		final Terrain terrain = war3MapViewer.terrain;
+		if (this.fogIndex < 0) {
+			final PathingGrid pathingGrid = war3MapViewer.simulation.getPathingGrid();
+			this.fogIndex = (pathingGrid.getFogOfWarIndexY(this.y) * terrain.getFogGridWidth())
+					+ pathingGrid.getFogOfWarIndexX(this.x);
+		}
+		final byte target = terrain.getTargetFog(this.fogIndex);
+		if (target != this.fogState.getMask()) {
+			this.fogState = CFogState.getByMask(target);
+		}
+		final byte visible = terrain.getVisibleFog(this.fogIndex);
+		if (visible != this.lastFogStateColor) {
+			this.lastFogStateColor = visible;
+			for (int i = 0; i < this.vertexColorBase.length; i++) {
+				VERTEX_COLOR_HEAP[i] = (this.vertexColorBase[i] * (255 - (this.lastFogStateColor & 0xFF))) / 255f;
+			}
+			((MdxComplexInstance) this.instance).setVertexColor(VERTEX_COLOR_HEAP);
+		}
+	}
 
 	/** @return whether this doodad's colour is still fading toward its fog state (warsmash-nx) */
 	public boolean updateFog(final War3MapViewer war3MapViewer) {

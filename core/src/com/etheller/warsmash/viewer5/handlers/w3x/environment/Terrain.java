@@ -1783,6 +1783,27 @@ public class Terrain {
 	private byte[] fogScratchState = new byte[0];
 	private byte[] fogScratchVisual = new byte[0];
 	private boolean fogUploaded;
+	/** The fog state the settings make of each raw cell value (getFogStateFromSettings), per pass. */
+	private final byte[] fogLut = new byte[256];
+
+	/**
+	 * warsmash-nx: the visible (faded) fog of a cell as of the last reloadFogOfWarDataToGPU, 0 outside
+	 * the grid. A doodad's fog colour fades from the same start in the same steps, so it is this.
+	 */
+	public byte getVisibleFog(final int index) {
+		return ((index >= 0) && (index < this.fogScratchVisual.length)) ? this.fogScratchVisual[index] : 0;
+	}
+
+	/** warsmash-nx: the fog state a cell is fading toward (as CPlayerFogOfWar.getState), 0 outside. */
+	public byte getTargetFog(final int index) {
+		return ((index >= 0) && (index < this.fogScratchState.length))
+				? this.fogLut[this.fogScratchState[index] & 0xFF]
+				: 0;
+	}
+
+	public int getFogGridWidth() {
+		return this.fogOfWarData.getWidth();
+	}
 
 	/**
 	 * Steps the visible fog one fade step toward the simulation's and uploads it. warsmash-nx: in
@@ -1800,6 +1821,10 @@ public class Terrain {
 		}
 		final byte[] state = this.fogScratchState;
 		final byte[] visual = this.fogScratchVisual;
+		final byte[] lut = this.fogLut;
+		for (int b = 0; b < 256; b++) {
+			lut[b] = fogMaskSettings.getFogStateFromSettings((byte) b);
+		}
 		final ByteBuffer fogOfWarBuffer = this.fogOfWarData.getFogOfWarBuffer().duplicate();
 		fogOfWarBuffer.clear();
 		fogOfWarBuffer.get(state, 0, count);
@@ -1809,8 +1834,7 @@ public class Terrain {
 		boolean changed = false;
 		for (int i = 0; i < count; i++) {
 			final byte old = visual[i];
-			final byte faded = War3MapViewer.fadeLineOfSightColor(old,
-					fogMaskSettings.getFogStateFromSettings(state[i]));
+			final byte faded = War3MapViewer.fadeLineOfSightColor(old, lut[state[i] & 0xFF]);
 			if (faded != old) {
 				visual[i] = faded;
 				changed = true;

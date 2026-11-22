@@ -5,6 +5,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import com.badlogic.gdx.graphics.Color;
+import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Rectangle;
@@ -31,6 +32,12 @@ public class MeleeUIMinimap {
 	private float heroAlpha = 0.90f;
 	private byte polarity = -1;
 	private boolean visible = true;
+	/** warsmash-nx: the fog over the minimap as one texture (one texel per fog cell). */
+	private Pixmap fogPixmap;
+	private Texture fogTexture;
+	private byte[] fogBytes;
+	private long fogUpdatedNs;
+	private static final long FOG_REFRESH_NS = 200_000_000L;
 	private final List<MinimapPing> pings = new ArrayList<>();
 
 	public MeleeUIMinimap(final Rectangle displayArea, final Rectangle playableMapArea, final Texture minimapTexture,
@@ -84,20 +91,46 @@ public class MeleeUIMinimap {
 		final float mapXMod = this.minimapFilledArea.width / (maxX - minX);
 		final float mapYMod = this.minimapFilledArea.height / (maxY - minY);
 
-		for (int y = 0; y < (maxY - minY); y++) {
-			for (int x = 0; x < (maxX - minX); x++) {
-				final CFogState state = fogOfWar.getFogState(game, x + minX, y + minY);
-				if (CFogState.FOGGED.equals(state)) {
-					batch.setColor(0f, 0f, 0f, 0.5f);
-					batch.draw(this.teamColors[0], this.minimapFilledArea.x + (x * mapXMod),
-							this.minimapFilledArea.y + (y * mapYMod), mapXMod, mapYMod);
+		// warsmash-nx: was a quad and a fog lookup per cell, every frame (tens of thousands; ~6% of the
+		// console's game thread). Now the cells are texels of one black texture, alpha 0.5 where
+		// fogged and 1 where masked, refreshed at most 5 times a second and drawn as one quad over
+		// the same area. Pixmap row 0 is the top of the drawn quad, so grid row y goes to h - 1 - y.
+		final int fogWidth = maxX - minX;
+		final int fogHeight = maxY - minY;
+		if ((fogWidth > 0) && (fogHeight > 0)) {
+			final long now = System.nanoTime();
+			if ((this.fogPixmap == null) || (this.fogPixmap.getWidth() != fogWidth)
+					|| (this.fogPixmap.getHeight() != fogHeight)) {
+				if (this.fogTexture != null) {
+					this.fogTexture.dispose();
+					this.fogPixmap.dispose();
 				}
-				else if (CFogState.MASKED.equals(state)) {
-					batch.setColor(0f, 0f, 0f, 1f);
-					batch.draw(this.teamColors[0], this.minimapFilledArea.x + (x * mapXMod),
-							this.minimapFilledArea.y + (y * mapYMod), mapXMod, mapYMod);
-				}
+				this.fogPixmap = new Pixmap(fogWidth, fogHeight, Pixmap.Format.RGBA8888);
+				this.fogTexture = new Texture(this.fogPixmap);
+				this.fogTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+				this.fogBytes = new byte[fogWidth * fogHeight * 4];
+				this.fogUpdatedNs = now - FOG_REFRESH_NS;
 			}
+			if ((now - this.fogUpdatedNs) >= FOG_REFRESH_NS) {
+				this.fogUpdatedNs = now;
+				final byte[] bytes = this.fogBytes;
+				for (int y = 0; y < fogHeight; y++) {
+					int j = (((fogHeight - 1 - y) * fogWidth) * 4) + 3;
+					for (int x = 0; x < fogWidth; x++, j += 4) {
+						final CFogState state = fogOfWar.getFogState(game, x + minX, y + minY);
+						bytes[j] = CFogState.FOGGED.equals(state) ? (byte) 128
+								: CFogState.MASKED.equals(state) ? (byte) 255 : 0;
+					}
+				}
+				final java.nio.ByteBuffer pixels = this.fogPixmap.getPixels();
+				pixels.position(0);
+				pixels.put(bytes);
+				pixels.position(0);
+				this.fogTexture.draw(this.fogPixmap, 0, 0);
+			}
+			batch.setColor(1f, 1f, 1f, 1f);
+			batch.draw(this.fogTexture, this.minimapFilledArea.x, this.minimapFilledArea.y,
+					fogWidth * mapXMod, fogHeight * mapYMod);
 		}
 
 		this.heroAlpha += HERO_STEP * this.polarity;

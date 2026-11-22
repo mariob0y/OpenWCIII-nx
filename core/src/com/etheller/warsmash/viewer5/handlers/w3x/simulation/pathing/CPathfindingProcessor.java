@@ -243,6 +243,12 @@ public class CPathfindingProcessor {
 		};
 	}
 
+	/**
+	 * warsmash-nx: search iterations per simulation tick (was a fixed 1500). The console sets less, so
+	 * a burst of path requests is spread over more ticks instead of stalling frames.
+	 */
+	public static int WORK_BUDGET_PER_TICK = 1500;
+
 	public void update(final CSimulation simulation) {
 		int workIterations = 0;
 		JobsLoop: while (!this.moveQueue.isEmpty()) {
@@ -511,7 +517,7 @@ public class CPathfindingProcessor {
 				if (this.totalIterations > 20000) {
 					break;
 				}
-				if (workIterations >= 1500) {
+				if (workIterations >= WORK_BUDGET_PER_TICK) {
 					// breaking jobs loop will implicitly exit without calling pathFound() below
 					break JobsLoop;
 				}
