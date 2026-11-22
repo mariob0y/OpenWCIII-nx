@@ -186,6 +186,11 @@ public abstract class Scene {
 
 		if (batch == null) {
 			batch = instance.getBatch(textureMapper);
+			if (batch.scene == null) {
+				// warsmash-nx: an instance batched before its scene was set (a lightning made during a cinematic)
+				// gave a batch with no scene, cached here for good: the next translucent render threw
+				batch.scene = this;
+			}
 
 			this.batches.put(textureMapper, batch);
 		}
