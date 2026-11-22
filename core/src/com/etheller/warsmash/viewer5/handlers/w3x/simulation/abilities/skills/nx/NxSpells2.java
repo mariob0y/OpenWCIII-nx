@@ -20,6 +20,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.def
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbilityFields;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbstractCAbilityTypeDefinition;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.CAbilityTypeDefinitionSpellBase;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.listeners.CUnitAttackDamageTakenListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.listeners.CUnitAttackPostDamageListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.CEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;
@@ -45,7 +46,10 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.StateModBuffTy
  * it times Data B (heroes Data D) as extra damage; Data E extra damage to summoned units;</li>
  * <li>Burning Oil (demolisher): the attacked ground burns for Duration: Data A per Data B seconds within
  * half the Area, Data C per Data D seconds within the Area, buildings times Data E;</li>
- * <li>Wander (critters): an idle unit walks to a random nearby spot every few seconds.</li>
+ * <li>Wander (critters): an idle unit walks to a random nearby spot every few seconds;</li>
+ * <li>Spiked Barricades (orc buildings): once the Rosp upgrade is researched, melee attackers take 5 plus
+ * 20 % (level 2: 50 %) of the damage they deal (upgradedata.slk rspi/rspp);</li>
+ * <li>Abolish Magic (creep casters, autocast): removes the target's buffs; summoned enemies take Data B.</li>
  * </ul>
  * Registered from NxSpells.register.
  */
@@ -62,6 +66,8 @@ public final class NxSpells2 {
 		put(map, "Afbk", (h, a) -> new OnAttack(h, a, OnAttack.FEEDBACK));
 		put(map, "Abof", (h, a) -> new OnAttack(h, a, OnAttack.BURNING_OIL));
 		put(map, "Awan", (h, a) -> new Wander(h, a));
+		put(map, "Aspi", (h, a) -> new SpikedBarricades(h, a));
+		put(map, "Aadm", (h, a) -> new AbolishMagic(h, a));
 	}
 
 	private static void put(final Map<War3ID, CAbilityTypeDefinition> map, final String code,
@@ -438,6 +444,93 @@ public final class NxSpells2 {
 			final float x = unit.getX() + ((float) StrictMath.cos(angle) * dist);
 			final float y = unit.getY() + ((float) StrictMath.sin(angle) * dist);
 			unit.order(game, OrderIds.move, new AbilityPointTarget(x, y));
+		}
+	}
+
+	/** Spiked Barricades: melee attackers of a building take damage once Rosp is researched. */
+	public static final class SpikedBarricades extends CAbilityPassiveSpellBase {
+		private static final War3ID UPGRADE = War3ID.fromString("Rosp");
+		private final CUnitAttackDamageTakenListener listener = this::onDamaged;
+
+		public SpikedBarricades(final int handleId, final War3ID alias) {
+			super(handleId, alias, alias);
+		}
+
+		@Override
+		public void populateData(final GameObject go, final int level) {
+		}
+
+		@Override
+		public void onAdd(final CSimulation game, final CUnit unit) {
+			super.onAdd(game, unit);
+			unit.addDamageTakenListener(this.listener);
+		}
+
+		@Override
+		public void onRemove(final CSimulation game, final CUnit unit) {
+			unit.removeDamageTakenListener(this.listener);
+			super.onRemove(game, unit);
+		}
+
+		private void onDamaged(final CSimulation game, final CUnit attacker, final CUnit target, final boolean isAttack,
+				final boolean isRanged, final CDamageType weaponType, final float damage, final float bonusDamage,
+				final float trueDamage) {
+			if (!isAttack || isRanged || (attacker == null) || (attacker == target) || attacker.isDead()
+					|| attacker.isBuilding() || !NxSpells.enemies(game, target, attacker)) {
+				return;
+			}
+			final int level = game.getPlayer(target.getPlayerIndex()).getTechtreeUnlocked(UPGRADE);
+			if (level <= 0) {
+				return;
+			}
+			NxSpells.spellDamage(game, target, attacker, 5 + (damage * (0.2f + (0.3f * (level - 1)))),
+					CDamageType.NORMAL);
+		}
+	}
+
+	/** Abolish Magic: dispels the target; summoned enemies take Data B. */
+	public static final class AbolishMagic extends CAbilityTargetSpellBase {
+		private float summonDamage;
+
+		public AbolishMagic(final int handleId, final War3ID alias) {
+			super(handleId, alias);
+		}
+
+		@Override
+		public int getBaseOrderId() {
+			return OrderIds.autodispel;
+		}
+
+		@Override
+		public void populateData(final GameObject go, final int level) {
+			this.summonDamage = NxSpells.data(go, AbilityFields.DATA_B, level);
+		}
+
+		@Override
+		protected void innerCheckCanTargetSpell(final CSimulation game, final CUnit unit, final int orderId,
+				final CWidget target,
+				final com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityTargetCheckReceiver<CWidget> receiver) {
+			final CUnit t = target.visit(AbilityTargetVisitor.UNIT);
+			if ((t == null) || t.isBuilding()) {
+				receiver.targetCheckFailed(
+						com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CommandStringErrorKeys.UNABLE_TO_TARGET_THIS_UNIT);
+				return;
+			}
+			receiver.targetOk(target);
+		}
+
+		@Override
+		public boolean doEffect(final CSimulation game, final CUnit caster, final AbilityTarget target) {
+			final CUnit t = target.visit(AbilityTargetVisitor.UNIT);
+			if ((t == null) || t.isDead()) {
+				return false;
+			}
+			NxBuff.dispel(game, t);
+			if (NxSpells.enemies(game, caster, t) && t.getClassifications().contains(CUnitClassification.SUMMONED)) {
+				NxSpells.spellDamage(game, caster, t, this.summonDamage, CDamageType.MAGIC);
+			}
+			game.createTemporarySpellEffectOnUnit(t, getAlias(), CEffectType.TARGET);
+			return false;
 		}
 	}
 }
