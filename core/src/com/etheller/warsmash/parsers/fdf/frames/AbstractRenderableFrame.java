@@ -349,7 +349,14 @@ public abstract class AbstractRenderableFrame implements UIFrame {
 	@Override
 	public final void render(final SpriteBatch batch, final BitmapFont font20, final GlyphLayout glyphLayout) {
 		if (this.visible) {
+			final boolean crumbs = com.etheller.warsmash.util.NxCrumbs.detail();
+			if (crumbs) {
+				com.etheller.warsmash.util.NxCrumbs.crumb("frame " + getClass().getSimpleName() + " " + this.name);
+			}
 			internalRender(batch, font20, glyphLayout);
+			if (crumbs) {
+				com.etheller.warsmash.util.NxCrumbs.crumb("frame done " + this.name);
+			}
 		}
 	}
 

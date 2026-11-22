@@ -277,8 +277,10 @@ public abstract class ModelViewer {
 	}
 
 	public void updateAndRender() {
+		com.etheller.warsmash.util.NxCrumbs.crumb("viewer: sound settings");
 		com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename.refreshSettings();
 		this.update();
+		com.etheller.warsmash.util.NxCrumbs.crumb("viewer: start frame");
 		this.startFrame();
 		this.render();
 	}
@@ -303,8 +305,18 @@ public abstract class ModelViewer {
 		this.visibleInstances = 0;
 		this.updatedParticles = 0;
 
+		int sceneIndex = 0;
 		for (final Scene scene : this.scenes) {
+			if (com.etheller.warsmash.util.NxCrumbs.on()) {
+				com.etheller.warsmash.util.NxCrumbs.crumb("viewer: scene " + sceneIndex + " update, dt " + dt
+						+ ", " + scene.instances.size() + " instances");
+			}
 			scene.update(dt);
+			if (com.etheller.warsmash.util.NxCrumbs.on()) {
+				com.etheller.warsmash.util.NxCrumbs.crumb("viewer: scene " + sceneIndex + " updated, "
+						+ scene.updatedParticles + " particles");
+			}
+			sceneIndex++;
 
 			this.visibleCells += scene.visibleCells;
 			this.visibleInstances += scene.visibleInstances;
@@ -320,10 +332,22 @@ public abstract class ModelViewer {
 	}
 
 	public void render() {
+		int sceneIndex = 0;
 		for (final Scene scene : this.scenes) {
+			final boolean crumbs = com.etheller.warsmash.util.NxCrumbs.on();
+			if (crumbs) {
+				com.etheller.warsmash.util.NxCrumbs.crumb("viewer: scene " + sceneIndex + " start frame");
+			}
 			scene.startFrame();
+			if (crumbs) {
+				com.etheller.warsmash.util.NxCrumbs.crumb("viewer: scene " + sceneIndex + " opaque");
+			}
 			scene.renderOpaque();
+			if (crumbs) {
+				com.etheller.warsmash.util.NxCrumbs.crumb("viewer: scene " + sceneIndex + " translucent");
+			}
 			scene.renderTranslucent();
+			sceneIndex++;
 		}
 	}
 

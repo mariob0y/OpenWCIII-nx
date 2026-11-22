@@ -583,8 +583,11 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 		Gdx.gl30.glEnable(GL30.GL_SCISSOR_TEST);
 		final float deltaTime = Gdx.graphics.getDeltaTime();
 		Gdx.gl30.glBindVertexArray(WarsmashGdxGame.VAO);
+		com.etheller.warsmash.util.NxCrumbs.crumb("menu: camera");
 		this.cameraManager.updateCamera();
+		com.etheller.warsmash.util.NxCrumbs.crumb("menu: UI update");
 		this.menuUI.update(deltaTime);
+		com.etheller.warsmash.util.NxCrumbs.crumb("menu: UI updated");
 		if ((this.mainInstance != null) && this.mainInstance.sequenceEnded) {
 			final int seqIdx = this.mainInstance.sequence;
 			final List<Sequence> sequences = (this.mainModel != null) ? this.mainModel.getSequences() : null;
@@ -596,7 +599,9 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 				}
 			}
 		}
+		com.etheller.warsmash.util.NxCrumbs.crumb("menu: viewer update and render");
 		this.viewer.updateAndRender();
+		com.etheller.warsmash.util.NxCrumbs.crumb("menu: viewer rendered");
 		this.menuRenderProbe.afterRender(this.viewer, this.scene);
 		com.etheller.warsmash.viewer5.handlers.w3x.ui.CampaignFlowProbe.afterMenuRender();
 		com.etheller.warsmash.viewer5.handlers.w3x.ui.CampaignPersistenceProbe.afterMenuRender();
@@ -832,7 +837,9 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 		this.uiViewport.apply();
 		this.batch.setProjectionMatrix(this.uiCamera.combined);
 		this.batch.begin();
+		com.etheller.warsmash.util.NxCrumbs.crumb("menu: 2D UI render");
 		this.menuUI.render(this.batch, this.glyphLayout);
+		com.etheller.warsmash.util.NxCrumbs.crumb("menu: 2D UI end");
 		this.batch.end();
 
 		Gdx.gl30.glEnable(GL30.GL_SCISSOR_TEST);

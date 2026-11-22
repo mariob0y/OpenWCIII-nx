@@ -566,7 +566,14 @@ public class MdxComplexInstance extends ModelInstance {
 				group.render(this, this.scene.camera.viewProjectionMatrix);
 			}
 		}
+		final boolean crumbs = com.etheller.warsmash.util.NxCrumbs.detail();
+		int groupIndex = 0;
 		for (final GenericGroup group : model.translucentGroups) {
+			if (crumbs) {
+				com.etheller.warsmash.util.NxCrumbs.crumb("translucent " + model.name + " group " + groupIndex + " of "
+						+ model.translucentGroups.size() + ": " + group.getClass().getSimpleName());
+			}
+			groupIndex++;
 			group.render(this, this.scene.camera.viewProjectionMatrix);
 
 			final int glGetError = Gdx.gl.glGetError();
