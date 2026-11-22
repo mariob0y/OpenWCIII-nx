@@ -7451,7 +7451,7 @@ public class Jass2 {
 							return BooleanJassValue.FALSE;
 						}
 						try {
-							CommonEnvironment.this.saveGameDir.mkdirs();
+							java.nio.file.Files.createDirectories(CommonEnvironment.this.saveGameDir.toPath());
 							final File srcFile = saveGameFileFor(CommonEnvironment.this.saveGameDir, source);
 							final File destFile = saveGameFileFor(CommonEnvironment.this.saveGameDir, dest);
 							if (!srcFile.exists()) {
@@ -7487,7 +7487,15 @@ public class Jass2 {
 						if (!src.exists()) {
 							return BooleanJassValue.FALSE;
 						}
-						return BooleanJassValue.of(src.renameTo(dest));
+						// warsmash-nx: Files.move (Clearwing's File.renameTo always fails; the console's Files.move
+						// falls back to copy + delete)
+						try {
+							java.nio.file.Files.move(src.toPath(), dest.toPath());
+							return BooleanJassValue.TRUE;
+						}
+						catch (final java.io.IOException e) {
+							return BooleanJassValue.FALSE;
+						}
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("CachePlayerHeroData",
 					(arguments, globalScope, triggerScope) -> {

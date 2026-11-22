@@ -246,7 +246,8 @@ public final class CGameCache implements CHandle {
 	public void save(final File file) throws IOException {
 		final File parent = file.getParentFile();
 		if (parent != null) {
-			parent.mkdirs();
+			// warsmash-nx: Files, not File.mkdirs (Clearwing's mkdirs fails on a new tree)
+			java.nio.file.Files.createDirectories(parent.toPath());
 		}
 		try (final DataOutputStream out = new DataOutputStream(new FileOutputStream(file))) {
 			out.writeInt(FILE_MAGIC);
