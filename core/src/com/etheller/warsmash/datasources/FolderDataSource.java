@@ -33,6 +33,21 @@ public class FolderDataSource implements DataSource {
 	private static final Map<String, Set<String>> LISTFILES = new HashMap<>();
 	private static final Map<String, Set<String>> LOOKUPS = new HashMap<>();
 
+	/**
+	 * warsmash-nx: a faster way to list a folder, set by the console launcher (a native readdir walk;
+	 * the Java walk below costs two file-service calls per file there, ~100 s per boot).
+	 */
+	public interface FastLister {
+		/** Every regular file below the folder, relative to it with '/' separators, one per line; null to fall back. */
+		String list(String folder);
+	}
+
+	private static FastLister fastLister;
+
+	public static void setFastLister(final FastLister lister) {
+		fastLister = lister;
+	}
+
 	public FolderDataSource(final Path folderPath) {
 		this.folderPath = folderPath;
 		final String key = folderPath.toString();
@@ -48,11 +63,24 @@ public class FolderDataSource implements DataSource {
 		final Path name = folderPath.getFileName();
 		final String step = "Reading game files (" + (name == null ? folderPath.toString() : name.toString()) + ")";
 		LoadingStatus.report(step);
-		try {
-			walk(folderPath, folderPath, this.listfile, step);
+		final String fast = (fastLister == null) ? null : fastLister.list(folderPath.toString());
+		if (fast != null) {
+			int start = 0;
+			int end;
+			while ((end = fast.indexOf('\n', start)) >= 0) {
+				if (end > start) {
+					this.listfile.add(fast.substring(start, end));
+				}
+				start = end + 1;
+			}
 		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
+		else {
+			try {
+				walk(folderPath, folderPath, this.listfile, step);
+			}
+			catch (final IOException e) {
+				throw new RuntimeException(e);
+			}
 		}
 		LoadingStatus.report(step, this.listfile.size() + " files");
 		this.lookup = new HashSet<>(this.listfile.size() * 2);
