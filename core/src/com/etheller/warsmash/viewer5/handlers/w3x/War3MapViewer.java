@@ -167,6 +167,19 @@ import mpq.MPQArchive;
 import mpq.MPQException;
 
 public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoader {
+	/** warsmash-nx: simulation speed multiplier for PC test runs (env NX_SPEED, default 1). */
+	private static final float NX_SPEED = nxSpeed();
+
+	private static float nxSpeed() {
+		final String v = System.getenv("NX_SPEED");
+		try {
+			return v == null ? 1f : Math.max(0.1f, Math.min(8f, Float.parseFloat(v)));
+		}
+		catch (final NumberFormatException e) {
+			return 1f;
+		}
+	}
+
 	private static final List<String> ORIGIN_STRING_LIST = Arrays.asList("origin");
 
 	public static int DEBUG_DEPTH = 9999;
@@ -1314,7 +1327,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			super.update();
 
 			final float rawDeltaTime = discardFrameTime ? 0 : Gdx.graphics.getDeltaTime();
-			this.updateTime += rawDeltaTime;
+			this.updateTime += rawDeltaTime * NX_SPEED; // warsmash-nx: PC test runs can play faster (env NX_SPEED)
 
 			final Iterator<TextTag> textTagIterator = this.textTags.iterator();
 			while (textTagIterator.hasNext()) {
