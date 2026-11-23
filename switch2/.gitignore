@@ -1,9 +1,6 @@
 # Build output
 /build-*/
 /warsmash/build/
-/probe-b/gen/
-/probe-b/classes-*/
-/probe-b/pc-out/
 *.log
 
 # Downloaded or built third-party code (third_party/build-libffi.sh, devkitPro packages, library jars)

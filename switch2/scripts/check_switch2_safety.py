@@ -16,7 +16,6 @@ the console stops a program from writing there: only the program's own code does
 4. The game has its own crash handler (platform_crash.cpp), so a fault is not filed by the system.
 
     python scripts/check_switch2_safety.py build-switch2/warsmash.elf
-    python scripts/check_switch2_safety.py --probe build-probe/ws_probe.elf
     python scripts/check_switch2_safety.py --self-test
 """
 from __future__ import annotations
@@ -182,8 +181,6 @@ def main() -> int:
     args = sys.argv[1:]
     if args == ["--self-test"]:
         return self_test()
-    probe = "--probe" in args
-    args = [a for a in args if a != "--probe"]
     if len(args) != 1:
         print(__doc__)
         return 2
@@ -204,7 +201,7 @@ def main() -> int:
                         "\n".join(f"  {n}" for n in missing))
 
     # The program's own crash handler (platform_crash.cpp), so a fault never reaches the system's
-    # crash reporter. Required of probes too: probe A's first console run crashed without one
+    # crash reporter. A first console run of an early test program (probe A) crashed without one
     # (2026-11-19), so the system filed the report this rule exists to avoid.
     if "__libnx_exception_handler" not in names:
         failures.append("no crash handler (__libnx_exception_handler, platform_crash.cpp): a crash would "

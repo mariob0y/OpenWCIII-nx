@@ -16,7 +16,9 @@
 # come out of the transpiler with the rest (build/gen/src).
 cmake_minimum_required(VERSION 3.13)
 project(warsmash_nx C CXX)
-# Thousands of objects: the link line is longer than Windows allows (see probe-b/CMakeLists.txt).
+# Thousands of objects: the link line is longer than Windows allows. The Makefile generator can pass
+# just the objects in a response file (relative paths: MSYS does not translate /c/... paths inside
+# one for the Windows-native compiler, so everything else stays on the command line).
 set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_OBJECTS 1)
 set(CMAKE_CXX_USE_RESPONSE_FILE_FOR_LIBRARIES 0)
 
