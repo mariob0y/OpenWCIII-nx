@@ -13,6 +13,11 @@ package com.etheller.warsmash.util;
  * Items are claimed in small chunks under the pool's lock, so the lock is taken once per chunk,
  * not once per item. Each worker has an index (1..workers; the game thread is 0) that a job can
  * use to pick its own scratch memory.
+ *
+ * A job waits only for the workers that joined it, never for all of them: the game thread claims
+ * chunks too, so every item gets done even if a worker is late, never woke, or never started (on
+ * the console one worker thread once never ran and the old "every worker checks in" wait hung the
+ * game at its first frame, 2026-11-23).
  */
 public final class ParallelJobs {
 	/** One parallel loop body: run item {@code index} on the thread with index {@code worker}. */
@@ -38,7 +43,10 @@ public final class ParallelJobs {
 	private static int count;
 	private static int next;
 	private static int generation;
-	private static int checkedIn; // workers done with the current generation
+	private static int active; // workers running chunks of the current job
+	private static int started; // workers that have reached their loop
+	private static long firstJobNanos;
+	private static boolean startWarned;
 	private static Throwable failure;
 	private static boolean running;
 
@@ -113,7 +121,6 @@ public final class ParallelJobs {
 				job = body;
 				count = n;
 				next = 0;
-				checkedIn = 0;
 				failure = null;
 				generation++;
 				lock.notifyAll();
@@ -128,15 +135,17 @@ public final class ParallelJobs {
 
 		Throwable mine = null;
 		try {
-			runChunks(body, 0);
+			runChunks(body, 0, -1);
 		}
 		catch (final Throwable t) {
 			mine = t;
 		}
 
 		final Throwable theirs;
+		final boolean warn;
 		synchronized (lock) {
-			while (checkedIn < workers) {
+			// every chunk is claimed (the loop above ran out of them); wait for the ones still running
+			while (active > 0) {
 				try {
 					lock.wait();
 				}
@@ -147,6 +156,17 @@ public final class ParallelJobs {
 			theirs = failure;
 			job = null;
 			running = false;
+			if (firstJobNanos == 0) {
+				firstJobNanos = System.nanoTime();
+			}
+			warn = !startWarned && (started < workers) && ((System.nanoTime() - firstJobNanos) > 10_000_000_000L);
+			if (warn) {
+				startWarned = true;
+			}
+		}
+		if (warn) {
+			System.out.println("ParallelJobs: only " + started + " of " + workers
+					+ " worker thread(s) started; the game thread does their share");
 		}
 		rethrow(mine != null ? mine : theirs);
 	}
@@ -164,13 +184,17 @@ public final class ParallelJobs {
 		throw new RuntimeException(t);
 	}
 
-	/** Claims and runs chunks of the current job until none are left. */
-	private static void runChunks(final Job body, final int worker) {
+	/**
+	 * Claims and runs chunks of the current job until none are left. A worker passes the generation
+	 * it joined, so it never takes chunks of a later job with this one's body; the game thread -1.
+	 */
+	private static void runChunks(final Job body, final int worker, final int jobGeneration) {
 		while (true) {
 			final int start;
 			final int end;
 			synchronized (lock) {
-				if ((next >= count) || (failure != null)) {
+				if ((job != body) || ((jobGeneration >= 0) && (generation != jobGeneration)) || (next >= count)
+						|| (failure != null)) {
 					return;
 				}
 				start = next;
@@ -191,11 +215,20 @@ public final class ParallelJobs {
 		if (threadPlacer != null) {
 			threadPlacer.place(worker);
 		}
-		int seen = 0;
+		int seen;
+		synchronized (lock) {
+			started++;
+			seen = generation;
+		}
 		while (true) {
 			final Job body;
+			final int jobGeneration;
 			synchronized (lock) {
-				while (generation == seen) {
+				// a job still open (running, chunks left) that this worker has not joined yet
+				while ((generation == seen) || (job == null) || (next >= count)) {
+					if ((generation != seen) && ((job == null) || (next >= count))) {
+						seen = generation; // that job is over or fully claimed: skip it
+					}
 					try {
 						lock.wait();
 					}
@@ -204,12 +237,12 @@ public final class ParallelJobs {
 					}
 				}
 				seen = generation;
+				jobGeneration = generation;
 				body = job;
+				active++;
 			}
 			try {
-				if (body != null) {
-					runChunks(body, worker);
-				}
+				runChunks(body, worker, jobGeneration);
 			}
 			catch (final Throwable t) {
 				synchronized (lock) {
@@ -218,10 +251,12 @@ public final class ParallelJobs {
 					}
 				}
 			}
-			synchronized (lock) {
-				checkedIn++;
-				if (checkedIn >= workers) {
-					lock.notifyAll();
+			finally {
+				synchronized (lock) {
+					active--;
+					if (active == 0) {
+						lock.notifyAll();
+					}
 				}
 			}
 		}
