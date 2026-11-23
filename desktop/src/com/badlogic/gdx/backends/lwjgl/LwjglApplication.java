@@ -47,6 +47,9 @@ import com.etheller.warsmash.audio.OpenALAudio;
  * will now support the 3D sound!
  */
 public class LwjglApplication implements Application {
+	/** warsmash-nx: -mute (test runs): audio runs as usual, silent (listener gain 0). */
+	public static boolean mute;
+
 	protected final LwjglGraphics graphics;
 	protected OpenALAudio audio;
 	protected final LwjglFiles files;
@@ -98,6 +101,10 @@ public class LwjglApplication implements Application {
 			try {
 				this.audio = new OpenALAudio(config.audioDeviceSimultaneousSources, config.audioDeviceBufferCount,
 						config.audioDeviceBufferSize);
+				// warsmash-nx: -mute (test runs): audio runs as usual, silent
+				if (LwjglApplication.mute) {
+					org.lwjgl.openal.AL10.alListenerf(org.lwjgl.openal.AL10.AL_GAIN, 0f);
+				}
 			}
 			catch (final Throwable t) {
 				log("LwjglApplication", "Couldn't initialize audio, disabling audio", t);

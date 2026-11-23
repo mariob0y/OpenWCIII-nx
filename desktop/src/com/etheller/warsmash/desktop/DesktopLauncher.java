@@ -147,6 +147,9 @@ public class DesktopLauncher {
 			else if ("-nolog".equals(normalizedArgs[argIndex])) {
 				noLogs = true;
 			}
+			else if ("-mute".equals(normalizedArgs[argIndex]) || "--mute".equals(normalizedArgs[argIndex])) {
+				com.badlogic.gdx.backends.lwjgl.LwjglApplication.mute = true;
+			}
 			else if ("-log".equals(normalizedArgs[argIndex]) || "--log".equals(normalizedArgs[argIndex])) {
 				noLogs = false;
 			}
