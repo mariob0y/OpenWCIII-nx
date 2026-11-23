@@ -1,0 +1,20 @@
+# Build output
+/build-*/
+/warsmash/build/
+/probe-b/gen/
+/probe-b/classes-*/
+/probe-b/pc-out/
+*.log
+
+# Downloaded or built third-party code (third_party/build-libffi.sh, devkitPro packages, library jars)
+/third_party/*/
+
+# Made from local Warcraft III files, not redistributable
+/warsmash/icon*.jpg
+
+# Tool output
+/tools/casc_extract/*.exe
+/tools/imagecheck/classes/
+/tools/imagecheck/old/
+/tools/imagecheck/run*.txt
+/scripts/campaign-audit/*.txt

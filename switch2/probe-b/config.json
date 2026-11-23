@@ -1,0 +1,7 @@
+{
+    "nonOptimized": ["wsnx.probeb.ProbeB$Reflected", "wsnx.probeb.ProbeB$Kind", "wsnx.probeb.gson.**"],
+    "useValueChecks": true,
+    "useLineNumbers": true,
+    "generateProjectFiles": false,
+    "mainClass": "wsnx.probeb.ProbeB"
+}

@@ -1,0 +1,100 @@
+# NxPlayBot goals for chapter 1 of The Founding of Durotar (OrcX01 + zones _02.._05).
+# Run: NX_PLAY=<this file> (see NxPlayBot.java for the format). The first goal whose condition holds is played.
+
+[OrcX01]
+quests DyingWish EarnKeep HarpyThreat ThunderHerb SealTunnel Survey DestroyHumans WarnTrolls SinkFleet SignalPyres Summit ThunderLizards LizardEggs Quillboars WarlockCoven StrangeBrew
+hero Rexxar
+party Rokhan Chen:ChenInParty
+# --- Dying Wish: deliver Mogrin's report to Thrall
+goal QuestDyingWishProgress<3 : goto MeetThrall_TripwireA
+# --- Earning Your Keep, part 1: Harpy Threat (Nazgrel)
+goal QuestHarpyThreatProgress<2 : goto MeetNazgrel_Tripwire
+# CHEAT after 45 min (~10 min of attempts at level 3): Bloodfeather hovers by a plateau the ground units reach only by a ~21,000-unit road, and the
+# bot lacks the micro to pull him down with Rokhan; the quest only needs him dead
+goal QuestHarpyThreatProgress==2 & TIME>2700 : cheatkill Bloodfeather
+# the harpies fly (Rexxar cannot hit them) and Bloodfeather's camp is hard at level 1: clear nearby creeps first
+goal QuestHarpyThreatProgress==2 & HEROLEVEL<3 : farm 2500 | attack Bloodfeather
+goal QuestHarpyThreatProgress==2 : attack Bloodfeather
+goal QuestHarpyThreatProgress==3 : goto MeetNazgrel_Tripwire
+goal QuestHarpyThreatProgress==4 : buy Armory I000
+# --- meet Drek'Thar and Gazlowe (Thunder Herb, Seal the Tunnel)
+goal QuestThunderHerbProgress<2 : goto MeetDrekthar_Tripwire
+goal QuestSealTunnelProgress<2 : goto MeetGazlowe_Tripwire
+# --- optional: Strange Brew (Chen joins): a keg from Aicila's marketplace, the Thunderbloom, the Thunderphoenix's egg
+goal QuestStrangeBrewProgress<2 : goto Chen_Tripwire
+goal QuestStrangeBrewProgress==2 & !QuestStrangeBrewProgress1 : buy AicilasMarketplace dkfw
+goal QuestStrangeBrewProgress==2 & !QuestStrangeBrewProgress2 : pickup dthb
+goal QuestStrangeBrewProgress==2 & !QuestStrangeBrewProgress3 : attack Thunderphoenix | pickup dphe
+goal QuestStrangeBrewProgress==2 : goto Chen_Tripwire
+# --- optional: Warlock Coven (Morg): the warlocks, their relic, back to Morg
+goal QuestWarlockCovenProgress<2 : goto MeetMorg_TripwireA
+goal QuestWarlockCovenProgress==2 : killgroup WarlockUnits
+goal QuestWarlockCovenProgress==3 : pickup horl
+goal QuestWarlockCovenProgress==4 : goto Morg_Tripwire
+# --- Seal the Tunnel: the Goblin cave zone, then back to Gazlowe
+goal QuestSealTunnelProgress<4 : goto Zone_Goblin_Tripwire
+goal QuestSealTunnelProgress==4 : goto MeetGazlowe_Tripwire
+# --- Thunder Herb: Thunder Ridge zone, then back to Drek'Thar
+goal QuestThunderHerbProgress<8 : goto Zone_ThunderRidge_Tripwire
+goal QuestThunderHerbProgress==8 : goto MeetDrekthar_Tripwire
+# --- Earning Your Keep done: Thrall
+goal QuestEarnKeepProgress==2 & QuestEarnKeepProgress1 & QuestEarnKeepProgress2 & QuestEarnKeepProgress3 : goto Thrall_Tripwire
+# --- Survey the Border: Garthok, through the Beast Den, the observatory, Thrall
+goal QuestSurveyProgress==2 : goto MeetGarthok_Tripwire
+goal QuestSurveyProgress==3 : goto Zone_BeastDen_Left_Tripwire
+goal QuestSurveyProgress==4 : goto Observatory_Tripwire
+goal QuestSurveyProgress==5 : goto Thrall_Tripwire
+# --- Protect the Border: the watch post, the Human encampment, Thrall
+goal QuestDestroyHumansProgress==2 : goto DestroyHumans_ReturnTripwireA
+goal QuestDestroyHumansProgress==3 : goto DestroyHumans_Found_TripwireA
+goal QuestDestroyHumansProgress==4 : killgroup HumanEncampment
+goal QuestDestroyHumansProgress==5 : goto Thrall_Tripwire
+# --- Warn the Trolls / Sink the Fleet / Signal Pyres: the Echo Isles zone
+goal QuestWarnTrollsProgress>=2 & QuestSignalPyresProgress<7 : goto Zone_EchoIsles_Tripwire
+# --- The Summit
+goal QuestSignalPyresProgress==7 & QuestSummitProgress<2 : goto Thrall_Tripwire
+goal QuestSummitProgress==2 : goto Summit_Area_Tripwire
+goal QuestSummitProgress==3 : killgroup SummitAmbushers
+goal QuestSummitProgress==4 : goto Thrall_Tripwire
+goal always : wait
+
+[OrcX01_02]
+# Goblin Cave: the goblins' cinematic, one support column per tunnel, back to Orgrimmar
+quests SealTunnel StrangeBrew
+hero Rexxar
+party Rokhan Chen:ChenInParty
+goal QuestSealTunnelProgress<3 : goto GoblinTripwire
+goal !Column01Dead : attack gg_dest_BTsc_0453
+goal !Column02Dead : attack gg_dest_BTsc_0460
+goal !Column03Dead : attack gg_dest_BTsc_0463
+goal always : goto Zone_Orgrimmar_Tripwire
+
+[OrcX01_03]
+# Beast Den: every quillboar (optional), out by the observatory side
+quests Survey Quillboars
+hero Rexxar
+party Rokhan Chen:ChenInParty
+goal QuestQuillboarsProgress<4 : killplayer 3
+goal always : goto Zone_Observatory_Tripwire
+
+[OrcX01_04]
+# Echo Isles: the troll village, five battleships, Vol'jin, five signal pyres, back
+quests WarnTrolls SinkFleet SignalPyres
+hero RexxarWyvern Rexxar RokhanWyvern Rokhan ChenWyvern Chen
+goal QuestWarnTrollsProgress<4 : goto Wyvern_Cinematic_Tripwire
+goal QuestSinkFleetProgress<7 : attackany gg_unit_hbsh_0105 gg_unit_hbsh_0108 gg_unit_hbsh_0106 gg_unit_hbsh_0104 gg_unit_hbsh_0103
+goal QuestSinkFleetProgress==7 : attack gg_unit_ovlj_0010
+goal QuestSignalPyresProgress<7 : visit TripwirePyre01 TripwirePyre02 TripwirePyre03 TripwirePyre04 TripwirePyre05
+goal always : goto Zone_Orgrimmar_2_Tripwire
+
+[OrcX01_05]
+# Thunder Ridge: Drek'Thar, six Shimmerweed, the thunder lizards and their eggs (optional), back
+quests ThunderHerb ThunderLizards LizardEggs
+hero Rexxar
+party Rokhan Chen:ChenInParty
+goal QuestThunderLizardsProgress<2 : goto TripwireDrekTharQuests
+goal QuestThunderHerbProgress<8 : pickup shwd
+goal QuestThunderLizardsProgress<3 : goto TripwireMeetTheHumans
+goal QuestThunderLizardsProgress<4 : killtype n000 n001 n002
+goal QuestLizardEggsProgress<5 : pickup thle
+goal always : goto Zone_Orgrimmar_Tripwire

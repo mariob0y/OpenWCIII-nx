@@ -1,0 +1,11 @@
+{
+    "mainClass": "wsnx.warsmash.SwitchLauncher",
+    "reflective": [
+        "com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.**",
+        "com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds"
+    ],
+    "useStackTraces": true,
+    "useLineNumbers": true,
+    "useValueChecks": true,
+    "generateProjectFiles": false
+}
