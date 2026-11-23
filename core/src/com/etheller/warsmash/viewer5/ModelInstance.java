@@ -76,11 +76,41 @@ public abstract class ModelInstance extends Node {
 
 	public abstract void clearEmittedObjects();
 
+	/**
+	 * The frame (viewer.frame) in which WorldScene last took this instance's pose for its parallel
+	 * pass; instances attached to it wait until that pose is done.
+	 */
+	public int poseDeferredFrame = -1;
+
+	/**
+	 * Called instead of updateAnimations while a WorldScene collects poses for its parallel pass:
+	 * an instance that can take part does the serial part of its animation update, registers with
+	 * the scene and returns true. The default takes no part.
+	 */
+	protected boolean deferAnimations(final float dt, final Scene scene) {
+		return false;
+	}
+
+	/** The parallel part of a deferred animation update (a worker thread; own state only). */
+	public void computeDeferredPose(final PoseScratch heap) {
+	}
+
+	/** The game-thread part of a deferred animation update, after every pose of the pass. */
+	public void finishDeferredPose() {
+	}
+
+	/** Pose verification (PoseVerifier): the state computeDeferredPose writes, or null. */
+	public int[] poseState(final int[] state, final boolean restore) {
+		return null;
+	}
+
 	@Override
 	protected final void updateObject(final float dt, final Scene scene) {
 		if (this.updateFrame < this.model.viewer.frame) {
 			if (this.rendered && !this.paused) {
-				this.updateAnimations(dt);
+				if (!deferAnimations(dt, scene)) {
+					this.updateAnimations(dt);
+				}
 			}
 		}
 

@@ -8,16 +8,13 @@ import com.badlogic.gdx.math.Vector3;
 import com.etheller.warsmash.util.RenderMathUtils;
 
 public abstract class SkeletalNode extends GenericNode {
-	protected static final Vector3 cameraRayHeap = new Vector3();
-	protected static final Vector3 billboardAxisHeap = new Vector3();
-	protected static final Quaternion rotationHeap = new Quaternion();
-	protected static final Quaternion rotationHeap2 = new Quaternion();
-	protected static final Vector3 scalingHeap = new Vector3();
-	protected static final Vector3 blendLocationHeap = new Vector3();
-	protected static final Vector3 blendHeap = new Vector3();
-	protected static final Vector3 blendScaleHeap = new Vector3();
 
 	public UpdatableObject object;
+	/**
+	 * Whether the generic object's own visibility track was on at the last pose evaluation; the
+	 * object is updated after the pose (MdxComplexInstance.finishNodes), maybe evaluated on a worker.
+	 */
+	public boolean objectVisible;
 
 	public boolean billboarded;
 	public boolean billboardedX;
@@ -80,13 +77,21 @@ public abstract class SkeletalNode extends GenericNode {
 	}
 
 	public void recalculateTransformation(final Scene scene, final float blendTimeRatio) {
+		recalculateTransformation(scene, blendTimeRatio, PoseScratch.MAIN);
+	}
+
+	/**
+	 * As {@link #recalculateTransformation(Scene, float)}, with the calling thread's temporaries:
+	 * poses are evaluated on several threads at once (WorldScene's parallel pose pass).
+	 */
+	public void recalculateTransformation(final Scene scene, final float blendTimeRatio, final PoseScratch heap) {
 		final float inverseBlendRatio = 1 - blendTimeRatio;
 		final Quaternion computedRotation;
 		Vector3 computedScaling;
 		Vector3 computedLocation;
 
 		if (this.dontInheritScaling) {
-			computedScaling = scalingHeap;
+			computedScaling = heap.scaling;
 
 			final Vector3 parentInverseScale = this.parent.inverseWorldScale;
 			computedScaling.x = parentInverseScale.x * this.localScale.x;
@@ -99,9 +104,9 @@ public abstract class SkeletalNode extends GenericNode {
 		}
 		else {
 			if (!Float.isNaN(blendTimeRatio) && (blendTimeRatio > 0)) {
-				blendScaleHeap.set(this.localScale).scl(inverseBlendRatio)
-						.add(blendHeap.set(this.localBlendScale).scl(blendTimeRatio));
-				computedScaling = blendScaleHeap;
+				heap.blendScale.set(this.localScale).scl(inverseBlendRatio)
+						.add(heap.blend.set(this.localBlendScale).scl(blendTimeRatio));
+				computedScaling = heap.blendScale;
 			}
 			else {
 				computedScaling = this.localScale;
@@ -114,7 +119,7 @@ public abstract class SkeletalNode extends GenericNode {
 		}
 
 		if (this.billboarded) {
-			computedRotation = rotationHeap;
+			computedRotation = heap.rotationA;
 
 			computedRotation.set(this.parent.inverseWorldRotation);
 			if (scene != null) {
@@ -126,77 +131,77 @@ public abstract class SkeletalNode extends GenericNode {
 			computedRotation.mul(this.localRotation);
 		}
 		else {
-			computedRotation = rotationHeap.set(this.localRotation);
+			computedRotation = heap.rotationA.set(this.localRotation);
 			if (!Float.isNaN(blendTimeRatio) && (blendTimeRatio > 0)) {
 				computedRotation.slerp(this.localBlendRotation, blendTimeRatio);
 			}
 
 			if (this.billboardedX) {
 				if (computedScaling == this.localScale) {
-					computedScaling = scalingHeap.set(computedScaling);
+					computedScaling = heap.scaling.set(computedScaling);
 				}
 				// It took me many hours to deduce from playing around that this negative one
 				// multiplier should be here. I suggest a lot of testing before you remove it.
 				computedScaling.z *= -1;
 
 				final Camera camera = scene.camera;
-				cameraRayHeap.set(camera.billboardedVectors[6]);
+				heap.cameraRay.set(camera.billboardedVectors[6]);
 
-				rotationHeap2.set(computedRotation);
+				heap.rotationB.set(computedRotation);
 				// Inverse that local rotation
-				rotationHeap2.x = -rotationHeap2.x;
-				rotationHeap2.y = -rotationHeap2.y;
-				rotationHeap2.z = -rotationHeap2.z;
+				heap.rotationB.x = -heap.rotationB.x;
+				heap.rotationB.y = -heap.rotationB.y;
+				heap.rotationB.z = -heap.rotationB.z;
 
-				rotationHeap2.mul(this.parent.inverseWorldRotation);
+				heap.rotationB.mul(this.parent.inverseWorldRotation);
 
-				rotationHeap2.transform(cameraRayHeap);
+				heap.transform(heap.rotationB, heap.cameraRay);
 
-				billboardAxisHeap.set(1, 0, 0);
-				final float angle = (float) Math.atan2(cameraRayHeap.z, cameraRayHeap.y);
-				rotationHeap2.setFromAxisRad(billboardAxisHeap, angle);
+				heap.billboardAxis.set(1, 0, 0);
+				final float angle = (float) Math.atan2(heap.cameraRay.z, heap.cameraRay.y);
+				heap.rotationB.setFromAxisRad(heap.billboardAxis, angle);
 
-				computedRotation.mul(rotationHeap2);
+				computedRotation.mul(heap.rotationB);
 			}
 			else if (this.billboardedY) {
 				final Camera camera = scene.camera;
-				cameraRayHeap.set(camera.billboardedVectors[6]);
+				heap.cameraRay.set(camera.billboardedVectors[6]);
 
-				rotationHeap2.set(computedRotation);
+				heap.rotationB.set(computedRotation);
 				// Inverse that local rotation
-				rotationHeap2.x = -rotationHeap2.x;
-				rotationHeap2.y = -rotationHeap2.y;
-				rotationHeap2.z = -rotationHeap2.z;
+				heap.rotationB.x = -heap.rotationB.x;
+				heap.rotationB.y = -heap.rotationB.y;
+				heap.rotationB.z = -heap.rotationB.z;
 
-				rotationHeap2.mul(this.parent.inverseWorldRotation);
+				heap.rotationB.mul(this.parent.inverseWorldRotation);
 
-				rotationHeap2.transform(cameraRayHeap);
+				heap.transform(heap.rotationB, heap.cameraRay);
 
-				billboardAxisHeap.set(0, 1, 0);
-				final float angle = (float) Math.atan2(-cameraRayHeap.z, cameraRayHeap.x);
-				rotationHeap2.setFromAxisRad(billboardAxisHeap, angle);
+				heap.billboardAxis.set(0, 1, 0);
+				final float angle = (float) Math.atan2(-heap.cameraRay.z, heap.cameraRay.x);
+				heap.rotationB.setFromAxisRad(heap.billboardAxis, angle);
 
-				computedRotation.mul(rotationHeap2);
+				computedRotation.mul(heap.rotationB);
 			}
 			else if (this.billboardedZ) {
 				final Camera camera = scene.camera;
-				cameraRayHeap.set(camera.billboardedVectors[6]);
+				heap.cameraRay.set(camera.billboardedVectors[6]);
 
-				rotationHeap2.set(computedRotation);
+				heap.rotationB.set(computedRotation);
 				// Inverse that local rotation
-				rotationHeap2.x = -rotationHeap2.x;
-				rotationHeap2.y = -rotationHeap2.y;
-				rotationHeap2.z = -rotationHeap2.z;
+				heap.rotationB.x = -heap.rotationB.x;
+				heap.rotationB.y = -heap.rotationB.y;
+				heap.rotationB.z = -heap.rotationB.z;
 
-				rotationHeap2.mul(this.parent.inverseWorldRotation);
+				heap.rotationB.mul(this.parent.inverseWorldRotation);
 
-				rotationHeap2.transform(cameraRayHeap);
+				heap.transform(heap.rotationB, heap.cameraRay);
 
-				billboardAxisHeap.set(0, 0, 1);
-				final float angle = (float) Math.atan2(cameraRayHeap.y, cameraRayHeap.x);
-				rotationHeap2.setFromAxisRad(billboardAxisHeap, angle);
+				heap.billboardAxis.set(0, 0, 1);
+				final float angle = (float) Math.atan2(heap.cameraRay.y, heap.cameraRay.x);
+				heap.rotationB.setFromAxisRad(heap.billboardAxis, angle);
 
-				computedRotation.mul(rotationHeap2);
+				computedRotation.mul(heap.rotationB);
 			}
 			else if (this.dontInheritRotation) {
 				computedRotation.mulLeft(this.parent.inverseWorldRotation);
@@ -204,8 +209,8 @@ public abstract class SkeletalNode extends GenericNode {
 		}
 
 		if (!Float.isNaN(blendTimeRatio) && (blendTimeRatio > 0)) {
-			computedLocation = blendLocationHeap.set(this.localLocation).scl(inverseBlendRatio)
-					.add(blendHeap.set(this.localBlendLocation).scl(blendTimeRatio));
+			computedLocation = heap.blendLocation.set(this.localLocation).scl(inverseBlendRatio)
+					.add(heap.blend.set(this.localBlendLocation).scl(blendTimeRatio));
 		}
 		else {
 			computedLocation = this.localLocation;

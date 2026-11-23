@@ -2,6 +2,8 @@ package com.etheller.warsmash.viewer5;
 
 import java.util.ArrayList;
 
+import com.etheller.warsmash.util.ParallelJobs;
+
 /**
  * A scene.
  *
@@ -22,6 +24,26 @@ public class WorldScene extends Scene {
 
 	public Grid grid;
 	private final InstanceProcessor instanceProcessor = new InstanceProcessor();
+
+	/**
+	 * The parallel pose pass. While the instances are walked, each one that can (an
+	 * MdxComplexInstance attached to nothing) advances its animation clock and leaves its pose
+	 * here; the poses are then evaluated on ParallelJobs' workers and the game thread together,
+	 * and finished (node objects, attached children, bone textures) on the game thread in walk
+	 * order. Instances attached to a host whose pose is pending wait in postponedInstances and are
+	 * walked after it, so they read the host's new bones, as they did when the host updated first.
+	 * Turn off with PARALLEL_POSES = false or zero workers.
+	 */
+	public static boolean PARALLEL_POSES = true;
+	private final ArrayList<ModelInstance> deferredPoses = new ArrayList<>();
+	private final ArrayList<ModelInstance> postponedInstances = new ArrayList<>();
+	private boolean collectingPoses;
+	private final ParallelJobs.Job poseJob = new ParallelJobs.Job() {
+		@Override
+		public void run(final int index, final int worker) {
+			WorldScene.this.deferredPoses.get(index).computeDeferredPose(PoseScratch.forSlot(worker));
+		}
+	};
 
 	public WorldScene(final ModelViewer viewer, final SceneLightManager lightManager) {
 		super(viewer, lightManager);
@@ -58,15 +80,73 @@ public class WorldScene extends Scene {
 
 		// Update and collect all of the visible instances.
 		instanceProcessor.reset(dt, frame);
-		for (final GridCell cell : this.grid.cells) {
-			if (cell.isVisible(this.camera) || true) {
-				this.visibleCells += 1;
+		this.collectingPoses = PARALLEL_POSES && (ParallelJobs.workerCount() > 0);
+		try {
+			for (final GridCell cell : this.grid.cells) {
+				if (cell.isVisible(this.camera) || true) {
+					this.visibleCells += 1;
 
-				for (final ModelInstance instance : new ArrayList<>(cell.instances)) {
-					instanceProcessor.call(instance);
+					for (final ModelInstance instance : new ArrayList<>(cell.instances)) {
+						instanceProcessor.call(instance);
+					}
 				}
 			}
 		}
+		finally {
+			this.collectingPoses = false;
+		}
+
+		final ArrayList<ModelInstance> deferred = this.deferredPoses;
+		if (!deferred.isEmpty()) {
+			try {
+				PoseScratch.ensureSlots(ParallelJobs.threadSlots());
+				if (PoseVerifier.ENABLED) {
+					PoseVerifier.runVerified(deferred, this.poseJob);
+				}
+				else {
+					ParallelJobs.parallelFor(deferred.size(), this.poseJob);
+				}
+				for (int i = 0, l = deferred.size(); i < l; i++) {
+					deferred.get(i).finishDeferredPose();
+				}
+			}
+			finally {
+				deferred.clear();
+			}
+		}
+
+		final ArrayList<ModelInstance> postponed = this.postponedInstances;
+		if (!postponed.isEmpty()) {
+			try {
+				// Not collecting any more, so none of these is postponed again.
+				for (int i = 0; i < postponed.size(); i++) {
+					instanceProcessor.call(postponed.get(i));
+				}
+			}
+			finally {
+				postponed.clear();
+			}
+		}
+	}
+
+	/** Whether instances may leave their poses for the parallel pass right now (game thread). */
+	public boolean isCollectingPoses() {
+		return this.collectingPoses;
+	}
+
+	/** Takes an instance's pose for the parallel pass of this frame (game thread). */
+	public void deferPose(final ModelInstance instance) {
+		instance.poseDeferredFrame = this.viewer.frame;
+		this.deferredPoses.add(instance);
+	}
+
+	/** The instance at the top of a node's parent chain, if the top is an instance. */
+	private static ModelInstance hostOf(final GenericNode node) {
+		GenericNode root = node;
+		while (root.parent != null) {
+			root = root.parent;
+		}
+		return root instanceof ModelInstance ? (ModelInstance) root : null;
 	}
 
 	private final class InstanceProcessor implements ModelInstanceCallback {
@@ -82,6 +162,14 @@ public class WorldScene extends Scene {
 		@Override
 		public void call(final ModelInstance instance) {
 //			final ModelInstance instance = cell.instances.get(i);
+			if (WorldScene.this.collectingPoses && (instance.parent != null)) {
+				final ModelInstance host = hostOf(instance.parent);
+				if ((host != null) && (host.poseDeferredFrame == this.frame)) {
+					// its host's bones are not evaluated yet: walk it after the pass
+					WorldScene.this.postponedInstances.add(instance);
+					return;
+				}
+			}
 			if (instance.rendered && (instance.cullFrame < frame) && instance.isVisible(camera)) {
 				instance.cullFrame = frame;
 

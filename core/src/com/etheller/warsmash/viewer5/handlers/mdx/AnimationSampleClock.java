@@ -22,4 +22,17 @@ public final class AnimationSampleClock {
 		}
 		return false;
 	}
+
+	/** Pose verification (PoseVerifier): the clock's state as three raw ints. */
+	void capture(final int[] out, final int offset) {
+		out[offset] = Float.floatToRawIntBits(this.elapsed);
+		out[offset + 1] = this.lastSequence;
+		out[offset + 2] = this.lastQuality;
+	}
+
+	void restore(final int[] in, final int offset) {
+		this.elapsed = Float.intBitsToFloat(in[offset]);
+		this.lastSequence = in[offset + 1];
+		this.lastQuality = in[offset + 2];
+	}
 }

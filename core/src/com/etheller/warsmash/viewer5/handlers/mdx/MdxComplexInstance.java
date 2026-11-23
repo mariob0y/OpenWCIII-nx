@@ -19,6 +19,7 @@ import com.etheller.warsmash.viewer5.GenericNode;
 import com.etheller.warsmash.viewer5.ModelInstance;
 import com.etheller.warsmash.viewer5.Node;
 import com.etheller.warsmash.viewer5.PathSolver;
+import com.etheller.warsmash.viewer5.PoseScratch;
 import com.etheller.warsmash.viewer5.RenderBatch;
 import com.etheller.warsmash.viewer5.Scene;
 import com.etheller.warsmash.viewer5.SkeletalNode;
@@ -32,13 +33,6 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.OptionsSettingsStore;
 import com.hiveworkshop.rms.parsers.mdlx.MdlxGeoset;
 
 public class MdxComplexInstance extends ModelInstance {
-	private static final float[] visibilityHeap = new float[1];
-	private static final float[] translationHeap = new float[3];
-	private static final float[] rotationHeap = new float[4];
-	private static final float[] scaleHeap = new float[3];
-	private static final float[] colorHeap = new float[3];
-	private static final float[] alphaHeap = new float[1];
-	private static final long[] textureIdHeap = new long[1];
 	private static final Vector3 intersectionHeap = new Vector3();
 
 	public List<LightInstance> lights = new ArrayList<>();
@@ -76,6 +70,16 @@ public class MdxComplexInstance extends ModelInstance {
 	public Texture[] replaceableTextures_normal = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
 	public Texture[] replaceableTextures_orm = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
 	private final AnimationSampleClock poseClock = new AnimationSampleClock();
+	/**
+	 * Whether the last node update recalculated any node's transform. When none moved, the bone
+	 * texture (this instance's own) already holds these matrices and its upload is skipped: most
+	 * doodads and idle units sample an unchanged pose on most frames.
+	 */
+	private boolean poseChanged;
+	// The deferred pose (deferAnimations -> computeDeferredPose -> finishDeferredPose).
+	private float pendingPoseDt;
+	private boolean pendingPoseForced;
+	private int pendingPoseQuality;
 	private float animationSpeed = 1.0f;
 	private float blendTime;
 	private float blendTimeRemaining;
@@ -309,6 +313,20 @@ public class MdxComplexInstance extends ModelInstance {
 	 * children down the hierarchy.
 	 */
 	public void updateNodes(final float dt, final boolean forced) {
+		final int quality = this.scene instanceof WorldScene ? OptionsSettingsStore.get().getAnimationQuality() : 2;
+		computeNodes(dt, forced, quality, PoseScratch.MAIN);
+		finishNodes(dt);
+	}
+
+	/**
+	 * The pure part of {@link #updateNodes}: node visibility, local and world transforms. Touches
+	 * only this instance's own nodes and reads the model, the parent instance's transform and the
+	 * camera, so instances can be evaluated on several threads at once (each with its own
+	 * {@code heap}). The nodes' objects and attached children are updated afterwards, on the game
+	 * thread, by {@link #finishNodes} (no object update feeds back into a node's transform).
+	 */
+	private void computeNodes(final float dt, final boolean forced, final int quality, final PoseScratch heap) {
+		this.poseChanged = false;
 		if (!this.model.ok) {
 			return;
 		}
@@ -319,9 +337,12 @@ public class MdxComplexInstance extends ModelInstance {
 		final MdxModel model = (MdxModel) this.model;
 		final List<GenericObject> sortedGenericObjects = model.sortedGenericObjects;
 		final Scene scene = this.scene;
+		final float[] visibilityHeap = heap.visibility;
+		final float[] translationHeap = heap.translation;
+		final float[] rotationHeap = heap.rotation;
+		final float[] scaleHeap = heap.scale;
+		boolean anyNodeRecalculated = false;
 
-		final int quality = scene instanceof WorldScene
-				? OptionsSettingsStore.get().getAnimationQuality() : 2;
 		final boolean samplePose = this.poseClock.advance(dt, sequence, quality, forced);
 
 		// Update the nodes
@@ -336,6 +357,7 @@ public class MdxComplexInstance extends ModelInstance {
 			final boolean nodeVisible = forced || (parent.visible && objectVisible);
 
 			node.visible = nodeVisible;
+			node.objectVisible = objectVisible;
 
 			// Every node only needs to be updated if this is a forced update, or if both
 			// the parent node and the generic object corresponding to this node are
@@ -399,9 +421,28 @@ public class MdxComplexInstance extends ModelInstance {
 				// If this is a forced update, or this node's local data was updated, or the
 				// parent node was updated, do a full world update.
 				if (wasReallyDirty) {
-					node.recalculateTransformation(scene, this.blendTimeRemaining / this.blendTime);
+					node.recalculateTransformation(scene, this.blendTimeRemaining / this.blendTime, heap);
+					anyNodeRecalculated = true;
 				}
+			}
+		}
+		this.poseChanged = anyNodeRecalculated;
+	}
 
+	/**
+	 * The rest of {@link #updateNodes}, in the same node order: each visible node's object
+	 * (attachments, emitters, event objects) and its non-skeletal children, which update their
+	 * own children, and so on. Game thread only (emitters spawn into the scene, events play sounds).
+	 */
+	private void finishNodes(final float dt) {
+		if (!this.model.ok) {
+			return;
+		}
+		final SkeletalNode[] sortedNodes = this.sortedNodes;
+		final Scene scene = this.scene;
+		for (int i = 0, l = sortedNodes.length; i < l; i++) {
+			final SkeletalNode node = sortedNodes[i];
+			if (node.visible) {
 				// If there is an instance object associated with this node, and the node is
 				// visible (which might not be the case for a forced update!), update the
 				// object.
@@ -409,7 +450,7 @@ public class MdxComplexInstance extends ModelInstance {
 				final UpdatableObject object = node.object;
 
 				if (object != null) {
-					object.update(dt, objectVisible);
+					object.update(dt, node.objectVisible);
 				}
 
 				// Update all of the node's non-skeletal children, which will update their
@@ -423,6 +464,17 @@ public class MdxComplexInstance extends ModelInstance {
 	 * Update the batch data.
 	 */
 	public void updateBatches(final boolean forced) {
+		updateBatches(forced, PoseScratch.MAIN);
+	}
+
+	/** As {@link #updateBatches(boolean)}, with the calling thread's temporaries. */
+	private void updateBatches(final boolean forced, final PoseScratch heap) {
+		final float[] colorHeap = heap.color;
+		final float[] alphaHeap = heap.alpha;
+		final long[] textureIdHeap = heap.textureId;
+		final float[] translationHeap = heap.translation;
+		final float[] rotationHeap = heap.rotation;
+		final float[] scaleHeap = heap.scale;
 		final int sequence = this.sequence;
 		final int frame = this.frame;
 		final int counter = this.counter;
@@ -585,6 +637,71 @@ public class MdxComplexInstance extends ModelInstance {
 
 	@Override
 	public void updateAnimations(final float dt) {
+		if (advanceAnimation(dt)) {
+			final boolean forced = this.forced;
+
+			// Update the nodes
+			updateNodes(dt, forced);
+
+			if (this.poseChanged) {
+				updateBoneTexture();
+			}
+
+			// Update the batches
+			updateBatches(forced);
+		}
+
+		this.forced = false;
+	}
+
+	/**
+	 * WorldScene's parallel pose pass: advance the animation clock now (it can hide the instance,
+	 * restart event emitters, change the sequence), and leave the pose to
+	 * {@link #computeDeferredPose} on a worker and {@link #finishDeferredPose} on the game thread.
+	 * Only for an instance attached to nothing (its pose reads no other instance's bones) and
+	 * with no lights (updateLights reads the nodes right after this).
+	 */
+	@Override
+	protected boolean deferAnimations(final float dt, final Scene scene) {
+		if (!(scene instanceof WorldScene) || (this.parent != null) || !this.lights.isEmpty()) {
+			return false;
+		}
+		final WorldScene worldScene = (WorldScene) scene;
+		if (!worldScene.isCollectingPoses()) {
+			return false;
+		}
+		if (advanceAnimation(dt)) {
+			this.pendingPoseDt = dt;
+			this.pendingPoseForced = this.forced;
+			this.pendingPoseQuality = OptionsSettingsStore.get().getAnimationQuality();
+			worldScene.deferPose(this);
+		}
+		this.forced = false;
+		return true;
+	}
+
+	/** Worker side of the deferred pose: nodes and batch data, with that thread's temporaries. */
+	@Override
+	public void computeDeferredPose(final PoseScratch heap) {
+		computeNodes(this.pendingPoseDt, this.pendingPoseForced, this.pendingPoseQuality, heap);
+		updateBatches(this.pendingPoseForced, heap);
+	}
+
+	/** Game-thread side of the deferred pose: node objects, attached children, the bone texture. */
+	@Override
+	public void finishDeferredPose() {
+		finishNodes(this.pendingPoseDt);
+		if (this.poseChanged) {
+			updateBoneTexture();
+		}
+	}
+
+	/**
+	 * Advances the frame, the global-sequence counter and the blend; handles the sequence's end.
+	 * Returns whether the pose has to be evaluated this frame (always with a sequence; without one
+	 * only when forced).
+	 */
+	private boolean advanceAnimation(final float dt) {
 		final MdxModel model = (MdxModel) this.model;
 		final int sequenceId = this.sequence;
 
@@ -644,37 +761,7 @@ public class MdxComplexInstance extends ModelInstance {
 			}
 		}
 
-		final boolean forced = this.forced;
-
-		if (sequenceId == -1) {
-			if (forced) {
-				// Update the nodes
-				updateNodes(dt, forced);
-
-				updateBoneTexture();
-
-				// Update the batches
-				updateBatches(forced);
-			}
-		}
-		else {
-			// let variants = model.variants;
-
-			// if (forced || variants.nodes[sequenceId]) {
-			// Update the nodes
-			updateNodes(dt, forced);
-
-			updateBoneTexture();
-			// }
-
-			// if (forced || variants.batches[sequenceId]) {
-			// Update the batches
-			updateBatches(forced);
-			// }
-		}
-
-		this.forced = false;
-
+		return (sequenceId != -1) || this.forced;
 	}
 
 	@Override
@@ -824,6 +911,135 @@ public class MdxComplexInstance extends ModelInstance {
 	/**
 	 * Get an attachment node.
 	 */
+	/**
+	 * Pose verification (PoseVerifier, PC only): everything {@link #computeDeferredPose} writes,
+	 * as raw bits, so a pose evaluated on a worker can be compared with the same pose evaluated
+	 * again on the game thread. {@code restore} false copies the state into a new array; true puts
+	 * {@code state} back and returns it.
+	 */
+	@Override
+	public int[] poseState(final int[] state, final boolean restore) {
+		int size = 4;
+		final SkeletalNode[] nodes = this.sortedNodes;
+		if (nodes != null) {
+			size += nodes.length * 65;
+		}
+		size += lengthOf(this.geosetColors) + lengthOf(this.uvAnims);
+		size += (this.layerAlphas == null ? 0 : this.layerAlphas.length)
+				+ (this.layerTextures == null ? 0 : this.layerTextures.length);
+		final int[] b = restore ? state : new int[size];
+		if (restore) {
+			this.poseChanged = b[0] != 0;
+			this.poseClock.restore(b, 1);
+		}
+		else {
+			b[0] = this.poseChanged ? 1 : 0;
+			this.poseClock.capture(b, 1);
+		}
+		int o = 4;
+		if (nodes != null) {
+			for (final SkeletalNode n : nodes) {
+				if (restore) {
+					n.visible = b[o] != 0;
+					n.objectVisible = b[o + 1] != 0;
+					n.wasDirty = b[o + 2] != 0;
+				}
+				else {
+					b[o] = n.visible ? 1 : 0;
+					b[o + 1] = n.objectVisible ? 1 : 0;
+					b[o + 2] = n.wasDirty ? 1 : 0;
+				}
+				o += 3;
+				o = vec(b, o, restore, n.localLocation);
+				o = quat(b, o, restore, n.localRotation);
+				o = vec(b, o, restore, n.localScale);
+				o = vec(b, o, restore, n.worldScale);
+				o = quat(b, o, restore, n.worldRotation);
+				o = quat(b, o, restore, n.inverseWorldRotation);
+				o = vec(b, o, restore, n.inverseWorldScale);
+				o = vec(b, o, restore, n.worldLocation);
+				o = vec(b, o, restore, n.inverseWorldLocation);
+				o = floats(b, o, restore, n.localMatrix.val);
+				o = floats(b, o, restore, n.worldMatrix.val);
+			}
+		}
+		if (this.geosetColors != null) {
+			for (final float[] c : this.geosetColors) {
+				o = floats(b, o, restore, c);
+			}
+		}
+		if (this.uvAnims != null) {
+			for (final float[] u : this.uvAnims) {
+				o = floats(b, o, restore, u);
+			}
+		}
+		if (this.layerAlphas != null) {
+			o = floats(b, o, restore, this.layerAlphas);
+		}
+		if (this.layerTextures != null) {
+			for (int i = 0; i < this.layerTextures.length; i++, o++) {
+				if (restore) {
+					this.layerTextures[i] = b[o];
+				}
+				else {
+					b[o] = this.layerTextures[i];
+				}
+			}
+		}
+		return b;
+	}
+
+	private static int lengthOf(final float[][] arrays) {
+		int n = 0;
+		if (arrays != null) {
+			for (final float[] a : arrays) {
+				n += a.length;
+			}
+		}
+		return n;
+	}
+
+	private static float f(final int[] b, final int o) {
+		return Float.intBitsToFloat(b[o]);
+	}
+
+	private static int vec(final int[] b, final int o, final boolean restore, final Vector3 v) {
+		if (restore) {
+			v.set(f(b, o), f(b, o + 1), f(b, o + 2));
+		}
+		else {
+			b[o] = Float.floatToRawIntBits(v.x);
+			b[o + 1] = Float.floatToRawIntBits(v.y);
+			b[o + 2] = Float.floatToRawIntBits(v.z);
+		}
+		return o + 3;
+	}
+
+	private static int quat(final int[] b, final int o, final boolean restore, final Quaternion q) {
+		if (restore) {
+			q.set(f(b, o), f(b, o + 1), f(b, o + 2), f(b, o + 3));
+		}
+		else {
+			b[o] = Float.floatToRawIntBits(q.x);
+			b[o + 1] = Float.floatToRawIntBits(q.y);
+			b[o + 2] = Float.floatToRawIntBits(q.z);
+			b[o + 3] = Float.floatToRawIntBits(q.w);
+		}
+		return o + 4;
+	}
+
+	private static int floats(final int[] b, final int o, final boolean restore, final float[] a) {
+		for (int i = 0; i < a.length; i++) {
+			if (restore) {
+				a[i] = f(b, o + i);
+			}
+			else {
+				b[o + i] = Float.floatToRawIntBits(a[i]);
+			}
+		}
+		return o + a.length;
+	}
+
 	public MdxNode getAttachment(final int id) {
 		final MdxModel model = (MdxModel) this.model;
 		final Attachment attachment = model.attachments.get(id);
@@ -913,8 +1129,8 @@ public class MdxComplexInstance extends ModelInstance {
 		ray.getEndPoint(intersection, 99999);
 		for (final Geoset geoset : mdxModel.geosets) {
 			if (!geoset.unselectable) {
-				geoset.getAlpha(alphaHeap, this.sequence, this.frame, this.counter);
-				if (alphaHeap[0] > 0) {
+				geoset.getAlpha(PoseScratch.MAIN.alpha, this.sequence, this.frame, this.counter);
+				if (PoseScratch.MAIN.alpha[0] > 0) {
 					final MdlxGeoset mdlxGeoset = geoset.mdlxGeoset;
 					if (CollisionShape.intersectRayTriangles(ray, this, mdlxGeoset.getVertices(), mdlxGeoset.getFaces(),
 							3, intersectionHeap)) {
@@ -951,8 +1167,8 @@ public class MdxComplexInstance extends ModelInstance {
 		if (collisionShapes.isEmpty() || alwaysUseMesh) {
 			for (final Geoset geoset : mdxModel.geosets) {
 				if (!geoset.unselectable) {
-					geoset.getAlpha(alphaHeap, this.sequence, this.frame, this.counter);
-					if (alphaHeap[0] > 0) {
+					geoset.getAlpha(PoseScratch.MAIN.alpha, this.sequence, this.frame, this.counter);
+					if (PoseScratch.MAIN.alpha[0] > 0) {
 						final MdlxGeoset mdlxGeoset = geoset.mdlxGeoset;
 						if (CollisionShape.intersectRayTriangles(ray, this, mdlxGeoset.getVertices(),
 								mdlxGeoset.getFaces(), 3, intersection)) {

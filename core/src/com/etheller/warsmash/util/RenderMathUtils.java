@@ -405,8 +405,12 @@ public enum RenderMathUtils {
 	public static final float EPSILON = 0.000001f;
 
 	public static float[] slerp(final float[] out, final float[] a, final float[] b, final float t) {
-		final float ax = a[0], ay = a[1], az = a[2], aw = a[3];
-		float bx = b[0], by = b[1], bz = b[2], bw = b[3];
+		return slerp(out, a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3], t);
+	}
+
+	/** slerp with the quaternions given as components; reads them all before writing out. */
+	private static float[] slerp(final float[] out, final float ax, final float ay, final float az, final float aw,
+			float bx, float by, float bz, float bw, final float t) {
 
 		float omega, cosom, sinom, scale0, scale1;
 
@@ -443,15 +447,17 @@ public enum RenderMathUtils {
 		return out;
 	}
 
-	private static final float[] sqlerpHeap1 = new float[4];
-	private static final float[] sqlerpHeap2 = new float[4];
-
+	/**
+	 * Spherical quadrangle interpolation. Thread-safe: the two intermediate slerps live in out and in
+	 * locals (they were two static arrays; poses are now evaluated on several threads). out must not
+	 * be one of a, b, c, d.
+	 */
 	public static float[] sqlerp(final float[] out, final float[] a, final float[] b, final float[] c, final float[] d,
 			final float t) {
-		slerp(sqlerpHeap1, a, d, t);
-		slerp(sqlerpHeap2, b, c, t);
-		slerp(out, sqlerpHeap1, sqlerpHeap2, 2 * t * (1 - t));
-		return out;
+		slerp(out, b, c, t);
+		final float bcx = out[0], bcy = out[1], bcz = out[2], bcw = out[3];
+		slerp(out, a, d, t);
+		return slerp(out, out[0], out[1], out[2], out[3], bcx, bcy, bcz, bcw, 2 * t * (1 - t));
 	}
 
 	static Vector3 best = new Vector3();
