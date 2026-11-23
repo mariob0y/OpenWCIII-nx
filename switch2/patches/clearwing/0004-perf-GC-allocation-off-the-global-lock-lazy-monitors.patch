@@ -1,0 +1,384 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:39 +0200
+Subject: [PATCH 04/32] perf: GC - allocation off the global lock, lazy
+ monitors, collector priority
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp       | 90 +++++++++++++------
+ runtime/res/clearwing/src/Clearwing.h         | 18 ++++
+ runtime/res/clearwing/src/Object.cpp          |  8 +-
+ runtime/res/clearwing/src/PlatformThreads.cpp | 13 +++
+ runtime/res/clearwing/src/Thread.cpp          |  4 +-
+ .../bytecode/JumpingInstruction.java          | 12 +--
+ 6 files changed, 108 insertions(+), 37 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 1a4e155..397c061 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -75,6 +75,9 @@ bool volatile suspendVM;
+ 
+ ClearwingGcStats clearwingGcStats{}; // warsmash-nx
+ 
++void M_java_lang_Object_finalize(jcontext ctx, jobject self); // warsmash-nx: Object.cpp (empty)
++void array_finalize(jcontext ctx, jobject self); // warsmash-nx: Array.cpp (frees the data, never throws)
++
+ static void collectionThreadFunc(jcontext ctx);
+ 
+ static void markPrimitive(jobject object, jint mark, jint depth) {}
+@@ -154,7 +157,7 @@ void shutdownVM(jcontext ctx) {
+             done = false;
+             threadContext->lock.lock();
+             if (threadContext->blockedBy)
+-                ((jmonitor) ((jobject) threadContext->blockedBy)->monitor)->condition.notify_all();
++                getMonitor((jobject) threadContext->blockedBy)->condition.notify_all(); // warsmash-nx
+             threadContext->lock.unlock();
+         }
+         if (done)
+@@ -398,6 +401,10 @@ jobject gcAllocObject(jcontext ctx, jclass clazz, int mark) {
+         rootObjects = new ankerl::unordered_dense::set<jobject>;
+     }
+ 
++    // warsmash-nx: an allocation is a safepoint. Without this a thread allocating while another
++    // collects returned from runGC (already running) and went on allocating, never stopping.
++    SAFEPOINT();
++
+     if (heapUsage > GC_HEAP_THRESHOLD || heapUsage - lastCollectionHeapUsage > GC_MEM_THRESHOLD || allocationsSinceCollection > GC_OBJECT_THRESHOLD)
+         runGC(ctx);
+ 
+@@ -405,22 +412,25 @@ jobject gcAllocObject(jcontext ctx, jclass clazz, int mark) {
+         constructAndThrow<&class_java_lang_OutOfMemoryError, init_java_lang_OutOfMemoryError>(ctx);
+ 
+     auto object = (jobject) new char[clazz->size]{};
+-    heapUsage += clazz->size + (int64_t) sizeof(ObjectMonitor);
++    heapUsage += clazz->size; // warsmash-nx: no monitor with the object any more
+     allocationsSinceCollection++;
+ 
+     *object = {
+         .clazz = (intptr_t) clazz,
+         .gcMark = mark,
+         .vtable = (intptr_t) clazz->classVtable,
+-        .monitor = (intptr_t) new ObjectMonitor,
++        .monitor = 0, // warsmash-nx: getMonitor makes it on first use
+     };
+ 
+-    objectsLock.lock();
++    // warsmash-nx: the thread's own list, no lock; runGC moves it into `objects` with every thread
++    // stopped (an allocation is never interrupted by a safepoint, so the list is never half-written).
+     if (mark == GC_MARK_START)
+-        objects->emplace(object);
+-    else
++        ctx->youngObjects.push_back(object);
++    else {
++        objectsLock.lock();
+         rootObjects->emplace(object);
+-    objectsLock.unlock();
++        objectsLock.unlock();
++    }
+ 
+     return object;
+ }
+@@ -514,6 +524,13 @@ jcontext createContext() {
+ void destroyContext(jcontext context) {
+     destroyJni(context->jniEnv);
+     acquireCriticalLock();
++    if (!context->youngObjects.empty()) { // warsmash-nx: its last objects join the set (runGC holds criticalLock)
++        objectsLock.lock();
++        for (auto object : context->youngObjects)
++            objects->emplace(object);
++        objectsLock.unlock();
++        context->youngObjects.clear();
++    }
+     std::erase(threadContexts, context);
+     releaseCriticalLock();
+     delete context;
+@@ -524,6 +541,7 @@ static void collectionThreadFunc(jcontext ctx) {
+ 
+     attachThread(ctx);
+     clearwingPlaceThread(); // warsmash-nx: run beside the main thread, not starved behind it
++    clearwingRaiseThreadPriority(); // warsmash-nx: and never behind a Java thread on its core
+ 
+     try {
+         FrameInfo frameInfo{ "GC:collect", 0 };
+@@ -543,9 +561,14 @@ static void collectionThreadFunc(jcontext ctx) {
+                 clearwingGcStats.collectorPhase = 1;
+                 int64_t done = 0;
+                 for (jobject obj : collected) {
+-                    tryCatch(frameRef, [&]{
+-                        ((finalizer_ptr)((void **)obj->vtable)[VTABLE_java_lang_Object_finalize])(ctx, obj);
+-                    }, &class_java_lang_Throwable, [](jobject ignored){});
++                    // warsmash-nx: the empty Object.finalize is not called; arrays' directly
++                    auto finalizer = (finalizer_ptr)((void **)obj->vtable)[VTABLE_java_lang_Object_finalize];
++                    if (finalizer == array_finalize)
++                        array_finalize(ctx, obj);
++                    else if (finalizer != M_java_lang_Object_finalize)
++                        tryCatch(frameRef, [&]{
++                            finalizer(ctx, obj);
++                        }, &class_java_lang_Throwable, [](jobject ignored){});
+                     if ((++done & 4095) == 0) {
+                         clearwingGcStats.collectorDone = done;
+                         SAFEPOINT();
+@@ -555,18 +578,18 @@ static void collectionThreadFunc(jcontext ctx) {
+                 clearwingGcStats.collectorDone = 0;
+                 clearwingGcStats.collectorPhase = 2;
+                 done = 0;
++                int64_t freedBytes = 0;
+                 for (jobject obj : collected) {
+                     if ((++done & 4095) == 0) {
+                         clearwingGcStats.collectorDone = done;
++                        heapUsage -= freedBytes; // warsmash-nx: one atomic update per 4096 objects
++                        freedBytes = 0;
+                         SAFEPOINT();
+                     }
+-                    objectsLock.lock();
+-                    objects->erase(obj);
+-                    objectsLock.unlock();
++                    // warsmash-nx: already out of `objects` (runGC's sweep), so no lock here
++                    freedBytes += ((jclass) obj->clazz)->size;
+ 
+-                    heapUsage -= ((jclass) obj->clazz)->size + (int64_t) sizeof(ObjectMonitor);
+-
+-                    delete (ObjectMonitor *) obj->monitor;
++                    delete (ObjectMonitor *) obj->monitor; // warsmash-nx: null unless it was used
+ 
+                     memset(obj, 0, sizeof(java_lang_Object)); // Erase collected objects to make memory bugs easier to catch
+                     obj->gcMark = GC_MARK_COLLECTED; // Set collected flag again
+@@ -574,6 +597,7 @@ static void collectionThreadFunc(jcontext ctx) {
+                     delete[] (char *) obj;
+                 }
+ 
++                heapUsage -= freedBytes; // warsmash-nx
+                 clearwingGcStats.freedTotal += (int64_t) collected.size(); // warsmash-nx
+                 clearwingGcStats.collectorPhase = 0;
+                 collected.clear();
+@@ -637,6 +661,16 @@ void runGC(jcontext ctx) {
+ 
+     acquireCriticalLock();
+ 
++    // warsmash-nx: every thread is stopped: their new objects join the set before marking (the
++    // stack scan asks the set whether a slot holds an object).
++    objectsLock.lock();
++    for (auto threadContext : threadContexts) {
++        for (auto object : threadContext->youngObjects)
++            objects->emplace(object);
++        threadContext->youngObjects.clear();
++    }
++    objectsLock.unlock();
++
+     static jint mark;
+     if (++mark > GC_MARK_END)
+         mark = GC_MARK_START + 1;
+@@ -700,19 +734,23 @@ void runGC(jcontext ctx) {
+     clearwingGcStats.phase = 3; // warsmash-nx
+     const size_t queuedBefore = collectedObjects.size();
+ 
+-    // Collect unreachable objects
+-    for (jobject obj : *objects) {
++    // Collect unreachable objects (warsmash-nx: and remove them from the set here, with every
++    // thread stopped, instead of one locked erase per object in the collector thread)
++    objectsLock.lock();
++    std::erase_if(*objects, [&](jobject obj) {
+         if ((obj->gcMark > GC_MARK_COLLECTED && obj->gcMark < GC_MARK_START) || obj->gcMark == mark)
+-            continue;
+-        if (obj->gcMark == GC_MARK_COLLECTED) // warsmash-nx: already queued for the collector
+-            continue;
++            return false;
++        if (obj->gcMark == GC_MARK_COLLECTED) // warsmash-nx: already queued (cannot happen now)
++            return true;
+         obj->gcMark = GC_MARK_COLLECTED;
+         collectedObjects.emplace_back(obj);
+ 
+         // Update weak references
+         for (auto[it, end] = weakReferences.equal_range(obj); it != end; ++it)
+             it->second->F_ptr = 0; // Todo: Always updating weak references here rather than at finalization may be problematic in some cases for JNI
+-    }
++        return true;
++    });
++    objectsLock.unlock();
+ 
+ #if false // Todo: Use macro
+     std::map<jclass, int> usage;
+@@ -965,7 +1003,7 @@ NORETURN void throwRuntimeException(jcontext ctx, const char *message) {
+ /// Lock on a monitor. Throws exceptions.
+ void monitorEnter(jcontext ctx, jobject object) {
+     NULL_CHECK(object);
+-    auto monitor = (jmonitor) object->monitor;
++    auto monitor = getMonitor(object); // warsmash-nx: made on first use
+ 
+     // Race condition here is fine, fall back to slower/blocking acquire
+     if (monitor->lock.try_lock()) {
+@@ -991,8 +1029,8 @@ void monitorEnter(jcontext ctx, jobject object) {
+ /// Unlock on a monitor. Throws exceptions.
+ void monitorExit(jcontext ctx, jobject object) {
+     NULL_CHECK(object);
+-    auto monitor = (jmonitor) object->monitor;
+     monitorOwnerCheck(ctx, object);
++    auto monitor = getMonitor(object); // warsmash-nx: exists, the owner check passed
+     if (--monitor->depth == 0)
+         monitor->owner = nullptr;
+     monitor->lock.unlock();
+@@ -1000,8 +1038,8 @@ void monitorExit(jcontext ctx, jobject object) {
+ 
+ /// Checks if the current thread owns a given monitor. Throws exceptions.
+ void monitorOwnerCheck(jcontext ctx, jobject object) {
+-    auto monitor = (jmonitor) object->monitor;
+-    if (!monitor->owner or monitor->owner != ctx)
++    auto monitor = (jmonitor) object->monitor; // warsmash-nx: none yet = not owned
++    if (!monitor or !monitor->owner or monitor->owner != ctx)
+         constructAndThrow<&class_java_lang_IllegalMonitorStateException, init_java_lang_IllegalMonitorStateException>(ctx);
+ }
+ 
+diff --git a/runtime/res/clearwing/src/Clearwing.h b/runtime/res/clearwing/src/Clearwing.h
+index 4d6f86a..4078872 100644
+--- a/runtime/res/clearwing/src/Clearwing.h
++++ b/runtime/res/clearwing/src/Clearwing.h
+@@ -291,6 +291,7 @@ NORETURN void throwIndexOutOfBounds(jcontext ctx);
+ NORETURN void throwArrayIndexOutOfBounds(jcontext ctx); // warsmash-nx
+ NORETURN void throwNegativeArraySize(jcontext ctx); // warsmash-nx
+ void clearwingPlaceThread(void); // warsmash-nx: PlatformThreads.cpp
++void clearwingRaiseThreadPriority(void); // warsmash-nx: PlatformThreads.cpp, for the collector
+ 
+ // warsmash-nx: what the collector is doing, for a watchdog on another thread. Plain aligned
+ // 64/32-bit stores and loads (atomic on AArch64); a reader may see fields of two moments.
+@@ -917,6 +918,22 @@ struct ObjectMonitor {
+     std::mutex conditionMutex;
+ };
+ 
++// warsmash-nx: an object's monitor is made on first use (synchronized, wait, notify), not with the
++// object: almost no object is ever locked, and a monitor was an allocation and a free per object.
++// Two threads racing here agree through the compare-and-swap; the loser frees its copy.
++inline jmonitor getMonitor(jobject object) {
++    auto existing = (jmonitor) __atomic_load_n(&object->monitor, __ATOMIC_ACQUIRE);
++    if (existing)
++        return existing;
++    auto created = new ObjectMonitor;
++    jref expected = 0;
++    if (__atomic_compare_exchange_n(&object->monitor, &expected, (jref) created, false, __ATOMIC_ACQ_REL,
++                                    __ATOMIC_ACQUIRE))
++        return created;
++    delete created;
++    return (jmonitor) expected;
++}
++
+ struct ExceptionFrame {
+     jclass type;
+     jmp_buf landingPad;
+@@ -945,6 +962,7 @@ struct Context {
+     std::atomic<jobject> blockedBy; // Object monitor blocking the current thread, or null
+     bool dead{};
+     std::vector<jobject> globalRefs{}; // Global JNI references
++    std::vector<jobject> youngObjects{}; // warsmash-nx: allocated since the last collection, not yet in `objects`
+ };
+ 
+ /// Checks if an object is null. Throws exceptions.
+diff --git a/runtime/res/clearwing/src/Object.cpp b/runtime/res/clearwing/src/Object.cpp
+index 0f8cd26..602f9b4 100644
+--- a/runtime/res/clearwing/src/Object.cpp
++++ b/runtime/res/clearwing/src/Object.cpp
+@@ -50,14 +50,14 @@ void M_java_lang_Object_finalize(jcontext ctx, jobject self) {
+ 
+ void M_java_lang_Object_notify(jcontext ctx, jobject self) {
+     monitorOwnerCheck(ctx, self);
+-    auto monitor = (jmonitor) self->monitor;
++    auto monitor = getMonitor(self);
+     { std::lock_guard<std::mutex> lock(monitor->conditionMutex); } // warsmash-nx: see wait()
+     monitor->condition.notify_one();
+ }
+ 
+ void M_java_lang_Object_notifyAll(jcontext ctx, jobject self) {
+     monitorOwnerCheck(ctx, self);
+-    auto monitor = (jmonitor) self->monitor;
++    auto monitor = getMonitor(self);
+     { std::lock_guard<std::mutex> lock(monitor->conditionMutex); } // warsmash-nx: see wait()
+     monitor->condition.notify_all();
+ }
+@@ -71,7 +71,7 @@ void M_java_lang_Object_wait(jcontext ctx, jobject self) {
+ 
+     // warsmash-nx: the condition mutex is taken before the monitor is released, so a notify (which
+     // needs the monitor, then this mutex) cannot fall between the two and be lost.
+-    auto monitor = (jmonitor) self->monitor;
++    auto monitor = getMonitor(self);
+     {
+         std::unique_lock<std::mutex> lock(monitor->conditionMutex);
+         monitorExit(ctx, self);
+@@ -99,7 +99,7 @@ void M_java_lang_Object_wait_long_int(jcontext ctx, jobject self, jlong millis,
+     ctx->blockedBy = self;
+     ctx->lock.unlock();
+ 
+-    auto monitor = (jmonitor) self->monitor; // warsmash-nx: as in wait()
++    auto monitor = getMonitor(self); // warsmash-nx: as in wait()
+     {
+         std::unique_lock<std::mutex> lock(monitor->conditionMutex);
+         monitorExit(ctx, self);
+diff --git a/runtime/res/clearwing/src/PlatformThreads.cpp b/runtime/res/clearwing/src/PlatformThreads.cpp
+index 00a1b05..3fa383e 100644
+--- a/runtime/res/clearwing/src/PlatformThreads.cpp
++++ b/runtime/res/clearwing/src/PlatformThreads.cpp
+@@ -44,3 +44,16 @@ extern "C" void clearwingPlaceThread(void) {
+     }
+ #endif
+ }
++
++// warsmash-nx (round 4): one priority step above the main thread, for the collector thread. It
++// sleeps 1 ms a loop, and a collection waits for it to reach a safepoint, so it must never sit
++// behind a busy Java thread on its core (probe B: a 1.18 s collection stop, 2026-11-20).
++extern "C" void clearwingRaiseThreadPriority(void) {
++#if defined(__SWITCH__)
++    s32 priority = 0x2C;
++    if (R_FAILED(svcGetThreadPriority(&priority, envGetMainThreadHandle())))
++        priority = 0x2C;
++    if (priority > 0x18)
++        (void)svcSetThreadPriority(CUR_THREAD_HANDLE, (u32)(priority - 1));
++#endif
++}
+diff --git a/runtime/res/clearwing/src/Thread.cpp b/runtime/res/clearwing/src/Thread.cpp
+index 4813f9e..2f65c0a 100644
+--- a/runtime/res/clearwing/src/Thread.cpp
++++ b/runtime/res/clearwing/src/Thread.cpp
+@@ -48,7 +48,7 @@ void threadEntrypoint(jcontext ctx, jthread thread) {
+     if (!vmExiting) {
+         monitorEnter(ctx, (jobject) thread);
+         thread->F_alive = false;
+-        auto monitor = (jmonitor) ((jobject) thread)->monitor;
++        auto monitor = getMonitor((jobject) thread); // warsmash-nx
+         { std::lock_guard<std::mutex> lock(monitor->conditionMutex); }
+         monitor->condition.notify_all();
+         monitorExit(ctx, (jobject) thread);
+@@ -95,7 +95,7 @@ void M_java_lang_Thread_interrupt(jcontext ctx, jobject self) {
+     threadCtx->lock.lock();
+     threadCtx->thread->F_interrupted = true;
+     if (threadCtx->blockedBy)
+-        ((jmonitor) ((jobject) threadCtx->blockedBy)->monitor)->condition.notify_all();
++        getMonitor((jobject) threadCtx->blockedBy)->condition.notify_all(); // warsmash-nx
+     threadCtx->lock.unlock();
+ }
+ 
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/bytecode/JumpingInstruction.java b/transpiler/src/com/thelogicmaster/clearwing/bytecode/JumpingInstruction.java
+index 87e69fa..7717c31 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/bytecode/JumpingInstruction.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/bytecode/JumpingInstruction.java
+@@ -12,16 +12,18 @@ public interface JumpingInstruction {
+     
+     List<Integer> getJumpLabels();
+ 
++    // warsmash-nx: every jump is a safepoint. Clearwing had them only at method entry and exit, so a
++    // loop without calls kept a collection (and so every other thread) waiting until it ended.
++    // Values live across a jump are in the frame the collector scans, never only in C++
++    // temporaries, which are scoped to the statement block the jump leaves.
+     default void appendGoto(StringBuilder builder, int bypass, int label, int originalLabel, int pops) {
+-        if (bypass != -1 || pops > 0)
+-            builder.append("{ ");
++        builder.append("{ ");
+         if (pops > 0)
+             builder.append("popExceptionFrames(frameRef, ").append(pops).append("); ");
+         if (bypass != -1)
+             builder.append("bypasses[").append(bypass).append("] = true; ");
+-        builder.append("goto ").append(LABEL_PREFIX).append(label).append(";");
+-        if (bypass != -1 || pops > 0)
+-            builder.append(" }");
++        builder.append("SAFEPOINT(); goto ").append(LABEL_PREFIX).append(label).append(";");
++        builder.append(" }");
+         if (bypass != -1)
+             builder.append(" // goto ").append(LABEL_PREFIX).append(originalLabel);
+     }

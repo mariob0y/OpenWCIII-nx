@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:51 +0200
+Subject: [PATCH 20/32] feat: runtime - two more JDK methods Gson calls
+
+---
+ runtime/src/java/lang/Class.java    | 9 +++++++++
+ runtime/src/java/util/TimeZone.java | 5 +++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/runtime/src/java/lang/Class.java b/runtime/src/java/lang/Class.java
+index 3ab6354..94b1647 100644
+--- a/runtime/src/java/lang/Class.java
++++ b/runtime/src/java/lang/Class.java
+@@ -552,6 +552,15 @@ public final class Class<T> implements java.lang.reflect.Type {
+         return getSuperclass();
+     }
+ 
++    /**
++     * warsmash-nx: none (no class signatures in this runtime; see jdk2b.edits.py). Raw array type:
++     * this runtime's Class is not a GenericDeclaration (same descriptor as the JDK's method).
++     */
++    @SuppressWarnings("rawtypes")
++    public java.lang.reflect.TypeVariable[] getTypeParameters() {
++        return new java.lang.reflect.TypeVariable[0];
++    }
++
+     /**
+      * warsmash-nx: the class named before the last '$' (member, local and anonymous classes), null
+      * for a top-level class. The runtime keeps no InnerClasses attribute, so a top-level class whose
+diff --git a/runtime/src/java/util/TimeZone.java b/runtime/src/java/util/TimeZone.java
+index 2110ce4..5a1c774 100644
+--- a/runtime/src/java/util/TimeZone.java
++++ b/runtime/src/java/util/TimeZone.java
+@@ -168,6 +168,11 @@ public abstract class TimeZone{
+      */
+     public abstract int getRawOffset();
+ 
++    /** warsmash-nx: as the JDK's TimeZone.getOffset(long). */
++    public int getOffset(long date) {
++        return inDaylightTime(new Date(date)) ? getRawOffset() + getDSTSavings() : getRawOffset();
++    }
++
+     /**
+      * Gets the TimeZone for the given ID.
+      */

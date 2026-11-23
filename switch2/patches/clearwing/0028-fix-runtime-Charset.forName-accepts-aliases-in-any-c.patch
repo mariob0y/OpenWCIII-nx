@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:55 +0200
+Subject: [PATCH 28/32] fix: runtime - Charset.forName accepts aliases in any
+ case
+
+---
+ runtime/src/java/nio/charset/Charset.java | 52 +++++++++++++++++++----
+ 1 file changed, 44 insertions(+), 8 deletions(-)
+
+diff --git a/runtime/src/java/nio/charset/Charset.java b/runtime/src/java/nio/charset/Charset.java
+index cd45275..d1cc181 100644
+--- a/runtime/src/java/nio/charset/Charset.java
++++ b/runtime/src/java/nio/charset/Charset.java
+@@ -49,15 +49,51 @@ public class Charset implements Comparable<Charset> {
+     }
+     
+     public static Charset forName(String name) {
+-        switch (name) {
+-            case "UTF-8": return StandardCharsets.UTF_8;
+-            case "ISO-8859-1": return StandardCharsets.ISO_8859_1;
+-            case "UTF-16": return StandardCharsets.UTF_16;
+-            case "UTF-16LE": return StandardCharsets.UTF_16LE;
+-            case "UTF-16BE": return StandardCharsets.UTF_16BE;
+-            case "US-ASCII": return StandardCharsets.US_ASCII;
+-            default: throw new UnsupportedCharsetException(name);
++        // warsmash-nx (jdk3d): ignoring ASCII case, with JDK 17's aliases and name checks
++        if (name == null)
++            throw new IllegalArgumentException("Null charset name");
++        char[] lower = name.toCharArray();
++        for (int i = 0; i < lower.length; i++)
++            if (lower[i] >= 'A' && lower[i] <= 'Z')
++                lower[i] = (char) (lower[i] + ('a' - 'A'));
++        switch (new String(lower)) {
++            case "utf-8": case "unicode-1-1-utf-8": case "utf8":
++                return StandardCharsets.UTF_8;
++            case "iso-8859-1": case "819": case "iso8859-1": case "l1": case "iso_8859-1:1987":
++            case "iso_8859-1": case "8859_1": case "iso-ir-100": case "latin1": case "cp819":
++            case "iso8859_1": case "ibm819": case "iso_8859_1": case "ibm-819": case "csisolatin1":
++                return StandardCharsets.ISO_8859_1;
++            case "us-ascii": case "ansi_x3.4-1968": case "cp367": case "csascii": case "iso-ir-6":
++            case "ascii": case "iso_646.irv:1983": case "ansi_x3.4-1986": case "ascii7": case "default":
++            case "iso_646.irv:1991": case "iso646-us": case "ibm367": case "646": case "us":
++                return StandardCharsets.US_ASCII;
++            case "utf-16": case "utf_16": case "unicode": case "utf16": case "unicodebig":
++                return StandardCharsets.UTF_16;
++            case "utf-16be": case "x-utf-16be": case "utf_16be": case "iso-10646-ucs-2":
++            case "unicodebigunmarked":
++                return StandardCharsets.UTF_16BE;
++            case "utf-16le": case "unicodelittleunmarked": case "utf_16le": case "x-utf-16le":
++                return StandardCharsets.UTF_16LE;
++            default:
++                break;
+         }
++        // The JDK's Charset.checkName, for names it does not know
++        int n = name.length();
++        if (n == 0)
++            throw new IllegalCharsetNameException(name);
++        for (int i = 0; i < n; i++) {
++            char c = name.charAt(i);
++            if (c >= 'A' && c <= 'Z') continue;
++            if (c >= 'a' && c <= 'z') continue;
++            if (c >= '0' && c <= '9') continue;
++            if (c == '-' && i != 0) continue;
++            if (c == '+' && i != 0) continue;
++            if (c == ':' && i != 0) continue;
++            if (c == '_' && i != 0) continue;
++            if (c == '.' && i != 0) continue;
++            throw new IllegalCharsetNameException(name);
++        }
++        throw new UnsupportedCharsetException(name);
+     }
+ 
+     public static Charset defaultCharset() {

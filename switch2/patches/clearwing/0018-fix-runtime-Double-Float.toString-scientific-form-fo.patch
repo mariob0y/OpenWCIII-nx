@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:50 +0200
+Subject: [PATCH 18/32] fix: runtime - Double/Float.toString scientific form
+ for one-digit values
+
+---
+ runtime/res/clearwing/src/Double.cpp | 6 ++++++
+ runtime/res/clearwing/src/Float.cpp  | 6 ++++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/runtime/res/clearwing/src/Double.cpp b/runtime/res/clearwing/src/Double.cpp
+index 833795b..01f3399 100644
+--- a/runtime/res/clearwing/src/Double.cpp
++++ b/runtime/res/clearwing/src/Double.cpp
+@@ -33,6 +33,12 @@ jobject SM_java_lang_Double_toStringImpl_double_boolean_R_java_lang_String(jcont
+     char *e = strchr(s, 'e');
+     if (!e)
+         return (jobject) stringFromNative(ctx, s);
++    if (!memchr(s, '.', e - s)) {
++        // warsmash-nx: one significant digit: the closest two-digit form, as the JDK (4.9E-324, not 5.0E-324)
++        result = std::to_chars(s, s + sizeof s - 8, d, std::chars_format::scientific, 1);
++        *result.ptr = '\0';
++        e = strchr(s, 'e');
++    }
+     *e = '\0';
+     const char *exponent = e + 1;
+     bool negative = *exponent == '-';
+diff --git a/runtime/res/clearwing/src/Float.cpp b/runtime/res/clearwing/src/Float.cpp
+index 11a4c1f..d741c1b 100644
+--- a/runtime/res/clearwing/src/Float.cpp
++++ b/runtime/res/clearwing/src/Float.cpp
+@@ -28,6 +28,12 @@ jobject SM_java_lang_Float_toStringImpl_float_boolean_R_java_lang_String(jcontex
+     char *e = strchr(s, 'e');
+     if (!e)
+         return (jobject) stringFromNative(ctx, s);
++    if (!memchr(s, '.', e - s)) {
++        // warsmash-nx: one significant digit: the closest two-digit form, as the JDK (4.9E-324, not 5.0E-324)
++        result = std::to_chars(s, s + sizeof s - 8, d, std::chars_format::scientific, 1);
++        *result.ptr = '\0';
++        e = strchr(s, 'e');
++    }
+     *e = '\0';
+     const char *exponent = e + 1;
+     bool negative = *exponent == '-';

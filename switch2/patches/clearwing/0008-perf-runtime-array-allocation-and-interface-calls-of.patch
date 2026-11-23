@@ -1,0 +1,86 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:42 +0200
+Subject: [PATCH 08/32] perf: runtime - array allocation and interface calls
+ off global locks
+
+---
+ runtime/res/clearwing/src/Array.cpp     | 29 ++++++++++++++++++++++++-
+ runtime/res/clearwing/src/Clearwing.cpp |  9 ++++++++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/res/clearwing/src/Array.cpp b/runtime/res/clearwing/src/Array.cpp
+index 50d37b9..c10dc6c 100644
+--- a/runtime/res/clearwing/src/Array.cpp
++++ b/runtime/res/clearwing/src/Array.cpp
+@@ -64,7 +64,22 @@ void *vtable_array[]{
+ };
+ 
+ /// Gets an array class for the provided type. Does not throw exceptions.
++static jclass getArrayClassLocked(jclass componentType, int dimensions);
++
++// warsmash-nx (round 6): a per-thread cache in front of the locked map (array classes are never
++// freed or replaced, so a cached one stays right).
+ jclass getArrayClass(jclass componentType, int dimensions) {
++    struct Entry { jclass component; int dimensions; jclass result; };
++    static thread_local Entry cache[64];
++    auto &entry = cache[(((uintptr_t) componentType >> 4) ^ (uintptr_t) dimensions) & 63];
++    if (entry.component == componentType && entry.dimensions == dimensions)
++        return entry.result;
++    const jclass result = getArrayClassLocked(componentType, dimensions);
++    entry = {componentType, dimensions, result};
++    return result;
++}
++
++static jclass getArrayClassLocked(jclass componentType, int dimensions) {
+     static std::mutex mutex;
+     static std::map<jclass, std::vector<jclass>> arrayClasses;
+ 
+@@ -138,7 +153,19 @@ extern "C++" jarray createMultiArray(jcontext ctx, jclass type, const std::vecto
+ 
+ /// Creates a new array. Throws exceptions.
+ jarray createArray(jcontext ctx, jclass type, int length) {
+-    return createMultiArray(ctx, type, {length});
++    // warsmash-nx (round 6): one dimension needs neither the vector nor protection: nothing below
++    // gcAlloc allocates, so there is no safepoint before the caller holds the array.
++    nullCheck(ctx, (jobject) type);
++    if (length < 0)
++        throwNegativeArraySize(ctx);
++    auto array = (jarray) gcAlloc(ctx, getArrayClass(type, 1));
++    array->length = length;
++    if (length == 0)
++        return array;
++    const int64_t bytes = (int64_t) (type->primitive ? type->size : (int) sizeof(jobject)) * length;
++    array->data = new char[bytes]{};
++    adjustHeapUsage(bytes);
++    return array;
+ }
+ 
+ jarray createArrayProtected(jcontext ctx, jclass type, int length) {
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index cb26b1c..777111f 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -362,6 +362,14 @@ void *resolveInterfaceMethod(jcontext ctx, jclass interface, int method, jobject
+ 
+     auto objectClass = (jclass) object->clazz;
+ 
++    // warsmash-nx (round 6): a per-thread cache before the lock and the two map lookups (an
++    // offset is fixed per class, so a cached one stays right; misses are only cached when found).
++    struct InterfaceEntry { jclass interface; jclass objectClass; int method; int offset; };
++    static thread_local InterfaceEntry interfaceCache[512];
++    auto &cached = interfaceCache[(((uintptr_t) interface >> 4) * 31 + ((uintptr_t) objectClass >> 4) * 17 + (uintptr_t) method) & 511];
++    if (cached.interface == interface && cached.objectClass == objectClass && cached.method == method)
++        return ((void **) object->vtable)[cached.offset];
++
+     int offset;
+     {
+         std::lock_guard guard(lock); // Todo: Making thread_local rather than locking is probably much faster
+@@ -398,6 +406,7 @@ void *resolveInterfaceMethod(jcontext ctx, jclass interface, int method, jobject
+     if (offset == -1)
+         constructAndThrow<&class_java_lang_NoSuchMethodError, init_java_lang_NoSuchMethodError>(ctx);
+ 
++    cached = {interface, objectClass, method, offset}; // warsmash-nx (round 6)
+     return ((void **) object->vtable)[offset];
+ }
+ 

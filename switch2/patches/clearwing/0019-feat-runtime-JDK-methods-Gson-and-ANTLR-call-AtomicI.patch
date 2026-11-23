@@ -1,0 +1,232 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:50 +0200
+Subject: [PATCH 19/32] feat: runtime - JDK methods Gson and ANTLR call;
+ AtomicIntegerArray.decrementAndGet
+
+---
+ runtime/src/java/io/PrintStream.java          | 10 ++++++
+ runtime/src/java/lang/Character.java          | 20 +++++++++++
+ runtime/src/java/lang/Class.java              | 24 +++++++++++++
+ runtime/src/java/lang/StringBuilder.java      | 10 ++++++
+ runtime/src/java/net/URL.java                 |  5 +++
+ runtime/src/java/text/DateFormat.java         | 15 ++++++++
+ runtime/src/java/util/GregorianCalendar.java  | 34 ++++++++++++++++++-
+ .../concurrent/atomic/AtomicIntegerArray.java |  2 +-
+ 8 files changed, 118 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/src/java/io/PrintStream.java b/runtime/src/java/io/PrintStream.java
+index 99f029b..326da4e 100644
+--- a/runtime/src/java/io/PrintStream.java
++++ b/runtime/src/java/io/PrintStream.java
+@@ -525,6 +525,16 @@ public class PrintStream extends FilterOutputStream implements Appendable {
+         return printf(format, args);
+     }
+ 
++    /** warsmash-nx: as printf (which the JDK's format is). */
++    public PrintStream format(String format, Object ... args) {
++        return printf(format, args);
++    }
++
++    /** warsmash-nx: as printf(Locale, ...) (this runtime's Formatter has one locale). */
++    public PrintStream format(Locale l, String format, Object ... args) {
++        return printf(l, format, args);
++    }
++
+ //    public PrintStream format(String format, Object ... args) {
+ //        synchronized (this) {
+ //            if ((formatter == null)
+diff --git a/runtime/src/java/lang/Character.java b/runtime/src/java/lang/Character.java
+index 577b727..09567f0 100644
+--- a/runtime/src/java/lang/Character.java
++++ b/runtime/src/java/lang/Character.java
+@@ -492,6 +492,26 @@ public final class Character implements Comparable<Character>{
+         return isJavaIdentifierPart((int) ch);
+     }
+ 
++    /** warsmash-nx: the JDK's answer for ASCII (letters only; see isLetter). */
++    public static boolean isUnicodeIdentifierStart(int codePoint) {
++        return isLetter(codePoint);
++    }
++
++    public static boolean isUnicodeIdentifierStart(char ch) {
++        return isUnicodeIdentifierStart((int) ch);
++    }
++
++    /** warsmash-nx: the JDK's answer for ASCII: letters, digits, '_', and the ignorable controls. */
++    public static boolean isUnicodeIdentifierPart(int codePoint) {
++        return isLetter(codePoint) || isDigit(codePoint) || codePoint == '_'
++                || (codePoint >= 0 && codePoint <= 8) || (codePoint >= 0xE && codePoint <= 0x1B)
++                || (codePoint >= 0x7F && codePoint <= 0x9F);
++    }
++
++    public static boolean isUnicodeIdentifierPart(char ch) {
++        return isUnicodeIdentifierPart((int) ch);
++    }
++
+     public static boolean isJavaIdentifierPart(int codePoint) {
+         return isLetter(codePoint) || isDigit(codePoint) || codePoint == '_' || codePoint == '$';
+ //        switch (getType(codePoint)) {
+diff --git a/runtime/src/java/lang/Class.java b/runtime/src/java/lang/Class.java
+index 6842443..3ab6354 100644
+--- a/runtime/src/java/lang/Class.java
++++ b/runtime/src/java/lang/Class.java
+@@ -547,6 +547,30 @@ public final class Class<T> implements java.lang.reflect.Type {
+         return interfaces;
+     }
+ 
++    /** warsmash-nx: the raw superclass (no class signatures in this runtime; see jdk2.edits.py). */
++    public java.lang.reflect.Type getGenericSuperclass() {
++        return getSuperclass();
++    }
++
++    /**
++     * warsmash-nx: the class named before the last '$' (member, local and anonymous classes), null
++     * for a top-level class. The runtime keeps no InnerClasses attribute, so a top-level class whose
++     * own name contains '$' is misreported.
++     */
++    public Class<?> getEnclosingClass() {
++        if (isArray() || isPrimitive())
++            return null;
++        String n = getName();
++        int index = n.lastIndexOf('$');
++        if (index <= 0)
++            return null;
++        try {
++            return Class.forName(n.substring(0, index));
++        } catch (ClassNotFoundException e) {
++            return null;
++        }
++    }
++
+     public java.lang.reflect.Type[] getGenericInterfaces() {
+         // Todo
+         throw new UnsupportedOperationException("Class.getGenericInterfaces() not supported on this platform");
+diff --git a/runtime/src/java/lang/StringBuilder.java b/runtime/src/java/lang/StringBuilder.java
+index 38d5c07..a5b120e 100644
+--- a/runtime/src/java/lang/StringBuilder.java
++++ b/runtime/src/java/lang/StringBuilder.java
+@@ -128,6 +128,16 @@ public final class StringBuilder implements CharSequence, Appendable {
+ //        return this; 
+ //    }
+ 
++    /** warsmash-nx: as the JDK (a supplementary code point appends its surrogate pair). */
++    public java.lang.StringBuilder appendCodePoint(int codePoint) {
++        if (Character.isBmpCodePoint(codePoint))
++            return append((char) codePoint);
++        if (!Character.isValidCodePoint(codePoint))
++            throw new IllegalArgumentException(String.format("Not a valid Unicode code point: 0x%X", codePoint));
++        append(Character.highSurrogate(codePoint));
++        return append(Character.lowSurrogate(codePoint));
++    }
++
+     public java.lang.StringBuilder append(char[] chars){
+         int newCount = count + chars.length;
+         if (newCount > value.length) {
+diff --git a/runtime/src/java/net/URL.java b/runtime/src/java/net/URL.java
+index ec43b0f..06be7e5 100644
+--- a/runtime/src/java/net/URL.java
++++ b/runtime/src/java/net/URL.java
+@@ -34,6 +34,11 @@ public class URL {
+         throw new UnsupportedOperationException("URL not implemented on this platform");
+     }
+     
++    /** warsmash-nx: unreachable (no URL can be constructed here). */
++    public String toExternalForm() {
++        throw new UnsupportedOperationException("URL not implemented on this platform");
++    }
++
+     public final InputStream openStream() throws IOException {
+         throw new UnsupportedOperationException();
+     }
+diff --git a/runtime/src/java/text/DateFormat.java b/runtime/src/java/text/DateFormat.java
+index c591645..89560b5 100644
+--- a/runtime/src/java/text/DateFormat.java
++++ b/runtime/src/java/text/DateFormat.java
+@@ -212,6 +212,21 @@ public class DateFormat extends Format {
+ 		return new DateFormat(MEDIUM, MEDIUM);
+ 	}
+ 
++	/** warsmash-nx: this runtime's DateFormat has no locales; as getDateTimeInstance(int, int). */
++	public static final DateFormat getDateTimeInstance(int dateStyle, int timeStyle, java.util.Locale locale) {
++		return getDateTimeInstance(dateStyle, timeStyle);
++	}
++
++	/** warsmash-nx: see getDateTimeInstance(int, int, Locale). */
++	public static final DateFormat getDateInstance(int style, java.util.Locale locale) {
++		return getDateInstance(style);
++	}
++
++	/** warsmash-nx: see getDateTimeInstance(int, int, Locale). */
++	public static final DateFormat getTimeInstance(int style, java.util.Locale locale) {
++		return getTimeInstance(style);
++	}
++
+ 	public void setTimeZone(TimeZone zone) {
+ 
+ 	}
+diff --git a/runtime/src/java/util/GregorianCalendar.java b/runtime/src/java/util/GregorianCalendar.java
+index c200160..056e944 100644
+--- a/runtime/src/java/util/GregorianCalendar.java
++++ b/runtime/src/java/util/GregorianCalendar.java
+@@ -17,7 +17,7 @@
+ 
+ package java.util;
+ 
+-class GregorianCalendar extends Calendar {
++public class GregorianCalendar extends Calendar { // warsmash-nx: public, as the JDK
+     /**
+      * Value for the BC era.
+      */
+@@ -70,6 +70,38 @@ class GregorianCalendar extends Calendar {
+     public GregorianCalendar(TimeZone zone) {
+         setTimeZone(zone);
+     }
++
++    /** warsmash-nx: this runtime has no locale-specific calendars; as GregorianCalendar(TimeZone). */
++    public GregorianCalendar(TimeZone zone, Locale aLocale) {
++        this(zone);
++    }
++
++    /** warsmash-nx: see GregorianCalendar(TimeZone, Locale). */
++    public GregorianCalendar(Locale aLocale) {
++        this();
++    }
++
++    /** warsmash-nx: as the JDK: that date at 00:00:00.000 in the default time zone. */
++    public GregorianCalendar(int year, int month, int dayOfMonth) {
++        this(year, month, dayOfMonth, 0, 0, 0);
++    }
++
++    /** warsmash-nx: as the JDK (seconds and milliseconds 0). */
++    public GregorianCalendar(int year, int month, int dayOfMonth, int hourOfDay, int minute) {
++        this(year, month, dayOfMonth, hourOfDay, minute, 0);
++    }
++
++    /** warsmash-nx: as the JDK (milliseconds 0, default time zone). */
++    public GregorianCalendar(int year, int month, int dayOfMonth, int hourOfDay, int minute, int second) {
++        this();
++        set(YEAR, year);
++        set(MONTH, month);
++        set(DAY_OF_MONTH, dayOfMonth);
++        set(HOUR_OF_DAY, hourOfDay);
++        set(MINUTE, minute);
++        set(SECOND, second);
++        set(MILLISECOND, 0);
++    }
+     
+     protected void computeFields() {
+         TimeZone timeZone = getTimeZone();
+diff --git a/runtime/src/java/util/concurrent/atomic/AtomicIntegerArray.java b/runtime/src/java/util/concurrent/atomic/AtomicIntegerArray.java
+index 4446a8c..b798c20 100644
+--- a/runtime/src/java/util/concurrent/atomic/AtomicIntegerArray.java
++++ b/runtime/src/java/util/concurrent/atomic/AtomicIntegerArray.java
+@@ -250,7 +250,7 @@ public class AtomicIntegerArray implements java.io.Serializable {
+      * @return the updated value
+      */
+     public final int decrementAndGet(int i) {
+-        return getAndIncrement(i) - 1;
++        return getAndDecrement(i) - 1; // warsmash-nx: was getAndIncrement (incremented the element)
+     }
+ 
+     /**

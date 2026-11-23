@@ -1,0 +1,2364 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:45 +0200
+Subject: [PATCH 10/32] feat: runtime - JDK methods and classes the engine
+ calls
+
+---
+ runtime/build.gradle                          |   2 +
+ runtime/src/java/io/DataInput.java            |   5 +
+ runtime/src/java/io/DataOutput.java           |   6 +
+ runtime/src/java/io/File.java                 |  24 +-
+ .../src/java/io/InvalidClassException.java    |  23 ++
+ runtime/src/java/io/ObjectStreamClass.java    |  11 +
+ runtime/src/java/lang/Byte.java               |   2 +
+ runtime/src/java/lang/CharSequence.java       |   5 +
+ runtime/src/java/lang/Character.java          |   5 +
+ .../src/java/lang/IllegalStateException.java  |   8 +
+ runtime/src/java/lang/Integer.java            |  40 ++
+ runtime/src/java/lang/Long.java               |  36 ++
+ runtime/src/java/lang/StrictMath.java         | 185 +++++++++
+ runtime/src/java/lang/String.java             |  36 ++
+ runtime/src/java/lang/reflect/Method.java     |   4 +
+ runtime/src/java/net/ProtocolFamily.java      |   6 +
+ .../src/java/net/StandardProtocolFamily.java  |   6 +
+ .../java/nio/channels/DatagramChannel.java    |  50 +++
+ .../channels/NonWritableChannelException.java |   7 +
+ .../nio/channels/ServerSocketChannel.java     |  32 ++
+ .../src/java/nio/channels/SocketChannel.java  |  54 +++
+ .../nio/charset/CharacterCodingException.java |   7 +
+ .../src/java/nio/file/DirectoryStream.java    |  16 +
+ .../nio/file/FileAlreadyExistsException.java  |  12 +
+ .../java/nio/file/FileSystemException.java    |  51 +++
+ .../java/nio/file/InvalidPathException.java   |  37 ++
+ .../java/nio/file/NoSuchFileException.java    |  12 +
+ .../java/nio/file/NotDirectoryException.java  |   8 +
+ runtime/src/java/nio/file/Path.java           |   2 +
+ runtime/src/java/nio/file/PathImpl.java       | 335 ++++++++++++++++
+ runtime/src/java/nio/file/Paths.java          |  23 ++
+ .../nio/file/ProviderMismatchException.java   |  11 +
+ .../src/java/nio/file/StandardCopyOption.java |   6 +
+ .../src/java/nio/file/StandardOpenOption.java |   6 +
+ .../nio/file/attribute/FileAttribute.java     |   8 +
+ .../src/java/security/AccessController.java   |  27 ++
+ .../src/java/security/PrivilegedAction.java   |   6 +
+ .../security/PrivilegedActionException.java   |  18 +
+ .../security/PrivilegedExceptionAction.java   |   6 +
+ runtime/src/java/sql/Date.java                |  11 +
+ runtime/src/java/sql/Time.java                |   8 +
+ runtime/src/java/sql/Timestamp.java           |  27 ++
+ runtime/src/java/util/Currency.java           |  42 ++
+ runtime/src/java/util/PriorityQueue.java      |   4 +
+ .../src/java/util/PropertyResourceBundle.java |  58 +++
+ runtime/src/java/util/Random.java             |  14 +
+ .../concurrent/ConcurrentSkipListMap.java     | 366 ++++++++++++++++++
+ .../concurrent/atomic/AtomicLongArray.java    | 115 ++++++
+ runtime/src/java/util/zip/CRC32C.java         |  68 ++++
+ runtime/src/java/util/zip/Checksum.java       |  25 ++
+ 50 files changed, 1871 insertions(+), 5 deletions(-)
+ create mode 100644 runtime/src/java/io/InvalidClassException.java
+ create mode 100644 runtime/src/java/io/ObjectStreamClass.java
+ create mode 100644 runtime/src/java/lang/StrictMath.java
+ create mode 100644 runtime/src/java/net/ProtocolFamily.java
+ create mode 100644 runtime/src/java/net/StandardProtocolFamily.java
+ create mode 100644 runtime/src/java/nio/channels/DatagramChannel.java
+ create mode 100644 runtime/src/java/nio/channels/NonWritableChannelException.java
+ create mode 100644 runtime/src/java/nio/channels/ServerSocketChannel.java
+ create mode 100644 runtime/src/java/nio/channels/SocketChannel.java
+ create mode 100644 runtime/src/java/nio/charset/CharacterCodingException.java
+ create mode 100644 runtime/src/java/nio/file/DirectoryStream.java
+ create mode 100644 runtime/src/java/nio/file/FileAlreadyExistsException.java
+ create mode 100644 runtime/src/java/nio/file/FileSystemException.java
+ create mode 100644 runtime/src/java/nio/file/InvalidPathException.java
+ create mode 100644 runtime/src/java/nio/file/NoSuchFileException.java
+ create mode 100644 runtime/src/java/nio/file/NotDirectoryException.java
+ create mode 100644 runtime/src/java/nio/file/PathImpl.java
+ create mode 100644 runtime/src/java/nio/file/Paths.java
+ create mode 100644 runtime/src/java/nio/file/ProviderMismatchException.java
+ create mode 100644 runtime/src/java/nio/file/StandardCopyOption.java
+ create mode 100644 runtime/src/java/nio/file/StandardOpenOption.java
+ create mode 100644 runtime/src/java/nio/file/attribute/FileAttribute.java
+ create mode 100644 runtime/src/java/security/AccessController.java
+ create mode 100644 runtime/src/java/security/PrivilegedAction.java
+ create mode 100644 runtime/src/java/security/PrivilegedActionException.java
+ create mode 100644 runtime/src/java/security/PrivilegedExceptionAction.java
+ create mode 100644 runtime/src/java/sql/Date.java
+ create mode 100644 runtime/src/java/sql/Time.java
+ create mode 100644 runtime/src/java/sql/Timestamp.java
+ create mode 100644 runtime/src/java/util/Currency.java
+ create mode 100644 runtime/src/java/util/PropertyResourceBundle.java
+ create mode 100644 runtime/src/java/util/concurrent/ConcurrentSkipListMap.java
+ create mode 100644 runtime/src/java/util/concurrent/atomic/AtomicLongArray.java
+ create mode 100644 runtime/src/java/util/zip/CRC32C.java
+
+diff --git a/runtime/build.gradle b/runtime/build.gradle
+index c6b9978..fc6ccf4 100644
+--- a/runtime/build.gradle
++++ b/runtime/build.gradle
+@@ -1,5 +1,7 @@
+ sourceCompatibility = 1.8
+ targetCompatibility = 1.8
++// warsmash-nx: the runtime's own sources win over the JDK's classes (see jdk1.edits.py)
++tasks.withType(JavaCompile).configureEach { options.compilerArgs += ['-Xprefer:source'] }
+ 
+ dependencies {
+     implementation('com.github.tommyettinger:RegExodus:0.1.14')
+diff --git a/runtime/src/java/io/DataInput.java b/runtime/src/java/io/DataInput.java
+index fcd8a1f..b1bf8df 100644
+--- a/runtime/src/java/io/DataInput.java
++++ b/runtime/src/java/io/DataInput.java
+@@ -28,6 +28,11 @@ package java.io;
+  * Since: JDK1.0, CLDC 1.0 See Also:DataInputStream, DataOutput
+  */
+ public interface DataInput extends AutoCloseable {
++    /** warsmash-nx: declared by the JDK; DataInputStream has its own. */
++    default String readLine() throws IOException {
++        throw new UnsupportedOperationException("readLine");
++    }
++
+     /**
+      * Reads one input byte and returns true if that byte is nonzero, false if that byte is zero. This method is suitable for reading the byte written by the writeBoolean method of interface DataOutput.
+      */
+diff --git a/runtime/src/java/io/DataOutput.java b/runtime/src/java/io/DataOutput.java
+index 6dac597..54c6347 100644
+--- a/runtime/src/java/io/DataOutput.java
++++ b/runtime/src/java/io/DataOutput.java
+@@ -28,6 +28,12 @@ package java.io;
+  * Since: JDK1.0, CLDC 1.0 See Also:DataInput, DataOutputStream
+  */
+ public interface DataOutput extends AutoCloseable {
++    /** warsmash-nx: declared by the JDK, as DataOutputStream's (the low byte of each char). */
++    default void writeBytes(String s) throws IOException {
++        for (int i = 0; i < s.length(); i++)
++            write((byte) s.charAt(i));
++    }
++
+     /**
+      * Writes to the output stream all the bytes in array b. If b is null, a NullPointerException is thrown. If b.length is zero, then no bytes are written. Otherwise, the byte b[0] is written first, then b[1], and so on; the last byte written is b[b.length-1].
+      */
+diff --git a/runtime/src/java/io/File.java b/runtime/src/java/io/File.java
+index a22dfef..201aead 100644
+--- a/runtime/src/java/io/File.java
++++ b/runtime/src/java/io/File.java
+@@ -83,11 +83,24 @@ public class File {
+ 	}
+ 
+ 	public int compareTo (File pathname) {
+-		return 0;
++		return path.compareTo(pathname.path); // warsmash-nx: was always 0 (sorting, TreeMap)
++	}
++
++	/** warsmash-nx: as the JDK's Unix file system (equal paths, case-sensitive). */
++	@Override
++	public boolean equals (Object obj) {
++		return (obj instanceof File) && compareTo((File) obj) == 0;
++	}
++
++	@Override
++	public int hashCode () {
++		return path.hashCode() ^ 1234321;
+ 	}
+ 
+ 	public boolean createNewFile () {
+-		return false;
++		if (exists()) // warsmash-nx: was always false
++			return false;
++		return createFile(path);
+ 	}
+ 
+ 	public static File createTempFile (String prefix, String suffix) {
+@@ -172,13 +185,14 @@ public class File {
+ 	}
+ 
+ 	public boolean isAbsolute () {
+-		return false;
++		// warsmash-nx: was always false. "/..." or a device prefix such as "sdmc:/..."
++		return path.startsWith("/") || path.indexOf(":/") > 0;
+ 	}
+ 
+ 	public native boolean isDirectory ();
+ 
+ 	public boolean isFile () {
+-		return !isDirectory();
++		return exists() && !isDirectory(); // warsmash-nx: was true for missing files
+ 	}
+ 
+ 	public boolean isInvalid () {
+@@ -280,7 +294,7 @@ public class File {
+ 	}
+ 	
+ 	public Path toPath () {
+-		return null;
++		return java.nio.file.Paths.get(path); // warsmash-nx: was null (Paths: runtime-additions)
+ 	}
+ 
+ 	@Override
+diff --git a/runtime/src/java/io/InvalidClassException.java b/runtime/src/java/io/InvalidClassException.java
+new file mode 100644
+index 0000000..b6a5f6a
+--- /dev/null
++++ b/runtime/src/java/io/InvalidClassException.java
+@@ -0,0 +1,23 @@
++package java.io;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. As the JDK, the class name prefixes the message. */
++public class InvalidClassException extends ObjectStreamException {
++	public String classname;
++
++	public InvalidClassException(String reason) {
++		super(reason);
++	}
++
++	public InvalidClassException(String cname, String reason) {
++		super(reason);
++		classname = cname;
++	}
++
++	@Override
++	public String getMessage() {
++		if (classname == null)
++			return super.getMessage();
++		else
++			return classname + "; " + super.getMessage();
++	}
++}
+diff --git a/runtime/src/java/io/ObjectStreamClass.java b/runtime/src/java/io/ObjectStreamClass.java
+new file mode 100644
+index 0000000..b9cc510
+--- /dev/null
++++ b/runtime/src/java/io/ObjectStreamClass.java
+@@ -0,0 +1,11 @@
++package java.io;
++
++/**
++ * warsmash-nx: the class only, for the class literal in Gson's UnsafeAllocator (it then asks for the
++ * private method getConstructorId by reflection, gets NoSuchMethodException, and moves on to its
++ * next strategy). Java serialization is not supported by this runtime.
++ */
++public class ObjectStreamClass implements Serializable {
++    private ObjectStreamClass() {
++    }
++}
+diff --git a/runtime/src/java/lang/Byte.java b/runtime/src/java/lang/Byte.java
+index f71319a..82e0fef 100644
+--- a/runtime/src/java/lang/Byte.java
++++ b/runtime/src/java/lang/Byte.java
+@@ -33,6 +33,8 @@ public final class Byte extends Number implements Comparable<Byte> {
+     
+     public static final Class<Byte> TYPE = (Class<Byte>)NativeUtils.getPrimitive("B");
+     public static final int SIZE = 8;
++
++    public static final int BYTES = SIZE / 8; // warsmash-nx
+     
+     /**
+      * The maximum value a Byte can have.
+diff --git a/runtime/src/java/lang/CharSequence.java b/runtime/src/java/lang/CharSequence.java
+index c763765..831405d 100644
+--- a/runtime/src/java/lang/CharSequence.java
++++ b/runtime/src/java/lang/CharSequence.java
+@@ -31,6 +31,11 @@ public interface CharSequence {
+      */
+     public int length();
+ 
++    /** warsmash-nx: Java 15 (StringBuilder.isEmpty). */
++    default boolean isEmpty() {
++        return this.length() == 0;
++    }
++
+     /**
+      * Returns the character at the specified index, with the first character
+      * having index zero.
+diff --git a/runtime/src/java/lang/Character.java b/runtime/src/java/lang/Character.java
+index aadcdb8..ef25c61 100644
+--- a/runtime/src/java/lang/Character.java
++++ b/runtime/src/java/lang/Character.java
+@@ -324,6 +324,11 @@ public final class Character implements Comparable<Character>{
+         return isLetter((int) ch);
+     }
+ 
++    /** warsmash-nx: as isLetter (this runtime's letters are ASCII only; see isLetter). */
++    public static boolean isAlphabetic(int codePoint) {
++        return isLetter(codePoint);
++    }
++
+     public static boolean isLetter(int codePoint) {
+         // Todo: Proper implementation
+         return (codePoint >= 'a' && codePoint <= 'z') || (codePoint >= 'A' && codePoint <= 'Z');
+diff --git a/runtime/src/java/lang/IllegalStateException.java b/runtime/src/java/lang/IllegalStateException.java
+index 70516cb..0bbe2a4 100644
+--- a/runtime/src/java/lang/IllegalStateException.java
++++ b/runtime/src/java/lang/IllegalStateException.java
+@@ -31,4 +31,12 @@ public class IllegalStateException extends RuntimeException {
+     public IllegalStateException(String s) {
+         super(s);
+     }
++
++    public IllegalStateException(String message, Throwable cause) { // warsmash-nx
++        super(message, cause);
++    }
++
++    public IllegalStateException(Throwable cause) { // warsmash-nx
++        super(cause);
++    }
+ }
+diff --git a/runtime/src/java/lang/Integer.java b/runtime/src/java/lang/Integer.java
+index d84855f..36a62d1 100644
+--- a/runtime/src/java/lang/Integer.java
++++ b/runtime/src/java/lang/Integer.java
+@@ -50,6 +50,46 @@ public final class Integer extends Number implements Comparable<Integer> {
+ 
+ 	public static final int SIZE = 32;
+ 
++	public static final int BYTES = SIZE / 8; // warsmash-nx
++
++	/** warsmash-nx: as the JDK (Long.toString of the unsigned value). */
++	public static String toUnsignedString(int i) {
++		return Long.toString(toUnsignedLong(i));
++	}
++
++	/** warsmash-nx: as the JDK. */
++	public static String toUnsignedString(int i, int radix) {
++		return Long.toString(toUnsignedLong(i), radix);
++	}
++
++	/** warsmash-nx: as the JDK 17 (messages included). */
++	public static int parseUnsignedInt(String s, int radix) throws NumberFormatException {
++		if (s == null) {
++			throw new NumberFormatException("Cannot parse null string: null");
++		}
++		int len = s.length();
++		if (len > 0) {
++			char firstChar = s.charAt(0);
++			if (firstChar == '-') {
++				throw new NumberFormatException("Illegal leading minus sign on unsigned string " + s + ".");
++			}
++			if (len <= 5 || (radix == 10 && len <= 9)) {
++				return parseInt(s, radix);
++			}
++			long ell = Long.parseLong(s, radix);
++			if ((ell & 0xffffffff00000000L) == 0) {
++				return (int) ell;
++			}
++			throw new NumberFormatException("String value " + s + " exceeds range of unsigned int.");
++		}
++		throw new NumberFormatException("For input string: \"" + s + "\"" + (radix == 10 ? "" : " under radix " + radix));
++	}
++
++	/** warsmash-nx: as the JDK. */
++	public static int parseUnsignedInt(String s) throws NumberFormatException {
++		return parseUnsignedInt(s, 10);
++	}
++
+ 	private int value;
+ 
+ 	/**
+diff --git a/runtime/src/java/lang/Long.java b/runtime/src/java/lang/Long.java
+index e946992..0f4a8db 100644
+--- a/runtime/src/java/lang/Long.java
++++ b/runtime/src/java/lang/Long.java
+@@ -49,6 +49,42 @@ public final class Long extends Number implements Comparable<Long> {
+ 
+ 	public static final int SIZE = 64;
+ 
++	public static final int BYTES = SIZE / 8; // warsmash-nx
++
++	/** warsmash-nx: as the JDK 17 (overflow guard and messages included). */
++	public static long parseUnsignedLong(String s, int radix) throws NumberFormatException {
++		if (s == null) {
++			throw new NumberFormatException("Cannot parse null string: null");
++		}
++		int len = s.length();
++		if (len > 0) {
++			char firstChar = s.charAt(0);
++			if (firstChar == '-') {
++				throw new NumberFormatException("Illegal leading minus sign on unsigned string " + s + ".");
++			}
++			if (len <= 12 || (radix == 10 && len <= 18)) {
++				return parseLong(s, radix);
++			}
++			long first = parseLong(s.substring(0, len - 1), radix);
++			int second = Character.digit(s.charAt(len - 1), radix);
++			if (second < 0) {
++				throw new NumberFormatException("Bad digit at end of " + s);
++			}
++			long result = first * radix + second;
++			int guard = radix * (int) (first >>> 57);
++			if (guard >= 128 || (result >= 0 && guard >= 128 - Character.MAX_RADIX)) {
++				throw new NumberFormatException("String value " + s + " exceeds range of unsigned long.");
++			}
++			return result;
++		}
++		throw new NumberFormatException("For input string: \"" + s + "\"" + (radix == 10 ? "" : " under radix " + radix));
++	}
++
++	/** warsmash-nx: as the JDK. */
++	public static long parseUnsignedLong(String s) throws NumberFormatException {
++		return parseUnsignedLong(s, 10);
++	}
++
+ 	private long value;
+ 
+ 	/**
+diff --git a/runtime/src/java/lang/StrictMath.java b/runtime/src/java/lang/StrictMath.java
+new file mode 100644
+index 0000000..4e1f495
+--- /dev/null
++++ b/runtime/src/java/lang/StrictMath.java
+@@ -0,0 +1,185 @@
++package java.lang;
++
++/**
++ * warsmash-nx: Clearwing 3.1.2 has no StrictMath; Warsmash's simulation and JASS natives use it
++ * (~150 calls). The JDK's StrictMath promises fdlibm's exact results so that every machine computes
++ * the same bits (lockstep multiplayer, replays). This port is single player, so it delegates to
++ * Math (the C library), which can differ from fdlibm in the last bit for sin/cos/tan/atan/pow etc.
++ * The exactly-rounded operations (sqrt, ceil, floor, rint, abs, min, max, round, toRadians,
++ * toDegrees) are the same either way.
++ */
++public final class StrictMath {
++	public static final double E = Math.E;
++	public static final double PI = Math.PI;
++
++	private StrictMath() {
++	}
++
++	public static double sin(final double a) {
++		return Math.sin(a);
++	}
++
++	public static double cos(final double a) {
++		return Math.cos(a);
++	}
++
++	public static double tan(final double a) {
++		return Math.tan(a);
++	}
++
++	public static double asin(final double a) {
++		return Math.asin(a);
++	}
++
++	public static double acos(final double a) {
++		return Math.acos(a);
++	}
++
++	public static double atan(final double a) {
++		return Math.atan(a);
++	}
++
++	public static double atan2(final double y, final double x) {
++		return Math.atan2(y, x);
++	}
++
++	public static double toRadians(final double angdeg) {
++		return Math.toRadians(angdeg);
++	}
++
++	public static double toDegrees(final double angrad) {
++		return Math.toDegrees(angrad);
++	}
++
++	public static double exp(final double a) {
++		return Math.exp(a);
++	}
++
++	public static double log(final double a) {
++		return Math.log(a);
++	}
++
++	public static double log10(final double a) {
++		return Math.log10(a);
++	}
++
++	public static double sqrt(final double a) {
++		return Math.sqrt(a);
++	}
++
++	public static double cbrt(final double a) {
++		return Math.cbrt(a);
++	}
++
++	public static double IEEEremainder(final double f1, final double f2) {
++		return Math.IEEEremainder(f1, f2);
++	}
++
++	public static double ceil(final double a) {
++		return Math.ceil(a);
++	}
++
++	public static double floor(final double a) {
++		return Math.floor(a);
++	}
++
++	public static double rint(final double a) {
++		return Math.rint(a);
++	}
++
++	public static double pow(final double a, final double b) {
++		return Math.pow(a, b);
++	}
++
++	public static int round(final float a) {
++		return Math.round(a);
++	}
++
++	public static long round(final double a) {
++		return Math.round(a);
++	}
++
++	public static double random() {
++		return Math.random();
++	}
++
++	public static int abs(final int a) {
++		return Math.abs(a);
++	}
++
++	public static long abs(final long a) {
++		return Math.abs(a);
++	}
++
++	public static float abs(final float a) {
++		return Math.abs(a);
++	}
++
++	public static double abs(final double a) {
++		return Math.abs(a);
++	}
++
++	public static int max(final int a, final int b) {
++		return Math.max(a, b);
++	}
++
++	public static long max(final long a, final long b) {
++		return Math.max(a, b);
++	}
++
++	public static float max(final float a, final float b) {
++		return Math.max(a, b);
++	}
++
++	public static double max(final double a, final double b) {
++		return Math.max(a, b);
++	}
++
++	public static int min(final int a, final int b) {
++		return Math.min(a, b);
++	}
++
++	public static long min(final long a, final long b) {
++		return Math.min(a, b);
++	}
++
++	public static float min(final float a, final float b) {
++		return Math.min(a, b);
++	}
++
++	public static double min(final double a, final double b) {
++		return Math.min(a, b);
++	}
++
++	public static double signum(final double d) {
++		return Math.signum(d);
++	}
++
++	public static float signum(final float f) {
++		return Math.signum(f);
++	}
++
++	public static double sinh(final double x) {
++		return Math.sinh(x);
++	}
++
++	public static double cosh(final double x) {
++		return Math.cosh(x);
++	}
++
++	public static double tanh(final double x) {
++		return Math.tanh(x);
++	}
++
++	public static double hypot(final double x, final double y) {
++		return Math.hypot(x, y);
++	}
++
++	public static double expm1(final double x) {
++		return Math.expm1(x);
++	}
++
++	public static double log1p(final double x) {
++		return Math.log1p(x);
++	}
++}
+diff --git a/runtime/src/java/lang/String.java b/runtime/src/java/lang/String.java
+index 2bd4b9b..8f2ae55 100644
+--- a/runtime/src/java/lang/String.java
++++ b/runtime/src/java/lang/String.java
+@@ -1023,4 +1023,40 @@ public final class String implements java.lang.CharSequence, Comparable<String>
+     public boolean isEmpty() {
+         return length() == 0;
+     }
++
++    /** warsmash-nx: as the JDK 11 (whitespace = Character.isWhitespace). */
++    public boolean isBlank() {
++        for (int i = 0; i < length(); i++)
++            if (!Character.isWhitespace(charAt(i)))
++                return false;
++        return true;
++    }
++
++    /** warsmash-nx: as the JDK (null elements become "null"). */
++    public static String join(CharSequence delimiter, CharSequence... elements) {
++        if (delimiter == null || elements == null)
++            throw new NullPointerException();
++        StringBuilder builder = new StringBuilder();
++        for (int i = 0; i < elements.length; i++) {
++            if (i > 0)
++                builder.append(delimiter);
++            builder.append(elements[i]);
++        }
++        return builder.toString();
++    }
++
++    /** warsmash-nx: as the JDK. */
++    public static String join(CharSequence delimiter, Iterable<? extends CharSequence> elements) {
++        if (delimiter == null || elements == null)
++            throw new NullPointerException();
++        StringBuilder builder = new StringBuilder();
++        boolean first = true;
++        for (CharSequence element : elements) {
++            if (!first)
++                builder.append(delimiter);
++            builder.append(element);
++            first = false;
++        }
++        return builder.toString();
++    }
+ }
+diff --git a/runtime/src/java/lang/reflect/Method.java b/runtime/src/java/lang/reflect/Method.java
+index 1cf8199..c1c3e39 100644
+--- a/runtime/src/java/lang/reflect/Method.java
++++ b/runtime/src/java/lang/reflect/Method.java
+@@ -133,6 +133,10 @@ public class Method {
+         return (Modifier.VARARGS & modifiers) != 0;
+     }
+ 
++    public boolean isBridge() { // warsmash-nx: ACC_BRIDGE
++        return (0x0040 & modifiers) != 0;
++    }
++
+     public int getModifiers() {
+         return modifiers;
+     }
+diff --git a/runtime/src/java/net/ProtocolFamily.java b/runtime/src/java/net/ProtocolFamily.java
+new file mode 100644
+index 0000000..b286f7d
+--- /dev/null
++++ b/runtime/src/java/net/ProtocolFamily.java
+@@ -0,0 +1,6 @@
++package java.net;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public interface ProtocolFamily {
++	String name();
++}
+diff --git a/runtime/src/java/net/StandardProtocolFamily.java b/runtime/src/java/net/StandardProtocolFamily.java
+new file mode 100644
+index 0000000..a75be70
+--- /dev/null
++++ b/runtime/src/java/net/StandardProtocolFamily.java
+@@ -0,0 +1,6 @@
++package java.net;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public enum StandardProtocolFamily implements ProtocolFamily {
++	INET, INET6, UNIX;
++}
+diff --git a/runtime/src/java/nio/channels/DatagramChannel.java b/runtime/src/java/nio/channels/DatagramChannel.java
+new file mode 100644
+index 0000000..b0d148f
+--- /dev/null
++++ b/runtime/src/java/nio/channels/DatagramChannel.java
+@@ -0,0 +1,50 @@
++package java.nio.channels;
++
++import java.io.IOException;
++import java.net.ProtocolFamily;
++import java.net.SocketAddress;
++import java.nio.ByteBuffer;
++import java.nio.channels.spi.AbstractSelectableChannel;
++import java.nio.channels.spi.SelectorProvider;
++
++/** warsmash-nx: missing from Clearwing 3.1.2; see SocketChannel (open() fails). */
++public abstract class DatagramChannel extends AbstractSelectableChannel implements ByteChannel {
++	protected DatagramChannel(final SelectorProvider provider) {
++		super(provider);
++	}
++
++	public static DatagramChannel open() throws IOException {
++		throw new IOException("networking is not available on this platform");
++	}
++
++	public static DatagramChannel open(final ProtocolFamily family) throws IOException {
++		throw new IOException("networking is not available on this platform");
++	}
++
++	@Override
++	public final int validOps() {
++		return SelectionKey.OP_READ | SelectionKey.OP_WRITE;
++	}
++
++	public abstract DatagramChannel bind(SocketAddress local) throws IOException;
++
++	public abstract DatagramChannel connect(SocketAddress remote) throws IOException;
++
++	public abstract DatagramChannel disconnect() throws IOException;
++
++	public abstract boolean isConnected();
++
++	public abstract SocketAddress receive(ByteBuffer dst) throws IOException;
++
++	public abstract int send(ByteBuffer src, SocketAddress target) throws IOException;
++
++	public abstract SocketAddress getRemoteAddress() throws IOException;
++
++	public abstract SocketAddress getLocalAddress() throws IOException;
++
++	@Override
++	public abstract int read(ByteBuffer dst) throws IOException;
++
++	@Override
++	public abstract int write(ByteBuffer src) throws IOException;
++}
+diff --git a/runtime/src/java/nio/channels/NonWritableChannelException.java b/runtime/src/java/nio/channels/NonWritableChannelException.java
+new file mode 100644
+index 0000000..3d2d4ac
+--- /dev/null
++++ b/runtime/src/java/nio/channels/NonWritableChannelException.java
+@@ -0,0 +1,7 @@
++package java.nio.channels;
++
++/** Missing from Clearwing's runtime; as in the JDK. */
++public class NonWritableChannelException extends IllegalStateException {
++	public NonWritableChannelException() {
++	}
++}
+diff --git a/runtime/src/java/nio/channels/ServerSocketChannel.java b/runtime/src/java/nio/channels/ServerSocketChannel.java
+new file mode 100644
+index 0000000..3a59aba
+--- /dev/null
++++ b/runtime/src/java/nio/channels/ServerSocketChannel.java
+@@ -0,0 +1,32 @@
++package java.nio.channels;
++
++import java.io.IOException;
++import java.net.SocketAddress;
++import java.nio.channels.spi.AbstractSelectableChannel;
++import java.nio.channels.spi.SelectorProvider;
++
++/** warsmash-nx: missing from Clearwing 3.1.2; see SocketChannel (open() fails). */
++public abstract class ServerSocketChannel extends AbstractSelectableChannel {
++	protected ServerSocketChannel(final SelectorProvider provider) {
++		super(provider);
++	}
++
++	public static ServerSocketChannel open() throws IOException {
++		throw new IOException("networking is not available on this platform");
++	}
++
++	@Override
++	public final int validOps() {
++		return SelectionKey.OP_ACCEPT;
++	}
++
++	public final ServerSocketChannel bind(final SocketAddress local) throws IOException {
++		return bind(local, 0);
++	}
++
++	public abstract ServerSocketChannel bind(SocketAddress local, int backlog) throws IOException;
++
++	public abstract SocketChannel accept() throws IOException;
++
++	public abstract SocketAddress getLocalAddress() throws IOException;
++}
+diff --git a/runtime/src/java/nio/channels/SocketChannel.java b/runtime/src/java/nio/channels/SocketChannel.java
+new file mode 100644
+index 0000000..761f8dd
+--- /dev/null
++++ b/runtime/src/java/nio/channels/SocketChannel.java
+@@ -0,0 +1,54 @@
++package java.nio.channels;
++
++import java.io.IOException;
++import java.net.SocketAddress;
++import java.nio.ByteBuffer;
++import java.nio.channels.spi.AbstractSelectableChannel;
++import java.nio.channels.spi.SelectorProvider;
++
++/**
++ * warsmash-nx: missing from Clearwing 3.1.2. Networking is not part of the console port (single
++ * player); Warsmash's lobby code compiles against this and open() fails with an IOException.
++ */
++public abstract class SocketChannel extends AbstractSelectableChannel implements ByteChannel {
++	protected SocketChannel(final SelectorProvider provider) {
++		super(provider);
++	}
++
++	public static SocketChannel open() throws IOException {
++		throw new IOException("networking is not available on this platform");
++	}
++
++	public static SocketChannel open(final SocketAddress remote) throws IOException {
++		throw new IOException("networking is not available on this platform");
++	}
++
++	@Override
++	public final int validOps() {
++		return SelectionKey.OP_READ | SelectionKey.OP_WRITE | SelectionKey.OP_CONNECT;
++	}
++
++	public abstract SocketChannel bind(SocketAddress local) throws IOException;
++
++	public abstract boolean isConnected();
++
++	public abstract boolean isConnectionPending();
++
++	public abstract boolean connect(SocketAddress remote) throws IOException;
++
++	public abstract boolean finishConnect() throws IOException;
++
++	public abstract SocketAddress getRemoteAddress() throws IOException;
++
++	public abstract SocketAddress getLocalAddress() throws IOException;
++
++	public abstract SocketChannel shutdownInput() throws IOException;
++
++	public abstract SocketChannel shutdownOutput() throws IOException;
++
++	@Override
++	public abstract int read(ByteBuffer dst) throws IOException;
++
++	@Override
++	public abstract int write(ByteBuffer src) throws IOException;
++}
+diff --git a/runtime/src/java/nio/charset/CharacterCodingException.java b/runtime/src/java/nio/charset/CharacterCodingException.java
+new file mode 100644
+index 0000000..420f6f1
+--- /dev/null
++++ b/runtime/src/java/nio/charset/CharacterCodingException.java
+@@ -0,0 +1,7 @@
++package java.nio.charset;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public class CharacterCodingException extends java.io.IOException {
++	public CharacterCodingException() {
++	}
++}
+diff --git a/runtime/src/java/nio/file/DirectoryStream.java b/runtime/src/java/nio/file/DirectoryStream.java
+new file mode 100644
+index 0000000..acee0c4
+--- /dev/null
++++ b/runtime/src/java/nio/file/DirectoryStream.java
+@@ -0,0 +1,16 @@
++package java.nio.file;
++
++import java.io.Closeable;
++import java.io.IOException;
++import java.util.Iterator;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public interface DirectoryStream<T> extends Closeable, Iterable<T> {
++	@FunctionalInterface
++	public static interface Filter<T> {
++		boolean accept(T entry) throws IOException;
++	}
++
++	@Override
++	Iterator<T> iterator();
++}
+diff --git a/runtime/src/java/nio/file/FileAlreadyExistsException.java b/runtime/src/java/nio/file/FileAlreadyExistsException.java
+new file mode 100644
+index 0000000..9b92e18
+--- /dev/null
++++ b/runtime/src/java/nio/file/FileAlreadyExistsException.java
+@@ -0,0 +1,12 @@
++package java.nio.file;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public class FileAlreadyExistsException extends FileSystemException {
++	public FileAlreadyExistsException(final String file) {
++		super(file);
++	}
++
++	public FileAlreadyExistsException(final String file, final String other, final String reason) {
++		super(file, other, reason);
++	}
++}
+diff --git a/runtime/src/java/nio/file/FileSystemException.java b/runtime/src/java/nio/file/FileSystemException.java
+new file mode 100644
+index 0000000..0e011d3
+--- /dev/null
++++ b/runtime/src/java/nio/file/FileSystemException.java
+@@ -0,0 +1,51 @@
++package java.nio.file;
++
++import java.io.IOException;
++
++/** warsmash-nx: missing from Clearwing 3.1.2; the JDK message format. */
++public class FileSystemException extends IOException {
++	private final String file;
++	private final String other;
++
++	public FileSystemException(final String file) {
++		super((String) null);
++		this.file = file;
++		this.other = null;
++	}
++
++	public FileSystemException(final String file, final String other, final String reason) {
++		super(reason);
++		this.file = file;
++		this.other = other;
++	}
++
++	public String getFile() {
++		return this.file;
++	}
++
++	public String getOtherFile() {
++		return this.other;
++	}
++
++	public String getReason() {
++		return super.getMessage();
++	}
++
++	@Override
++	public String getMessage() {
++		if ((this.file == null) && (this.other == null)) {
++			return getReason();
++		}
++		final StringBuilder sb = new StringBuilder();
++		if (this.file != null) {
++			sb.append(this.file);
++		}
++		if (this.other != null) {
++			sb.append(" -> ").append(this.other);
++		}
++		if (getReason() != null) {
++			sb.append(": ").append(getReason());
++		}
++		return sb.toString();
++	}
++}
+diff --git a/runtime/src/java/nio/file/InvalidPathException.java b/runtime/src/java/nio/file/InvalidPathException.java
+new file mode 100644
+index 0000000..91d2bf4
+--- /dev/null
++++ b/runtime/src/java/nio/file/InvalidPathException.java
+@@ -0,0 +1,37 @@
++package java.nio.file;
++
++/** warsmash-nx: missing from Clearwing 3.1.2 (thrown by PathImpl). */
++public class InvalidPathException extends IllegalArgumentException {
++	private final String input;
++	private final int index;
++
++	public InvalidPathException(final String input, final String reason, final int index) {
++		super(reason);
++		if ((input == null) || (reason == null)) {
++			throw new NullPointerException();
++		}
++		this.input = input;
++		this.index = index;
++	}
++
++	public InvalidPathException(final String input, final String reason) {
++		this(input, reason, -1);
++	}
++
++	public String getInput() {
++		return this.input;
++	}
++
++	public String getReason() {
++		return super.getMessage();
++	}
++
++	public int getIndex() {
++		return this.index;
++	}
++
++	@Override
++	public String getMessage() {
++		return getReason() + (this.index > -1 ? " at index " + this.index : "") + ": " + this.input;
++	}
++}
+diff --git a/runtime/src/java/nio/file/NoSuchFileException.java b/runtime/src/java/nio/file/NoSuchFileException.java
+new file mode 100644
+index 0000000..03b6689
+--- /dev/null
++++ b/runtime/src/java/nio/file/NoSuchFileException.java
+@@ -0,0 +1,12 @@
++package java.nio.file;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public class NoSuchFileException extends FileSystemException {
++	public NoSuchFileException(final String file) {
++		super(file);
++	}
++
++	public NoSuchFileException(final String file, final String other, final String reason) {
++		super(file, other, reason);
++	}
++}
+diff --git a/runtime/src/java/nio/file/NotDirectoryException.java b/runtime/src/java/nio/file/NotDirectoryException.java
+new file mode 100644
+index 0000000..033d8e3
+--- /dev/null
++++ b/runtime/src/java/nio/file/NotDirectoryException.java
+@@ -0,0 +1,8 @@
++package java.nio.file;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public class NotDirectoryException extends FileSystemException {
++	public NotDirectoryException(final String file) {
++		super(file);
++	}
++}
+diff --git a/runtime/src/java/nio/file/Path.java b/runtime/src/java/nio/file/Path.java
+index edc7248..02a3d4f 100644
+--- a/runtime/src/java/nio/file/Path.java
++++ b/runtime/src/java/nio/file/Path.java
+@@ -9,6 +9,8 @@ import java.util.NoSuchElementException;
+ 
+ public interface Path extends Comparable<Path>, Iterable<Path>, Watchable {
+     static Path of(String first, String... more) {
++        if (true) // warsmash-nx: Paths over PathImpl (runtime-additions)
++            return Paths.get(first, more);
+         throw new UnsupportedOperationException();
+ //        return FileSystems.getDefault().getPath(first, more);
+     }
+diff --git a/runtime/src/java/nio/file/PathImpl.java b/runtime/src/java/nio/file/PathImpl.java
+new file mode 100644
+index 0000000..58be96e
+--- /dev/null
++++ b/runtime/src/java/nio/file/PathImpl.java
+@@ -0,0 +1,335 @@
++package java.nio.file;
++
++import java.io.File;
++import java.io.IOException;
++import java.net.URI;
++import java.util.ArrayList;
++
++/**
++ * warsmash-nx: Clearwing 3.1.2 declares java.nio.file.Path but has no implementation
++ * (File.toPath() returned null, Path.of threw). This is the JDK's Unix path, by its rules: '/'
++ * separates names, repeated and trailing separators are dropped, absolute = starts with '/', the
++ * empty path has one empty name. Console paths such as "sdmc:/switch/warsmash" are relative by
++ * these rules ("sdmc:" is the first name), which is all resolve/relativize need.
++ */
++final class PathImpl implements Path {
++	private final String path; // normalized: no repeated or trailing '/' (except "/")
++	private String[] names; // lazily split
++
++	PathImpl(final String input) {
++		this.path = normalizeSeparators(input);
++	}
++
++	private static String normalizeSeparators(final String input) {
++		if (input.indexOf('\u0000') >= 0) {
++			throw new InvalidPathException(input, "Nul character not allowed");
++		}
++		final StringBuilder out = new StringBuilder(input.length());
++		char previous = 0;
++		for (int i = 0; i < input.length(); i++) {
++			final char c = input.charAt(i);
++			if ((c == '/') && (previous == '/')) {
++				continue;
++			}
++			out.append(c);
++			previous = c;
++		}
++		int length = out.length();
++		if ((length > 1) && (out.charAt(length - 1) == '/')) {
++			out.setLength(length - 1);
++		}
++		return out.toString();
++	}
++
++	private String[] names() {
++		if (this.names == null) {
++			if (this.path.isEmpty()) {
++				this.names = new String[] { "" };
++			}
++			else if (this.path.equals("/")) {
++				this.names = new String[0];
++			}
++			else {
++				final ArrayList<String> list = new ArrayList<>();
++				int start = this.path.charAt(0) == '/' ? 1 : 0;
++				for (int i = start; i <= this.path.length(); i++) {
++					if ((i == this.path.length()) || (this.path.charAt(i) == '/')) {
++						list.add(this.path.substring(start, i));
++						start = i + 1;
++					}
++				}
++				this.names = list.toArray(new String[0]);
++			}
++		}
++		return this.names;
++	}
++
++	private static Path join(final boolean absolute, final String[] names, final int from, final int to) {
++		final StringBuilder out = new StringBuilder();
++		if (absolute) {
++			out.append('/');
++		}
++		for (int i = from; i < to; i++) {
++			if (i > from) {
++				out.append('/');
++			}
++			out.append(names[i]);
++		}
++		return new PathImpl(out.toString());
++	}
++
++	private static PathImpl check(final Path other) {
++		if (other == null) {
++			throw new NullPointerException();
++		}
++		if (!(other instanceof PathImpl)) {
++			throw new ProviderMismatchException();
++		}
++		return (PathImpl) other;
++	}
++
++	@Override
++	public FileSystem getFileSystem() {
++		return null; // Clearwing has no FileSystem; the String overloads below do not need one
++	}
++
++	@Override
++	public boolean isAbsolute() {
++		return this.path.startsWith("/");
++	}
++
++	@Override
++	public Path getRoot() {
++		return isAbsolute() ? new PathImpl("/") : null;
++	}
++
++	@Override
++	public Path getFileName() {
++		if (this.path.isEmpty()) {
++			return this;
++		}
++		final String[] n = names();
++		return n.length == 0 ? null : new PathImpl(n[n.length - 1]);
++	}
++
++	@Override
++	public Path getParent() {
++		final String[] n = names();
++		if (n.length == 0) {
++			return null;
++		}
++		if (n.length == 1) {
++			return isAbsolute() ? getRoot() : null;
++		}
++		return join(isAbsolute(), n, 0, n.length - 1);
++	}
++
++	@Override
++	public int getNameCount() {
++		return names().length;
++	}
++
++	@Override
++	public Path getName(final int index) {
++		final String[] n = names();
++		if ((index < 0) || (index >= n.length)) {
++			throw new IllegalArgumentException();
++		}
++		return new PathImpl(n[index]);
++	}
++
++	@Override
++	public Path subpath(final int beginIndex, final int endIndex) {
++		final String[] n = names();
++		if ((beginIndex < 0) || (beginIndex >= n.length) || (endIndex > n.length) || (beginIndex >= endIndex)) {
++			throw new IllegalArgumentException();
++		}
++		return join(false, n, beginIndex, endIndex);
++	}
++
++	@Override
++	public boolean startsWith(final Path other) {
++		final PathImpl that = check(other);
++		if (that.isAbsolute() != isAbsolute()) {
++			return false;
++		}
++		if (that.path.isEmpty()) {
++			return this.path.isEmpty();
++		}
++		final String[] mine = names(), theirs = that.names();
++		if (theirs.length > mine.length) {
++			return false;
++		}
++		for (int i = 0; i < theirs.length; i++) {
++			if (!mine[i].equals(theirs[i])) {
++				return false;
++			}
++		}
++		return true;
++	}
++
++	@Override
++	public boolean startsWith(final String other) {
++		return startsWith(new PathImpl(other));
++	}
++
++	@Override
++	public boolean endsWith(final Path other) {
++		final PathImpl that = check(other);
++		if (that.isAbsolute()) {
++			return that.path.equals(this.path);
++		}
++		if (that.path.isEmpty()) {
++			return this.path.isEmpty();
++		}
++		final String[] mine = names(), theirs = that.names();
++		if (theirs.length > mine.length) {
++			return false;
++		}
++		for (int i = 0; i < theirs.length; i++) {
++			if (!mine[mine.length - theirs.length + i].equals(theirs[i])) {
++				return false;
++			}
++		}
++		return true;
++	}
++
++	@Override
++	public boolean endsWith(final String other) {
++		return endsWith(new PathImpl(other));
++	}
++
++	@Override
++	public Path normalize() {
++		final String[] n = names();
++		final ArrayList<String> out = new ArrayList<>();
++		for (final String name : n) {
++			if (name.equals(".")) {
++				continue;
++			}
++			if (name.equals("..")) {
++				if (!out.isEmpty() && !out.get(out.size() - 1).equals("..")) {
++					out.remove(out.size() - 1);
++					continue;
++				}
++				if (isAbsolute()) {
++					continue; // "/.." is "/"
++				}
++			}
++			out.add(name);
++		}
++		return join(isAbsolute(), out.toArray(new String[0]), 0, out.size());
++	}
++
++	@Override
++	public Path resolve(final Path other) {
++		final PathImpl that = check(other);
++		if (that.isAbsolute()) {
++			return that;
++		}
++		if (that.path.isEmpty()) {
++			return this;
++		}
++		if (this.path.isEmpty()) {
++			return that;
++		}
++		return new PathImpl(this.path.equals("/") ? "/" + that.path : this.path + "/" + that.path);
++	}
++
++	@Override
++	public Path resolve(final String other) {
++		return resolve(new PathImpl(other));
++	}
++
++	@Override
++	public Path resolveSibling(final String other) {
++		return resolveSibling(new PathImpl(other));
++	}
++
++	@Override
++	public Path relativize(final Path other) {
++		final PathImpl that = check(other);
++		if (that.isAbsolute() != isAbsolute()) {
++			throw new IllegalArgumentException("'other' is different type of Path");
++		}
++		if (this.path.equals(that.path)) {
++			return new PathImpl("");
++		}
++		if (this.path.isEmpty()) {
++			return that;
++		}
++		final String[] mine = names(), theirs = that.names();
++		final int shorter = Math.min(mine.length, theirs.length);
++		int common = 0;
++		while ((common < shorter) && mine[common].equals(theirs[common])) {
++			common++;
++		}
++		final StringBuilder out = new StringBuilder();
++		for (int i = common; i < mine.length; i++) {
++			if (out.length() > 0) {
++				out.append('/');
++			}
++			out.append("..");
++		}
++		for (int i = common; i < theirs.length; i++) {
++			if (out.length() > 0) {
++				out.append('/');
++			}
++			out.append(theirs[i]);
++		}
++		return new PathImpl(out.toString());
++	}
++
++	@Override
++	public URI toUri() {
++		throw new UnsupportedOperationException("Path.toUri");
++	}
++
++	@Override
++	public Path toAbsolutePath() {
++		if (isAbsolute()) {
++			return this;
++		}
++		return new PathImpl(new File(this.path.isEmpty() ? "." : this.path).getAbsolutePath());
++	}
++
++	@Override
++	public Path toRealPath(final LinkOption... options) throws IOException {
++		final Path real = toAbsolutePath().normalize();
++		if (!new File(real.toString()).exists()) {
++			throw new NoSuchFileException(this.path);
++		}
++		return real;
++	}
++
++	@Override
++	public File toFile() {
++		return new File(this.path);
++	}
++
++	@Override
++	public WatchKey register(final WatchService watcher, final WatchEvent.Kind<?>[] events,
++			final WatchEvent.Modifier... modifiers) throws IOException {
++		throw new UnsupportedOperationException("Path.register");
++	}
++
++	@Override
++	public int compareTo(final Path other) {
++		return this.path.compareTo(check(other).path);
++	}
++
++	@Override
++	public boolean equals(final Object other) {
++		return (other instanceof PathImpl) && ((PathImpl) other).path.equals(this.path);
++	}
++
++	@Override
++	public int hashCode() {
++		return this.path.hashCode();
++	}
++
++	@Override
++	public String toString() {
++		return this.path;
++	}
++}
+diff --git a/runtime/src/java/nio/file/Paths.java b/runtime/src/java/nio/file/Paths.java
+new file mode 100644
+index 0000000..4513885
+--- /dev/null
++++ b/runtime/src/java/nio/file/Paths.java
+@@ -0,0 +1,23 @@
++package java.nio.file;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. Paths over PathImpl (the JDK Unix rules). */
++public final class Paths {
++	private Paths() {
++	}
++
++	public static Path get(final String first, final String... more) {
++		if ((more == null) || (more.length == 0)) {
++			return new PathImpl(first);
++		}
++		final StringBuilder sb = new StringBuilder(first);
++		for (final String segment : more) {
++			if (!segment.isEmpty()) {
++				if (sb.length() > 0) {
++					sb.append('/');
++				}
++				sb.append(segment);
++			}
++		}
++		return new PathImpl(sb.toString());
++	}
++}
+diff --git a/runtime/src/java/nio/file/ProviderMismatchException.java b/runtime/src/java/nio/file/ProviderMismatchException.java
+new file mode 100644
+index 0000000..90fe59b
+--- /dev/null
++++ b/runtime/src/java/nio/file/ProviderMismatchException.java
+@@ -0,0 +1,11 @@
++package java.nio.file;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public class ProviderMismatchException extends IllegalArgumentException {
++	public ProviderMismatchException() {
++	}
++
++	public ProviderMismatchException(final String msg) {
++		super(msg);
++	}
++}
+diff --git a/runtime/src/java/nio/file/StandardCopyOption.java b/runtime/src/java/nio/file/StandardCopyOption.java
+new file mode 100644
+index 0000000..64760b7
+--- /dev/null
++++ b/runtime/src/java/nio/file/StandardCopyOption.java
+@@ -0,0 +1,6 @@
++package java.nio.file;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public enum StandardCopyOption implements CopyOption {
++	REPLACE_EXISTING, COPY_ATTRIBUTES, ATOMIC_MOVE;
++}
+diff --git a/runtime/src/java/nio/file/StandardOpenOption.java b/runtime/src/java/nio/file/StandardOpenOption.java
+new file mode 100644
+index 0000000..3bb5365
+--- /dev/null
++++ b/runtime/src/java/nio/file/StandardOpenOption.java
+@@ -0,0 +1,6 @@
++package java.nio.file;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public enum StandardOpenOption implements OpenOption {
++	READ, WRITE, APPEND, TRUNCATE_EXISTING, CREATE, CREATE_NEW, DELETE_ON_CLOSE, SPARSE, SYNC, DSYNC;
++}
+diff --git a/runtime/src/java/nio/file/attribute/FileAttribute.java b/runtime/src/java/nio/file/attribute/FileAttribute.java
+new file mode 100644
+index 0000000..0ad1304
+--- /dev/null
++++ b/runtime/src/java/nio/file/attribute/FileAttribute.java
+@@ -0,0 +1,8 @@
++package java.nio.file.attribute;
++
++/** warsmash-nx: missing from Clearwing 3.1.2 (appears in Files/FileChannel signatures). */
++public interface FileAttribute<T> {
++	String name();
++
++	T value();
++}
+diff --git a/runtime/src/java/security/AccessController.java b/runtime/src/java/security/AccessController.java
+new file mode 100644
+index 0000000..e7ff406
+--- /dev/null
++++ b/runtime/src/java/security/AccessController.java
+@@ -0,0 +1,27 @@
++package java.security;
++
++/**
++ * warsmash-nx: missing from Clearwing 3.1.2. There is no security manager on this platform, so
++ * every action runs directly (what the JDK does when none is installed). Gson uses it to read
++ * enum constants reflectively.
++ */
++public final class AccessController {
++	private AccessController() {
++	}
++
++	public static <T> T doPrivileged(PrivilegedAction<T> action) {
++		return action.run();
++	}
++
++	public static <T> T doPrivileged(PrivilegedExceptionAction<T> action) throws PrivilegedActionException {
++		try {
++			return action.run();
++		}
++		catch (RuntimeException e) {
++			throw e;
++		}
++		catch (Exception e) {
++			throw new PrivilegedActionException(e);
++		}
++	}
++}
+diff --git a/runtime/src/java/security/PrivilegedAction.java b/runtime/src/java/security/PrivilegedAction.java
+new file mode 100644
+index 0000000..44cf2ac
+--- /dev/null
++++ b/runtime/src/java/security/PrivilegedAction.java
+@@ -0,0 +1,6 @@
++package java.security;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public interface PrivilegedAction<T> {
++	T run();
++}
+diff --git a/runtime/src/java/security/PrivilegedActionException.java b/runtime/src/java/security/PrivilegedActionException.java
+new file mode 100644
+index 0000000..330af8c
+--- /dev/null
++++ b/runtime/src/java/security/PrivilegedActionException.java
+@@ -0,0 +1,18 @@
++package java.security;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. As the JDK: wraps the checked exception as the cause. */
++public class PrivilegedActionException extends Exception {
++	public PrivilegedActionException(Exception exception) {
++		super(null, exception);
++	}
++
++	public Exception getException() {
++		return (Exception) getCause();
++	}
++
++	@Override
++	public String toString() {
++		Throwable cause = getCause();
++		return (cause != null) ? (getClass().getName() + ": " + cause.toString()) : getClass().getName();
++	}
++}
+diff --git a/runtime/src/java/security/PrivilegedExceptionAction.java b/runtime/src/java/security/PrivilegedExceptionAction.java
+new file mode 100644
+index 0000000..675cc5f
+--- /dev/null
++++ b/runtime/src/java/security/PrivilegedExceptionAction.java
+@@ -0,0 +1,6 @@
++package java.security;
++
++/** warsmash-nx: missing from Clearwing 3.1.2. */
++public interface PrivilegedExceptionAction<T> {
++	T run() throws Exception;
++}
+diff --git a/runtime/src/java/sql/Date.java b/runtime/src/java/sql/Date.java
+new file mode 100644
+index 0000000..e7afec4
+--- /dev/null
++++ b/runtime/src/java/sql/Date.java
+@@ -0,0 +1,11 @@
++package java.sql;
++
++/**
++ * warsmash-nx: missing from Clearwing 3.1.2. Gson's java.sql adapters construct it; only the
++ * millisecond constructor and setTime, as the JDK's (no valueOf/toString date-only form).
++ */
++public class Date extends java.util.Date {
++	public Date(long date) {
++		super(date);
++	}
++}
+diff --git a/runtime/src/java/sql/Time.java b/runtime/src/java/sql/Time.java
+new file mode 100644
+index 0000000..3e25e78
+--- /dev/null
++++ b/runtime/src/java/sql/Time.java
+@@ -0,0 +1,8 @@
++package java.sql;
++
++/** warsmash-nx: missing from Clearwing 3.1.2 (see java.sql.Date). */
++public class Time extends java.util.Date {
++	public Time(long time) {
++		super(time);
++	}
++}
+diff --git a/runtime/src/java/sql/Timestamp.java b/runtime/src/java/sql/Timestamp.java
+new file mode 100644
+index 0000000..0b481ff
+--- /dev/null
++++ b/runtime/src/java/sql/Timestamp.java
+@@ -0,0 +1,27 @@
++package java.sql;
++
++/**
++ * warsmash-nx: missing from Clearwing 3.1.2 (see java.sql.Date). As the JDK, the sub-second part
++ * is kept as nanos and getTime() still returns the full milliseconds.
++ */
++public class Timestamp extends java.util.Date {
++	private int nanos;
++
++	public Timestamp(long time) {
++		super((time / 1000) * 1000);
++		nanos = (int) ((time % 1000) * 1000000);
++		if (nanos < 0) {
++			nanos = 1000000000 + nanos;
++			super.setTime(((time / 1000) - 1) * 1000);
++		}
++	}
++
++	@Override
++	public long getTime() {
++		return super.getTime() + (nanos / 1000000);
++	}
++
++	public int getNanos() {
++		return nanos;
++	}
++}
+diff --git a/runtime/src/java/util/Currency.java b/runtime/src/java/util/Currency.java
+new file mode 100644
+index 0000000..cb8ae56
+--- /dev/null
++++ b/runtime/src/java/util/Currency.java
+@@ -0,0 +1,42 @@
++package java.util;
++
++/**
++ * warsmash-nx: missing from Clearwing 3.1.2. Gson's Currency adapter needs getInstance and
++ * getCurrencyCode. No ISO 4217 table here: any three upper-case letters are accepted (the JDK
++ * accepts only known codes), one shared instance per code, as the JDK.
++ */
++public final class Currency {
++	private static final HashMap<String, Currency> INSTANCES = new HashMap<>();
++	private final String currencyCode;
++
++	private Currency(String currencyCode) {
++		this.currencyCode = currencyCode;
++	}
++
++	public static Currency getInstance(String currencyCode) {
++		if (currencyCode.length() != 3)
++			throw new IllegalArgumentException();
++		for (int i = 0; i < 3; i++) {
++			char c = currencyCode.charAt(i);
++			if (c < 'A' || c > 'Z')
++				throw new IllegalArgumentException();
++		}
++		synchronized (INSTANCES) {
++			Currency currency = INSTANCES.get(currencyCode);
++			if (currency == null) {
++				currency = new Currency(currencyCode);
++				INSTANCES.put(currencyCode, currency);
++			}
++			return currency;
++		}
++	}
++
++	public String getCurrencyCode() {
++		return currencyCode;
++	}
++
++	@Override
++	public String toString() {
++		return currencyCode;
++	}
++}
+diff --git a/runtime/src/java/util/PriorityQueue.java b/runtime/src/java/util/PriorityQueue.java
+index 1a45e41..e236641 100644
+--- a/runtime/src/java/util/PriorityQueue.java
++++ b/runtime/src/java/util/PriorityQueue.java
+@@ -62,6 +62,10 @@ public class PriorityQueue<E> extends AbstractQueue<E> {
+         this(initialCapacity, null);
+     }
+ 
++    public PriorityQueue(Comparator<? super E> comparator) { // warsmash-nx
++        this(11, comparator);
++    }
++
+     /**
+      * Constructs a priority queue with the specified capacity and comparator.
+      * 
+diff --git a/runtime/src/java/util/PropertyResourceBundle.java b/runtime/src/java/util/PropertyResourceBundle.java
+new file mode 100644
+index 0000000..140389a
+--- /dev/null
++++ b/runtime/src/java/util/PropertyResourceBundle.java
+@@ -0,0 +1,58 @@
++package java.util;
++
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.Reader;
++
++/**
++ * warsmash-nx: missing from Clearwing 3.1.2 (whose ResourceBundle.getString returns the key itself).
++ * Like the JDK: loads with Properties.load and throws MissingResourceException for a missing key;
++ * Warsmash's WorldEditStrings relies on that (with the key returned, its WESTRING loop never ends).
++ */
++public class PropertyResourceBundle extends ResourceBundle {
++	private final Map<String, Object> lookup;
++
++	@SuppressWarnings({ "unchecked", "rawtypes" })
++	public PropertyResourceBundle(final InputStream stream) throws IOException {
++		final Properties properties = new Properties();
++		properties.load(stream);
++		this.lookup = new HashMap(properties);
++	}
++
++	@SuppressWarnings({ "unchecked", "rawtypes" })
++	public PropertyResourceBundle(final Reader reader) throws IOException {
++		final Properties properties = new Properties();
++		properties.load(reader);
++		this.lookup = new HashMap(properties);
++	}
++
++	public Object handleGetObject(final String key) {
++		if (key == null) {
++			throw new NullPointerException();
++		}
++		return this.lookup.get(key);
++	}
++
++	@Override
++	public String getString(final String key) {
++		final Object value = handleGetObject(key);
++		if (value == null) {
++			throw new MissingResourceException("Can't find resource for bundle " + getClass().getName() + ", key "
++					+ key, getClass().getName(), key);
++		}
++		return (String) value;
++	}
++
++	public boolean containsKey(final String key) {
++		return handleGetObject(key) != null;
++	}
++
++	@Override
++	public Enumeration<String> getKeys() {
++		return Collections.enumeration(this.lookup.keySet());
++	}
++
++	public Set<String> keySet() {
++		return this.lookup.keySet();
++	}
++}
+diff --git a/runtime/src/java/util/Random.java b/runtime/src/java/util/Random.java
+index 1f14361..ae2abc7 100644
+--- a/runtime/src/java/util/Random.java
++++ b/runtime/src/java/util/Random.java
+@@ -81,6 +81,20 @@ public class Random{
+         return (next(24) / 16777216f);
+     }
+ 
++    /**
++     * warsmash-nx: Java 17 (RandomGenerator.nextFloat(float) = RandomSupport.checkBound +
++     * boundedNextFloat): nextFloat() * bound, pulled below bound if rounding reached it.
++     */
++    public float nextFloat(float bound) {
++        if (!(bound > 0.0 && bound < Float.POSITIVE_INFINITY))
++            throw new IllegalArgumentException("bound must be finite and positive");
++        float r = nextFloat();
++        r = r * bound;
++        if (r >= bound)
++            r = Float.intBitsToFloat(Float.floatToRawIntBits(bound) - 1); // Math.nextDown, bound > 0
++        return r;
++    }
++
+     /**
+      * Returns the next pseudorandom, uniformly distributed int value from this random number generator's sequence. The general contract of nextInt is that one int value is pseudorandomly generated and returned. All 232 possible int values are produced with (approximately) equal probability. The method nextInt is implemented by class Random as follows: public int nextInt() { return next(32); }
+      */
+diff --git a/runtime/src/java/util/concurrent/ConcurrentSkipListMap.java b/runtime/src/java/util/concurrent/ConcurrentSkipListMap.java
+new file mode 100644
+index 0000000..890f655
+--- /dev/null
++++ b/runtime/src/java/util/concurrent/ConcurrentSkipListMap.java
+@@ -0,0 +1,366 @@
++package java.util.concurrent;
++
++import java.util.AbstractMap;
++import java.util.Collection;
++import java.util.Comparator;
++import java.util.Map;
++import java.util.NavigableMap;
++import java.util.NavigableSet;
++import java.util.Set;
++import java.util.SortedMap;
++import java.util.TreeMap;
++
++/**
++ * warsmash-nx: missing from Clearwing 3.1.2 (Gson constructs one for fields typed
++ * ConcurrentNavigableMap/ConcurrentSkipListMap; Warsmash itself never does). Not a skip list: a
++ * TreeMap behind one lock, and every sub-map view shares that lock. Same ordering, nulls refused,
++ * entries handed out are immutable snapshots, as the JDK's. Deviation: the key/entry/value views
++ * and their iterators are the TreeMap's, so they are not weakly consistent (a concurrent change may
++ * throw ConcurrentModificationException).
++ */
++public class ConcurrentSkipListMap<K, V> extends AbstractMap<K, V> implements ConcurrentNavigableMap<K, V>, Cloneable {
++	private final NavigableMap<K, V> m;
++	private final Object lock;
++
++	public ConcurrentSkipListMap() {
++		this(new TreeMap<K, V>(), null);
++	}
++
++	public ConcurrentSkipListMap(Comparator<? super K> comparator) {
++		this(new TreeMap<K, V>(comparator), null);
++	}
++
++	public ConcurrentSkipListMap(Map<? extends K, ? extends V> map) {
++		this(new TreeMap<K, V>(), null);
++		putAll(map);
++	}
++
++	public ConcurrentSkipListMap(SortedMap<K, ? extends V> map) {
++		this(new TreeMap<K, V>(map.comparator()), null);
++		putAll(map);
++	}
++
++	private ConcurrentSkipListMap(NavigableMap<K, V> m, Object lock) {
++		this.m = m;
++		this.lock = lock != null ? lock : this;
++	}
++
++	private ConcurrentSkipListMap<K, V> view(NavigableMap<K, V> v) {
++		return new ConcurrentSkipListMap<K, V>(v, lock);
++	}
++
++	private static void checkKey(Object key) {
++		if (key == null)
++			throw new NullPointerException();
++	}
++
++	private static void checkKeyValue(Object key, Object value) {
++		if (key == null || value == null)
++			throw new NullPointerException();
++	}
++
++	/** As the JDK: entries handed out are immutable snapshots. */
++	private static <K, V> Map.Entry<K, V> snapshot(Map.Entry<K, V> e) {
++		return e == null ? null : new AbstractMap.SimpleImmutableEntry<K, V>(e.getKey(), e.getValue());
++	}
++
++	@Override
++	public int size() {
++		synchronized (lock) {
++			return m.size();
++		}
++	}
++
++	@Override
++	public boolean isEmpty() {
++		synchronized (lock) {
++			return m.isEmpty();
++		}
++	}
++
++	@Override
++	public boolean containsKey(Object key) {
++		checkKey(key);
++		synchronized (lock) {
++			return m.containsKey(key);
++		}
++	}
++
++	@Override
++	public boolean containsValue(Object value) {
++		if (value == null)
++			throw new NullPointerException();
++		synchronized (lock) {
++			return m.containsValue(value);
++		}
++	}
++
++	@Override
++	public V get(Object key) {
++		checkKey(key);
++		synchronized (lock) {
++			return m.get(key);
++		}
++	}
++
++	@Override
++	public V put(K key, V value) {
++		checkKeyValue(key, value);
++		synchronized (lock) {
++			return m.put(key, value);
++		}
++	}
++
++	@Override
++	public V remove(Object key) {
++		checkKey(key);
++		synchronized (lock) {
++			return m.remove(key);
++		}
++	}
++
++	@Override
++	public void clear() {
++		synchronized (lock) {
++			m.clear();
++		}
++	}
++
++	@Override
++	public V putIfAbsent(K key, V value) {
++		checkKeyValue(key, value);
++		synchronized (lock) {
++			V old = m.get(key);
++			if (old == null)
++				m.put(key, value);
++			return old;
++		}
++	}
++
++	@Override
++	public boolean remove(Object key, Object value) {
++		checkKey(key);
++		synchronized (lock) {
++			V old = m.get(key);
++			if (old != null && value != null && old.equals(value)) {
++				m.remove(key);
++				return true;
++			}
++			return false;
++		}
++	}
++
++	@Override
++	public V replace(K key, V value) {
++		checkKeyValue(key, value);
++		synchronized (lock) {
++			return m.containsKey(key) ? m.put(key, value) : null;
++		}
++	}
++
++	@Override
++	public boolean replace(K key, V oldValue, V newValue) {
++		checkKeyValue(key, oldValue);
++		if (newValue == null)
++			throw new NullPointerException();
++		synchronized (lock) {
++			V old = m.get(key);
++			if (old != null && old.equals(oldValue)) {
++				m.put(key, newValue);
++				return true;
++			}
++			return false;
++		}
++	}
++
++	@Override
++	public Comparator<? super K> comparator() {
++		return m.comparator();
++	}
++
++	@Override
++	public K firstKey() {
++		synchronized (lock) {
++			return m.firstKey();
++		}
++	}
++
++	@Override
++	public K lastKey() {
++		synchronized (lock) {
++			return m.lastKey();
++		}
++	}
++
++	@Override
++	public Map.Entry<K, V> firstEntry() {
++		synchronized (lock) {
++			return snapshot(m.firstEntry());
++		}
++	}
++
++	@Override
++	public Map.Entry<K, V> lastEntry() {
++		synchronized (lock) {
++			return snapshot(m.lastEntry());
++		}
++	}
++
++	@Override
++	public Map.Entry<K, V> pollFirstEntry() {
++		synchronized (lock) {
++			return snapshot(m.pollFirstEntry());
++		}
++	}
++
++	@Override
++	public Map.Entry<K, V> pollLastEntry() {
++		synchronized (lock) {
++			return snapshot(m.pollLastEntry());
++		}
++	}
++
++	@Override
++	public Map.Entry<K, V> lowerEntry(K key) {
++		checkKey(key);
++		synchronized (lock) {
++			return snapshot(m.lowerEntry(key));
++		}
++	}
++
++	@Override
++	public K lowerKey(K key) {
++		checkKey(key);
++		synchronized (lock) {
++			return m.lowerKey(key);
++		}
++	}
++
++	@Override
++	public Map.Entry<K, V> floorEntry(K key) {
++		checkKey(key);
++		synchronized (lock) {
++			return snapshot(m.floorEntry(key));
++		}
++	}
++
++	@Override
++	public K floorKey(K key) {
++		checkKey(key);
++		synchronized (lock) {
++			return m.floorKey(key);
++		}
++	}
++
++	@Override
++	public Map.Entry<K, V> ceilingEntry(K key) {
++		checkKey(key);
++		synchronized (lock) {
++			return snapshot(m.ceilingEntry(key));
++		}
++	}
++
++	@Override
++	public K ceilingKey(K key) {
++		checkKey(key);
++		synchronized (lock) {
++			return m.ceilingKey(key);
++		}
++	}
++
++	@Override
++	public Map.Entry<K, V> higherEntry(K key) {
++		checkKey(key);
++		synchronized (lock) {
++			return snapshot(m.higherEntry(key));
++		}
++	}
++
++	@Override
++	public K higherKey(K key) {
++		checkKey(key);
++		synchronized (lock) {
++			return m.higherKey(key);
++		}
++	}
++
++	@Override
++	public ConcurrentNavigableMap<K, V> subMap(K fromKey, boolean fromInclusive, K toKey, boolean toInclusive) {
++		checkKeyValue(fromKey, toKey);
++		synchronized (lock) {
++			return view(m.subMap(fromKey, fromInclusive, toKey, toInclusive));
++		}
++	}
++
++	@Override
++	public ConcurrentNavigableMap<K, V> headMap(K toKey, boolean inclusive) {
++		checkKey(toKey);
++		synchronized (lock) {
++			return view(m.headMap(toKey, inclusive));
++		}
++	}
++
++	@Override
++	public ConcurrentNavigableMap<K, V> tailMap(K fromKey, boolean inclusive) {
++		checkKey(fromKey);
++		synchronized (lock) {
++			return view(m.tailMap(fromKey, inclusive));
++		}
++	}
++
++	@Override
++	public ConcurrentNavigableMap<K, V> subMap(K fromKey, K toKey) {
++		return subMap(fromKey, true, toKey, false);
++	}
++
++	@Override
++	public ConcurrentNavigableMap<K, V> headMap(K toKey) {
++		return headMap(toKey, false);
++	}
++
++	@Override
++	public ConcurrentNavigableMap<K, V> tailMap(K fromKey) {
++		return tailMap(fromKey, true);
++	}
++
++	@Override
++	public ConcurrentNavigableMap<K, V> descendingMap() {
++		synchronized (lock) {
++			return view(m.descendingMap());
++		}
++	}
++
++	@Override
++	public NavigableSet<K> navigableKeySet() {
++		return m.navigableKeySet();
++	}
++
++	@Override
++	public NavigableSet<K> keySet() {
++		return m.navigableKeySet();
++	}
++
++	@Override
++	public NavigableSet<K> descendingKeySet() {
++		return m.descendingKeySet();
++	}
++
++	@Override
++	public Set<Map.Entry<K, V>> entrySet() {
++		return m.entrySet();
++	}
++
++	@Override
++	public Collection<V> values() {
++		return m.values();
++	}
++
++	@Override
++	public ConcurrentSkipListMap<K, V> clone() {
++		synchronized (lock) {
++			ConcurrentSkipListMap<K, V> copy = new ConcurrentSkipListMap<K, V>(comparator());
++			copy.putAll(m);
++			return copy;
++		}
++	}
++}
+diff --git a/runtime/src/java/util/concurrent/atomic/AtomicLongArray.java b/runtime/src/java/util/concurrent/atomic/AtomicLongArray.java
+new file mode 100644
+index 0000000..1a0ad52
+--- /dev/null
++++ b/runtime/src/java/util/concurrent/atomic/AtomicLongArray.java
+@@ -0,0 +1,115 @@
++package java.util.concurrent.atomic;
++
++import java.util.function.LongBinaryOperator;
++import java.util.function.LongUnaryOperator;
++
++/**
++ * warsmash-nx: missing from Clearwing 3.1.2. A long[] behind the object's monitor, as Clearwing's
++ * own AtomicIntegerArray (Java 8 API; results and toString as the JDK's).
++ */
++public class AtomicLongArray implements java.io.Serializable {
++	private static final long serialVersionUID = -2308431214976778248L;
++	private final long[] array;
++
++	public AtomicLongArray(int length) {
++		array = new long[length];
++	}
++
++	public AtomicLongArray(long[] array) {
++		this.array = array.clone();
++	}
++
++	public final int length() {
++		return array.length;
++	}
++
++	public final synchronized long get(int i) {
++		return array[i];
++	}
++
++	public final synchronized void set(int i, long newValue) {
++		array[i] = newValue;
++	}
++
++	public final void lazySet(int i, long newValue) {
++		set(i, newValue);
++	}
++
++	public final synchronized long getAndSet(int i, long newValue) {
++		long value = array[i];
++		array[i] = newValue;
++		return value;
++	}
++
++	public final synchronized boolean compareAndSet(int i, long expect, long update) {
++		if (array[i] != expect)
++			return false;
++		array[i] = update;
++		return true;
++	}
++
++	public final boolean weakCompareAndSet(int i, long expect, long update) {
++		return compareAndSet(i, expect, update);
++	}
++
++	public final synchronized long getAndAdd(int i, long delta) {
++		long value = array[i];
++		array[i] = value + delta;
++		return value;
++	}
++
++	public final long getAndIncrement(int i) {
++		return getAndAdd(i, 1);
++	}
++
++	public final long getAndDecrement(int i) {
++		return getAndAdd(i, -1);
++	}
++
++	public final long incrementAndGet(int i) {
++		return getAndAdd(i, 1) + 1;
++	}
++
++	public final long decrementAndGet(int i) {
++		return getAndAdd(i, -1) - 1;
++	}
++
++	public final long addAndGet(int i, long delta) {
++		return getAndAdd(i, delta) + delta;
++	}
++
++	public final synchronized long getAndUpdate(int i, LongUnaryOperator updateFunction) {
++		long prev = array[i];
++		array[i] = updateFunction.applyAsLong(prev);
++		return prev;
++	}
++
++	public final synchronized long updateAndGet(int i, LongUnaryOperator updateFunction) {
++		return array[i] = updateFunction.applyAsLong(array[i]);
++	}
++
++	public final synchronized long getAndAccumulate(int i, long x, LongBinaryOperator accumulatorFunction) {
++		long prev = array[i];
++		array[i] = accumulatorFunction.applyAsLong(prev, x);
++		return prev;
++	}
++
++	public final synchronized long accumulateAndGet(int i, long x, LongBinaryOperator accumulatorFunction) {
++		return array[i] = accumulatorFunction.applyAsLong(array[i], x);
++	}
++
++	@Override
++	public synchronized String toString() {
++		int iMax = array.length - 1;
++		if (iMax == -1)
++			return "[]";
++		StringBuilder b = new StringBuilder();
++		b.append('[');
++		for (int i = 0; ; i++) {
++			b.append(array[i]);
++			if (i == iMax)
++				return b.append(']').toString();
++			b.append(',').append(' ');
++		}
++	}
++}
+diff --git a/runtime/src/java/util/zip/CRC32C.java b/runtime/src/java/util/zip/CRC32C.java
+new file mode 100644
+index 0000000..faf6098
+--- /dev/null
++++ b/runtime/src/java/util/zip/CRC32C.java
+@@ -0,0 +1,68 @@
++package java.util.zip;
++
++import java.nio.ByteBuffer;
++
++/**
++ * warsmash-nx: missing from Clearwing 3.1.2. CRC-32C (Castagnoli, reflected polynomial 0x82F63B78),
++ * initial value and final complement as the JDK's class: getValue() of "123456789" is 0xE3069283.
++ */
++public final class CRC32C implements Checksum {
++	private static final int[] TABLE = new int[256];
++
++	static {
++		for (int n = 0; n < 256; n++) {
++			int c = n;
++			for (int k = 0; k < 8; k++) {
++				c = (c & 1) != 0 ? (c >>> 1) ^ 0x82F63B78 : c >>> 1;
++			}
++			TABLE[n] = c;
++		}
++	}
++
++	private int crc = 0xFFFFFFFF;
++
++	public CRC32C() {
++	}
++
++	@Override
++	public void update(final int b) {
++		this.crc = (this.crc >>> 8) ^ TABLE[(this.crc ^ b) & 0xFF];
++	}
++
++	@Override
++	public void update(final byte[] b, final int off, final int len) {
++		if (b == null) {
++			throw new NullPointerException();
++		}
++		if ((off < 0) || (len < 0) || (off > (b.length - len))) {
++			throw new ArrayIndexOutOfBoundsException();
++		}
++		int c = this.crc;
++		for (int i = off; i < (off + len); i++) {
++			c = (c >>> 8) ^ TABLE[(c ^ b[i]) & 0xFF];
++		}
++		this.crc = c;
++	}
++
++	public void update(final byte[] b) {
++		update(b, 0, b.length);
++	}
++
++	public void update(final ByteBuffer buffer) {
++		int c = this.crc;
++		while (buffer.hasRemaining()) {
++			c = (c >>> 8) ^ TABLE[(c ^ buffer.get()) & 0xFF];
++		}
++		this.crc = c;
++	}
++
++	@Override
++	public long getValue() {
++		return (~this.crc) & 0xFFFFFFFFL;
++	}
++
++	@Override
++	public void reset() {
++		this.crc = 0xFFFFFFFF;
++	}
++}
+diff --git a/runtime/src/java/util/zip/Checksum.java b/runtime/src/java/util/zip/Checksum.java
+index 0369c53..3d5d83f 100644
+--- a/runtime/src/java/util/zip/Checksum.java
++++ b/runtime/src/java/util/zip/Checksum.java
+@@ -57,4 +57,29 @@ interface Checksum {
+      * Resets the checksum to its initial value.
+      */
+     public void reset();
++
++    /** warsmash-nx: Java 9. */
++    default public void update(byte[] b) {
++        update(b, 0, b.length);
++    }
++
++    /** warsmash-nx: Java 9, as the JDK's default. */
++    default public void update(java.nio.ByteBuffer buffer) {
++        int pos = buffer.position();
++        int limit = buffer.limit();
++        int rem = limit - pos;
++        if (rem <= 0)
++            return;
++        if (buffer.hasArray()) {
++            update(buffer.array(), pos + buffer.arrayOffset(), rem);
++        } else {
++            byte[] b = new byte[Math.min(buffer.remaining(), 4096)];
++            while (buffer.hasRemaining()) {
++                int length = Math.min(buffer.remaining(), b.length);
++                buffer.get(b, 0, length);
++                update(b, 0, length);
++            }
++        }
++        buffer.position(limit);
++    }
+ }

@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:48 +0200
+Subject: [PATCH 15/32] fix: runtime - String(byte[], Charset) declares no
+ exception; File is Comparable
+
+---
+ runtime/src/java/io/File.java     |  2 +-
+ runtime/src/java/lang/String.java | 16 ++++++++++++----
+ 2 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/runtime/src/java/io/File.java b/runtime/src/java/io/File.java
+index 201aead..8be6c3a 100644
+--- a/runtime/src/java/io/File.java
++++ b/runtime/src/java/io/File.java
+@@ -35,7 +35,7 @@ import java.util.ArrayList;
+ /**
+  * @author shannah
+  */
+-public class File {
++public class File implements Comparable<File> { // warsmash-nx: Comparable, as the JDK
+ 	public static final String pathSeparator = ":";
+ 	public static final char pathSeparatorChar = ':';
+ 	public static final String separator = "/";
+diff --git a/runtime/src/java/lang/String.java b/runtime/src/java/lang/String.java
+index 1b7d40f..d86c3a5 100644
+--- a/runtime/src/java/lang/String.java
++++ b/runtime/src/java/lang/String.java
+@@ -103,12 +103,20 @@ public final class String implements java.lang.CharSequence, Comparable<String>
+         this(bytesToChars(bytes, off, len, enc));
+     }
+     
+-    public String(byte[] bytes, java.nio.charset.Charset charset) throws java.io.UnsupportedEncodingException {
+-        this(bytes, 0, bytes.length, charset.displayName());
++    public String(byte[] bytes, java.nio.charset.Charset charset) { // warsmash-nx: no declared exception, as the JDK
++        this(decodeCharset(bytes, 0, bytes.length, charset));
+     }
+ 
+-    public String(byte[] bytes, int offset, int length, Charset charset) throws java.io.UnsupportedEncodingException {
+-        this(bytes, offset, length, charset.displayName());
++    public String(byte[] bytes, int offset, int length, Charset charset) { // warsmash-nx: as above
++        this(decodeCharset(bytes, offset, length, charset));
++    }
++
++    private static String decodeCharset(byte[] bytes, int offset, int length, Charset charset) { // warsmash-nx
++        try {
++            return new String(bytes, offset, length, charset.displayName());
++        } catch (java.io.UnsupportedEncodingException e) {
++            throw new IllegalStateException(e);
++        }
+     }
+ 
+     /**

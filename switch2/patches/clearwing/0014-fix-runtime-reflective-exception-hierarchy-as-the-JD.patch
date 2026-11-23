@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:47 +0200
+Subject: [PATCH 14/32] fix: runtime - reflective exception hierarchy as the
+ JDK's
+
+---
+ runtime/src/java/lang/ClassNotFoundException.java | 2 +-
+ runtime/src/java/lang/IllegalAccessException.java | 2 +-
+ runtime/src/java/lang/InstantiationException.java | 2 +-
+ runtime/src/java/lang/reflect/Proxy.java          | 2 +-
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/runtime/src/java/lang/ClassNotFoundException.java b/runtime/src/java/lang/ClassNotFoundException.java
+index abfc96e..7549445 100644
+--- a/runtime/src/java/lang/ClassNotFoundException.java
++++ b/runtime/src/java/lang/ClassNotFoundException.java
+@@ -26,7 +26,7 @@ package java.lang;
+  * Thrown when an application tries to load in a class through its string name using the forName method in class Class but no definition for the class with the specified name could be found.
+  * Since: JDK1.0, CLDC 1.0 See Also:Class.forName(java.lang.String)
+  */
+-public class ClassNotFoundException extends java.lang.Exception{
++public class ClassNotFoundException extends ReflectiveOperationException{ // warsmash-nx: as the JDK
+     /**
+      * Constructs a ClassNotFoundException with no detail message.
+      */
+diff --git a/runtime/src/java/lang/IllegalAccessException.java b/runtime/src/java/lang/IllegalAccessException.java
+index c4c4e6f..3f9b6b8 100644
+--- a/runtime/src/java/lang/IllegalAccessException.java
++++ b/runtime/src/java/lang/IllegalAccessException.java
+@@ -27,7 +27,7 @@ package java.lang;
+  * An instance of this class can also be thrown when an application tries to create an instance of a class using the newInstance method in class Class, but the current method does not have access to the appropriate zero-argument constructor.
+  * Since: JDK1.0, CLDC 1.0 See Also:Class.forName(java.lang.String), Class.newInstance()
+  */
+-public class IllegalAccessException extends java.lang.Exception{
++public class IllegalAccessException extends ReflectiveOperationException{ // warsmash-nx: as the JDK
+     /**
+      * Constructs an IllegalAccessException without a detail message.
+      */
+diff --git a/runtime/src/java/lang/InstantiationException.java b/runtime/src/java/lang/InstantiationException.java
+index 4ef7a5a..a1d2345 100644
+--- a/runtime/src/java/lang/InstantiationException.java
++++ b/runtime/src/java/lang/InstantiationException.java
+@@ -26,7 +26,7 @@ package java.lang;
+  * Thrown when an application tries to create an instance of a class using the newInstance method in class Class, but the specified class object cannot be instantiated because it is an interface or is an abstract class.
+  * Since: JDK1.0, CLDC 1.0 See Also:Class.newInstance()
+  */
+-public class InstantiationException extends java.lang.Exception{
++public class InstantiationException extends ReflectiveOperationException{ // warsmash-nx: as the JDK
+     /**
+      * Constructs an InstantiationException with no detail message.
+      */
+diff --git a/runtime/src/java/lang/reflect/Proxy.java b/runtime/src/java/lang/reflect/Proxy.java
+index 2fc04b4..d24f725 100644
+--- a/runtime/src/java/lang/reflect/Proxy.java
++++ b/runtime/src/java/lang/reflect/Proxy.java
+@@ -30,7 +30,7 @@ public class Proxy {
+     public static Object newProxyInstance(ClassLoader loader, Class<?>[] interfaces, InvocationHandler h) throws IllegalArgumentException {
+         try {
+             return getProxyClass(loader, interfaces).getConstructor(InvocationHandler.class).newInstance(h);
+-        } catch (ReflectiveOperationException | IllegalAccessException e) {
++        } catch (ReflectiveOperationException e) { // warsmash-nx: IllegalAccessException is one now
+             return null;
+         }
+     }

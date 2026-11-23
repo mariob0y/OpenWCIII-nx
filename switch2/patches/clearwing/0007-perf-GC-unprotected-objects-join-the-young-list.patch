@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:42 +0200
+Subject: [PATCH 07/32] perf: GC - unprotected objects join the young list
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 83cade7..cb26b1c 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -476,7 +476,12 @@ static jobject makeRegular(jobject object, int mark) {
+     }
+     object->gcMark = GC_MARK_START;
+     rootObjects->erase(object);
+-    objects->emplace(object);
++    // warsmash-nx (round 5c): back as a young object of this thread, outside the set (a duplicate
++    // in a young list is harmless: the sweep skips what it already collected, the set dedups).
++    if (threadContext)
++        threadContext->youngObjects.push_back(object);
++    else
++        objects->emplace(object);
+     objectsLock.unlock();
+     return object;
+ }
+@@ -533,7 +538,8 @@ void destroyContext(jcontext context) {
+     if (!context->youngObjects.empty()) { // warsmash-nx: its last objects join the set (runGC holds criticalLock)
+         objectsLock.lock();
+         for (auto object : context->youngObjects)
+-            objects->emplace(object);
++            if (object->gcMark >= GC_MARK_START) // warsmash-nx (round 5c): not roots, not queued
++                objects->emplace(object);
+         objectsLock.unlock();
+         context->youngObjects.clear();
+     }
+@@ -777,8 +783,10 @@ void runGC(jcontext ctx) {
+     for (auto threadContext : threadContexts) {
+         youngCount += (int64_t) threadContext->youngObjects.size();
+         for (jobject obj : threadContext->youngObjects) {
+-            if ((obj->gcMark > GC_MARK_COLLECTED && obj->gcMark < GC_MARK_START) || obj->gcMark == mark)
++            if (obj->gcMark == mark)
+                 objects->emplace(obj);
++            else if (obj->gcMark > GC_MARK_COLLECTED && obj->gcMark < GC_MARK_START)
++                continue; // warsmash-nx (round 5c): made a root since; it is in rootObjects
+             else if (obj->gcMark != GC_MARK_COLLECTED)
+                 collect(obj);
+         }

@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:48 +0200
+Subject: [PATCH 16/32] fix: runtime - Long.MIN_VALUE and other constants as
+ the JDK's
+
+---
+ runtime/src/java/lang/Character.java | 2 +-
+ runtime/src/java/lang/Long.java      | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/src/java/lang/Character.java b/runtime/src/java/lang/Character.java
+index ef25c61..577b727 100644
+--- a/runtime/src/java/lang/Character.java
++++ b/runtime/src/java/lang/Character.java
+@@ -175,7 +175,7 @@ public final class Character implements Comparable<Character>{
+     public static final byte PARAGRAPH_SEPARATOR = 14;
+     public static final byte CONTROL = 15;
+     public static final byte FORMAT = 16;
+-    public static final byte PRIVATE_USE = 17;
++    public static final byte PRIVATE_USE = 18; // warsmash-nx: was 17 (the JDK's value is 18)
+     public static final byte SURROGATE = 19;
+     public static final byte DASH_PUNCTUATION = 20;
+     public static final byte START_PUNCTUATION = 21;
+diff --git a/runtime/src/java/lang/Long.java b/runtime/src/java/lang/Long.java
+index 0f4a8db..e24f12d 100644
+--- a/runtime/src/java/lang/Long.java
++++ b/runtime/src/java/lang/Long.java
+@@ -45,7 +45,7 @@ public final class Long extends Number implements Comparable<Long> {
+ 	 * The smallest value of type long.
+ 	 * See Also:Constant Field Values
+ 	 */
+-	public static final long MIN_VALUE = -9223372036854775807l;
++	public static final long MIN_VALUE = 0x8000000000000000L; // warsmash-nx: was -9223372036854775807
+ 
+ 	public static final int SIZE = 64;
+ 

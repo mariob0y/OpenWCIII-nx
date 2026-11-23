@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:51 +0200
+Subject: [PATCH 21/32] fix: runtime - Calendar leniency
+
+---
+ runtime/src/java/util/Calendar.java          | 12 ++++++++++++
+ runtime/src/java/util/GregorianCalendar.java |  4 ----
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/runtime/src/java/util/Calendar.java b/runtime/src/java/util/Calendar.java
+index ad2d090..296b82d 100644
+--- a/runtime/src/java/util/Calendar.java
++++ b/runtime/src/java/util/Calendar.java
+@@ -450,6 +450,18 @@ public abstract class Calendar{
+     /**
+      * Sets the time field with the given value.
+      */
++    private boolean lenient = true; // warsmash-nx
++
++    /** warsmash-nx: as the JDK (GregorianCalendar.computeTime validates fields when false). */
++    public void setLenient(boolean lenient) {
++        this.lenient = lenient;
++    }
++
++    /** warsmash-nx: as the JDK (true until setLenient(false)). */
++    public boolean isLenient() {
++        return lenient;
++    }
++
+     public final void set(int field, int value){
+         fields[field] = value;
+         isSet[field] = true;
+diff --git a/runtime/src/java/util/GregorianCalendar.java b/runtime/src/java/util/GregorianCalendar.java
+index 056e944..89d48e8 100644
+--- a/runtime/src/java/util/GregorianCalendar.java
++++ b/runtime/src/java/util/GregorianCalendar.java
+@@ -699,10 +699,6 @@ public class GregorianCalendar extends Calendar { // warsmash-nx: public, as the
+         }
+     }
+     
+-    boolean isLenient() {
+-        return true;
+-    }
+-
+     private long daysFromBaseYear(int iyear) {
+         long year = iyear;
+         

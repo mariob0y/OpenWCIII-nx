@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:46 +0200
+Subject: [PATCH 12/32] fix: runtime - declared exceptions as the JDK's
+
+---
+ runtime/src/java/lang/String.java         | 8 ++++++--
+ runtime/src/java/lang/reflect/Method.java | 3 ++-
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/runtime/src/java/lang/String.java b/runtime/src/java/lang/String.java
+index 8f2ae55..1b7d40f 100644
+--- a/runtime/src/java/lang/String.java
++++ b/runtime/src/java/lang/String.java
+@@ -421,8 +421,12 @@ public final class String implements java.lang.CharSequence, Comparable<String>
+      */
+     public native byte[] getBytes(java.lang.String enc) throws java.io.UnsupportedEncodingException;
+     
+-    public byte[] getBytes(Charset charset) throws java.io.UnsupportedEncodingException {
+-        return getBytes(charset.displayName());
++    public byte[] getBytes(Charset charset) { // warsmash-nx: the JDK declares no exception
++        try {
++            return getBytes(charset.displayName());
++        } catch (java.io.UnsupportedEncodingException e) {
++            throw new IllegalStateException(e);
++        }
+     }
+ 
+     /**
+diff --git a/runtime/src/java/lang/reflect/Method.java b/runtime/src/java/lang/reflect/Method.java
+index c1c3e39..e45f658 100644
+--- a/runtime/src/java/lang/reflect/Method.java
++++ b/runtime/src/java/lang/reflect/Method.java
+@@ -141,7 +141,8 @@ public class Method {
+         return modifiers;
+     }
+ 
+-    public native Object invoke(Object obj, Object ... args);
++    public native Object invoke(Object obj, Object ... args) // warsmash-nx: the JDK's declared exceptions
++            throws IllegalAccessException, IllegalArgumentException, InvocationTargetException;
+ 
+     public Annotation[] getDeclaredAnnotations() {
+         return annotations;

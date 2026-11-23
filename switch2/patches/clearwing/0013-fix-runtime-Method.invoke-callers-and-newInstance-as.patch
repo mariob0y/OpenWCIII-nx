@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:47 +0200
+Subject: [PATCH 13/32] fix: runtime - Method.invoke callers and newInstance as
+ the JDK
+
+---
+ runtime/src/java/lang/Class.java               | 8 ++++++++
+ runtime/src/java/lang/reflect/Constructor.java | 3 ++-
+ 2 files changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/src/java/lang/Class.java b/runtime/src/java/lang/Class.java
+index 1b1a726..6842443 100644
+--- a/runtime/src/java/lang/Class.java
++++ b/runtime/src/java/lang/Class.java
+@@ -253,9 +253,17 @@ public final class Class<T> implements java.lang.reflect.Type {
+             return getDeclaredConstructor().newInstance();
+         } catch (NoSuchMethodException e) {
+             throw new InstantiationException();
++        } catch (java.lang.reflect.InvocationTargetException e) {
++            // warsmash-nx: as the JDK, the constructor's own exception, unwrapped
++            throw Class.<RuntimeException>sneakyThrow(e.getCause());
+         }
+     }
+ 
++    @SuppressWarnings("unchecked")
++    private static <T extends Throwable> T sneakyThrow(Throwable t) throws T { // warsmash-nx
++        throw (T) t;
++    }
++
+     /**
+      * Converts the object to a string. The string representation is the string
+      * "class" or "interface", followed by a space, and then by the fully
+diff --git a/runtime/src/java/lang/reflect/Constructor.java b/runtime/src/java/lang/reflect/Constructor.java
+index cd7415d..8ad0f9d 100644
+--- a/runtime/src/java/lang/reflect/Constructor.java
++++ b/runtime/src/java/lang/reflect/Constructor.java
+@@ -69,7 +69,8 @@ public class Constructor<T> {
+         return method.isAnnotationPresent(annotation);
+     }
+ 
+-    public Object newInstance(Object ... initargs) throws IllegalAccessException {
++    public Object newInstance(Object ... initargs) // warsmash-nx: the JDK's declared exceptions
++            throws InstantiationException, IllegalAccessException, IllegalArgumentException, InvocationTargetException {
+         Object o = nativeCreate(getDeclaringClass());
+         method.invoke(o, initargs);
+         return o;

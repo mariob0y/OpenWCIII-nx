@@ -1,0 +1,630 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:36 +0200
+Subject: [PATCH 02/32] fix: runtime - bounds checks, wait/notify, thread join
+ and core placement, float printing
+
+---
+ runtime/res/clearwing/src/Array.cpp           |  3 +
+ runtime/res/clearwing/src/Clearwing.cpp       | 16 +++-
+ runtime/res/clearwing/src/Clearwing.h         | 35 +++++++--
+ runtime/res/clearwing/src/Double.cpp          | 73 ++++++------------
+ runtime/res/clearwing/src/Float.cpp           | 74 ++++++-------------
+ runtime/res/clearwing/src/Math.cpp            | 27 ++++++-
+ runtime/res/clearwing/src/Object.cpp          | 20 +++--
+ runtime/res/clearwing/src/PlatformThreads.cpp | 46 ++++++++++++
+ runtime/res/clearwing/src/Thread.cpp          | 15 +++-
+ runtime/src/java/lang/Float.java              |  6 +-
+ runtime/src/java/util/Random.java             | 23 +++++-
+ 11 files changed, 213 insertions(+), 125 deletions(-)
+ create mode 100644 runtime/res/clearwing/src/PlatformThreads.cpp
+
+diff --git a/runtime/res/clearwing/src/Array.cpp b/runtime/res/clearwing/src/Array.cpp
+index 47bd123..50d37b9 100644
+--- a/runtime/res/clearwing/src/Array.cpp
++++ b/runtime/res/clearwing/src/Array.cpp
+@@ -113,6 +113,9 @@ jclass getArrayClass(jclass componentType, int dimensions) {
+ /// Creates a new multi-dimensional array. Throws exceptions.
+ extern "C++" jarray createMultiArray(jcontext ctx, jclass type, const std::vector<int> &dimensions) {
+     nullCheck(ctx, (jobject) type);
++    for (int dimension : dimensions) // warsmash-nx
++        if (dimension < 0)
++            throwNegativeArraySize(ctx);
+     auto array = (jarray) gcAllocProtected(ctx, getArrayClass(type, (int) dimensions.size())); // Safe because no methods are called on it, so no safepoint
+     array->length = dimensions[0];
+     if (array->length == 0) // Todo: Verify
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index dc39996..bd747af 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -12,6 +12,8 @@
+ #include "java/lang/IllegalMonitorStateException.h"
+ #include "java/lang/IllegalArgumentException.h"
+ #include "java/lang/IndexOutOfBoundsException.h"
++#include "java/lang/ArrayIndexOutOfBoundsException.h"
++#include "java/lang/NegativeArraySizeException.h"
+ #include "java/lang/OutOfMemoryError.h"
+ #include "java/lang/StackOverflowError.h"
+ #include "java/io/IOException.h"
+@@ -154,6 +156,7 @@ void shutdownVM(jcontext ctx) {
+         }
+         if (done)
+             break;
++        std::this_thread::sleep_for(std::chrono::milliseconds(1)); // warsmash-nx: let them finish
+     }
+ }
+ 
+@@ -517,6 +520,7 @@ static void collectionThreadFunc(jcontext ctx) {
+     static std::vector<jobject> collected;
+ 
+     attachThread(ctx);
++    clearwingPlaceThread(); // warsmash-nx: run beside the main thread, not starved behind it
+ 
+     try {
+         FrameInfo frameInfo{ "GC:collect", 0 };
+@@ -596,6 +600,7 @@ void runGC(jcontext ctx) {
+         releaseCriticalLock();
+         if (!blocked)
+             break;
++        std::this_thread::sleep_for(std::chrono::microseconds(50)); // warsmash-nx: let them run
+     }
+ 
+     auto copyTime = std::chrono::system_clock::now();
+@@ -800,6 +805,7 @@ void safepointSuspend(jcontext ctx) {
+     while (suspendVM) {
+         if (exiting)
+             throw ExitException();
++        std::this_thread::sleep_for(std::chrono::microseconds(50)); // warsmash-nx: let the GC run
+     }
+     ctx->suspended = false;
+ }
+@@ -856,7 +862,7 @@ void throwException(jcontext ctx, jobject exception) {
+ }
+ 
+ void throwDivisionByZero(jcontext ctx) {
+-    constructAndThrowMsg<&class_java_lang_ClassCastException, init_java_lang_ArithmeticException_java_lang_String>(ctx, "Division by Zero");
++    constructAndThrowMsg<&class_java_lang_ArithmeticException, init_java_lang_ArithmeticException_java_lang_String>(ctx, "/ by zero");
+ }
+ 
+ void throwClassCast(jcontext ctx) {
+@@ -875,6 +881,14 @@ void throwIndexOutOfBounds(jcontext ctx) {
+     constructAndThrow<&class_java_lang_IndexOutOfBoundsException, init_java_lang_IndexOutOfBoundsException>(ctx);
+ }
+ 
++void throwArrayIndexOutOfBounds(jcontext ctx) {
++    constructAndThrow<&class_java_lang_ArrayIndexOutOfBoundsException, init_java_lang_ArrayIndexOutOfBoundsException>(ctx);
++}
++
++void throwNegativeArraySize(jcontext ctx) {
++    constructAndThrow<&class_java_lang_NegativeArraySizeException, init_java_lang_NegativeArraySizeException>(ctx);
++}
++
+ void throwIllegalArgument(jcontext ctx) {
+     constructAndThrow<&class_java_lang_IllegalArgumentException, init_java_lang_IllegalArgumentException>(ctx);
+ }
+diff --git a/runtime/res/clearwing/src/Clearwing.h b/runtime/res/clearwing/src/Clearwing.h
+index d89ddfd..85b34cf 100644
+--- a/runtime/res/clearwing/src/Clearwing.h
++++ b/runtime/res/clearwing/src/Clearwing.h
+@@ -288,6 +288,9 @@ NORETURN void throwClassCast(jcontext ctx);
+ NORETURN void throwNullPointer(jcontext ctx);
+ NORETURN void throwStackOverflow(jcontext ctx);
+ NORETURN void throwIndexOutOfBounds(jcontext ctx);
++NORETURN void throwArrayIndexOutOfBounds(jcontext ctx); // warsmash-nx
++NORETURN void throwNegativeArraySize(jcontext ctx); // warsmash-nx
++void clearwingPlaceThread(void); // warsmash-nx: PlatformThreads.cpp
+ NORETURN void throwIllegalArgument(jcontext ctx);
+ NORETURN void throwIOException(jcontext ctx, const char *message);
+ NORETURN void throwRuntimeException(jcontext ctx, const char *message);
+@@ -682,11 +685,11 @@ jint longCompare(jlong value1, jlong value2);
+ 
+ #define INST_ISHL() \
+     sp--; \
+-    sp[-1].i = sp[-1].i << sp[0].i
++    sp[-1].i = sp[-1].i << (sp[0].i & 31)
+ 
+ #define INST_ISHR() \
+     sp--; \
+-    sp[-1].i = sp[-1].i >> sp[0].i
++    sp[-1].i = sp[-1].i >> (sp[0].i & 31)
+ 
+ #define INST_ISTORE(local) \
+     frame[local].i = (--sp)->i
+@@ -697,7 +700,7 @@ jint longCompare(jlong value1, jlong value2);
+ 
+ #define INST_IUSHR() \
+     sp--; \
+-    sp[-1].i = *(uint32_t *) &sp[-1].i >> sp[0].i
++    sp[-1].i = *(uint32_t *) &sp[-1].i >> (sp[0].i & 31)
+ 
+ #define INST_IXOR() \
+     sp--; \
+@@ -761,11 +764,11 @@ jint longCompare(jlong value1, jlong value2);
+ 
+ #define INST_LSHL() \
+     sp--; \
+-    sp[-1].l = sp[-1].l << sp[0].i
++    sp[-1].l = sp[-1].l << (sp[0].i & 63)
+ 
+ #define INST_LSHR() \
+     sp--; \
+-    sp[-1].l = sp[-1].l >> sp[0].i
++    sp[-1].l = sp[-1].l >> (sp[0].i & 63)
+ 
+ #define INST_LSTORE(local) \
+     frame[local].l = (--sp)->l
+@@ -776,7 +779,7 @@ jint longCompare(jlong value1, jlong value2);
+ 
+ #define INST_LUSHR() \
+     sp--; \
+-    sp[-1].l = *(uint64_t *) &sp[-1].l >> sp[0].i
++    sp[-1].l = *(uint64_t *) &sp[-1].l >> (sp[0].i & 63)
+ 
+ #define INST_LXOR() \
+     sp--; \
+@@ -941,11 +944,27 @@ inline jobject checkCast(jcontext ctx, jclass type, jobject object) {
+ 
+ inline jarray arrayBoundsCheck(jcontext ctx, jarray array, int index) {
+     nullCheck(ctx, (jobject)array);
+-    if (index >= array->length)
+-        throwIndexOutOfBounds(ctx);
++    if ((uint32_t) index >= (uint32_t) array->length) // warsmash-nx: negative indices too
++        throwArrayIndexOutOfBounds(ctx);
+     return array;
+ }
+ 
++// warsmash-nx: integer division and remainder for the optimized code, with Java's zero check.
++// (MIN / -1 is MIN and MIN % -1 is 0 on AArch64, as in Java.)
++template <typename T>
++inline T javaDiv(jcontext ctx, T a, T b) {
++    if (b == 0)
++        throwDivisionByZero(ctx);
++    return a / b;
++}
++
++template <typename T>
++inline T javaRem(jcontext ctx, T a, T b) {
++    if (b == 0)
++        throwDivisionByZero(ctx);
++    return a % b;
++}
++
+ inline jframe pushStackFrame(jcontext ctx, const FrameInfo *info, volatile jtype *frame, jobject monitor = nullptr) {
+     SAFEPOINT();
+     auto frameRef = &ctx->frames[ctx->stackDepth++];
+diff --git a/runtime/res/clearwing/src/Double.cpp b/runtime/res/clearwing/src/Double.cpp
+index d6a080e..833795b 100644
+--- a/runtime/res/clearwing/src/Double.cpp
++++ b/runtime/res/clearwing/src/Double.cpp
+@@ -1,6 +1,8 @@
+ #include "java/lang/Double.h"
+ 
+ #include <cstring>
++#include <cstdio>
++#include <charconv>
+ 
+ extern "C" {
+ 
+@@ -17,58 +19,29 @@ jdouble SM_java_lang_Double_longBitsToDouble_long_R_double(jcontext ctx, jlong v
+ }
+ 
+ jobject SM_java_lang_Double_toStringImpl_double_boolean_R_java_lang_String(jcontext ctx, jdouble d, jbool b) {
+-    char s[32]{};
++    // warsmash-nx: shortest round-trip digits, as Java prints them (was printf %f / %1.20E,
++    // which gave 6 decimals for doubles and 21 digits in scientific form).
++    char s[64]{};
++    auto result = std::to_chars(s, s + sizeof s - 8, d, b ? std::chars_format::scientific : std::chars_format::fixed);
++    *result.ptr = '\0';
+     if (!b) {
+-        snprintf(s, 32, "%lf", d);
+-    } else {
+-        snprintf(s, 32, "%1.20E", d);
++        if (!strchr(s, '.'))
++            strcat(s, ".0");
++        return (jobject) stringFromNative(ctx, s);
+     }
+-
+-    // We need to match the format of Java spec.  That includes:
+-    // No "+" for positive exponent.
+-    // No leading zeroes in positive exponents.
+-    // No trailing zeroes in decimal portion.
+-    int j = 0;
+-    int i = 32;
+-    char s2[32]{};
+-    char inside = false;
+-    while (i-- > 0 && j < 32) {
+-        if (inside) {
+-            if (s[i] == '.') {
+-                s2[j++] = '0';
+-            }
+-            if (s[i] != '0') {
+-                inside = false;
+-                s2[j++] = s[i];
+-            }
+-
+-        } else {
+-            if (s[i] == 'E') {
+-                inside = true;
+-            }
+-            if (s[i] == '+') {
+-                // If a positive exponent, we don't need leading zeroes in
+-                // the exponent
+-                while (s2[--j] == '0') {
+-
+-                }
+-                j++;
+-                continue;
+-            }
+-            s2[j++] = s[i];
+-        }
+-    }
+-    i = 0;
+-    while (j-- > 0) {
+-        s[i++] = s2[j];
+-        if (s[i] == '\0') {
+-            break;
+-        }
+-    }
+-    if (strcmp(s, "NAN") == 0) {
+-        s[1] = 'a';
+-    }
+-    return (jobject) stringFromNative(ctx, s);
++    char out[64]{};
++    char *e = strchr(s, 'e');
++    if (!e)
++        return (jobject) stringFromNative(ctx, s);
++    *e = '\0';
++    const char *exponent = e + 1;
++    bool negative = *exponent == '-';
++    if (*exponent == '-' || *exponent == '+')
++        exponent++;
++    while (*exponent == '0' && exponent[1])
++        exponent++;
++    snprintf(out, sizeof out, "%s%sE%s%s", s, strchr(s, '.') ? "" : ".0", negative ? "-" : "", exponent);
++    return (jobject) stringFromNative(ctx, out);
+ }
+ 
+ }
+diff --git a/runtime/res/clearwing/src/Float.cpp b/runtime/res/clearwing/src/Float.cpp
+index 503b5f3..11a4c1f 100644
+--- a/runtime/res/clearwing/src/Float.cpp
++++ b/runtime/res/clearwing/src/Float.cpp
+@@ -1,4 +1,6 @@
+ #include <cstring>
++#include <cstdio>
++#include <charconv>
+ #include "java/lang/Float.h"
+ 
+ extern "C" {
+@@ -12,57 +14,29 @@ jfloat SM_java_lang_Float_intBitsToFloat_int_R_float(jcontext ctx, jint value) {
+ }
+ 
+ jobject SM_java_lang_Float_toStringImpl_float_boolean_R_java_lang_String(jcontext ctx, jfloat d, jbool b) {
+-    char s[32];
+-    if (!b){
+-        sprintf(s, "%f", d);
+-    } else {
+-        sprintf(s, "%1.20E", d);
++    // warsmash-nx: shortest round-trip digits, as Java prints them (was printf %f / %1.20E,
++    // which gave 6 decimals for doubles and 21 digits in scientific form).
++    char s[64]{};
++    auto result = std::to_chars(s, s + sizeof s - 8, d, b ? std::chars_format::scientific : std::chars_format::fixed);
++    *result.ptr = '\0';
++    if (!b) {
++        if (!strchr(s, '.'))
++            strcat(s, ".0");
++        return (jobject) stringFromNative(ctx, s);
+     }
+-    // We need to match the format of Java spec.  That includes:
+-    // No "+" for positive exponent.
+-    // No leading zeroes in positive exponents.
+-    // No trailing zeroes in decimal portion.
+-    int j=0;
+-    int i=32;
+-    char s2[32];
+-    char inside=false;
+-    while (i-- > 0){
+-        if (inside){
+-            if (s[i]=='.'){
+-                s2[j++]='0';
+-            }
+-            if (s[i]!='0'){
+-                inside=false;
+-                s2[j++]=s[i];
+-            }
+-
+-        } else {
+-            if (s[i]=='E'){
+-                inside=true;
+-            }
+-            if (s[i]=='+'){
+-                // If a positive exponent, we don't need leading zeroes in
+-                // the exponent
+-                while (s2[--j]=='0'){
+-
+-                }
+-                j++;
+-                continue;
+-            }
+-            s2[j++]=s[i];
+-        }
+-    }
+-    i=0;
+-    while (j-- > 0){
+-        s[i++]=s2[j];
+-        if (s[i]=='\0'){
+-            break;
+-        }
+-    }
+-    if (strcmp(s, "NAN") == 0) {
+-        s[1] = 'a';
+-    }
+-    return (jobject) stringFromNative(ctx, s);
++    char out[64]{};
++    char *e = strchr(s, 'e');
++    if (!e)
++        return (jobject) stringFromNative(ctx, s);
++    *e = '\0';
++    const char *exponent = e + 1;
++    bool negative = *exponent == '-';
++    if (*exponent == '-' || *exponent == '+')
++        exponent++;
++    while (*exponent == '0' && exponent[1])
++        exponent++;
++    snprintf(out, sizeof out, "%s%sE%s%s", s, strchr(s, '.') ? "" : ".0", negative ? "-" : "", exponent);
++    return (jobject) stringFromNative(ctx, out);
+ }
+ 
+ }
+diff --git a/runtime/res/clearwing/src/Math.cpp b/runtime/res/clearwing/src/Math.cpp
+index 8210172..57f5828 100644
+--- a/runtime/res/clearwing/src/Math.cpp
++++ b/runtime/res/clearwing/src/Math.cpp
+@@ -34,8 +34,27 @@ jdouble SM_java_lang_Math_floor_double_R_double(jcontext ctx, jdouble value) {
+     return jdouble(l - 1);
+ }
+ 
++// warsmash-nx: Java's min/max: NaN if either is NaN, and -0.0 < 0.0.
++extern "C++" {
++template <typename T>
++static T javaMax(T a, T b) {
++    if (a != a) return a;
++    if (b != b) return b;
++    if (a == 0 && b == 0) return std::signbit(a) ? b : a;
++    return a > b ? a : b;
++}
++
++template <typename T>
++static T javaMin(T a, T b) {
++    if (a != a) return a;
++    if (b != b) return b;
++    if (a == 0 && b == 0) return std::signbit(a) ? a : b;
++    return a < b ? a : b;
++}
++}
++
+ jdouble SM_java_lang_Math_max_double_double_R_double(jcontext ctx, jdouble value1, jdouble value2) {
+-    return std::max(value1, value2);
++    return javaMax(value1, value2);
+ }
+ 
+ jdouble SM_java_lang_Math_pow_double_double_R_double(jcontext ctx, jdouble value1, jdouble value2) {
+@@ -43,7 +62,7 @@ jdouble SM_java_lang_Math_pow_double_double_R_double(jcontext ctx, jdouble value
+ }
+ 
+ jfloat SM_java_lang_Math_max_float_float_R_float(jcontext ctx, jfloat value1, jfloat value2) {
+-    return std::max(value1, value2);
++    return javaMax(value1, value2);
+ }
+ 
+ jint SM_java_lang_Math_max_int_int_R_int(jcontext ctx, jint value1, jint value2) {
+@@ -55,11 +74,11 @@ jlong SM_java_lang_Math_max_long_long_R_long(jcontext ctx, jlong value1, jlong v
+ }
+ 
+ jdouble SM_java_lang_Math_min_double_double_R_double(jcontext ctx, jdouble value1, jdouble value2) {
+-    return std::min(value1, value2);
++    return javaMin(value1, value2);
+ }
+ 
+ jfloat SM_java_lang_Math_min_float_float_R_float(jcontext ctx, jfloat value1, jfloat value2) {
+-    return std::min(value1, value2);
++    return javaMin(value1, value2);
+ }
+ 
+ jint SM_java_lang_Math_min_int_int_R_int(jcontext ctx, jint value1, jint value2) {
+diff --git a/runtime/res/clearwing/src/Object.cpp b/runtime/res/clearwing/src/Object.cpp
+index e0c3314..0f8cd26 100644
+--- a/runtime/res/clearwing/src/Object.cpp
++++ b/runtime/res/clearwing/src/Object.cpp
+@@ -50,12 +50,16 @@ void M_java_lang_Object_finalize(jcontext ctx, jobject self) {
+ 
+ void M_java_lang_Object_notify(jcontext ctx, jobject self) {
+     monitorOwnerCheck(ctx, self);
+-    ((jmonitor) self->monitor)->condition.notify_one();
++    auto monitor = (jmonitor) self->monitor;
++    { std::lock_guard<std::mutex> lock(monitor->conditionMutex); } // warsmash-nx: see wait()
++    monitor->condition.notify_one();
+ }
+ 
+ void M_java_lang_Object_notifyAll(jcontext ctx, jobject self) {
+     monitorOwnerCheck(ctx, self);
+-    ((jmonitor) self->monitor)->condition.notify_all();
++    auto monitor = (jmonitor) self->monitor;
++    { std::lock_guard<std::mutex> lock(monitor->conditionMutex); } // warsmash-nx: see wait()
++    monitor->condition.notify_all();
+ }
+ 
+ void M_java_lang_Object_wait(jcontext ctx, jobject self) {
+@@ -64,12 +68,14 @@ void M_java_lang_Object_wait(jcontext ctx, jobject self) {
+     ctx->lock.lock();
+     ctx->blockedBy = self;
+     ctx->lock.unlock();
+-    monitorExit(ctx, self);
+ 
+-    ctx->suspended = true;
++    // warsmash-nx: the condition mutex is taken before the monitor is released, so a notify (which
++    // needs the monitor, then this mutex) cannot fall between the two and be lost.
+     auto monitor = (jmonitor) self->monitor;
+     {
+         std::unique_lock<std::mutex> lock(monitor->conditionMutex);
++        monitorExit(ctx, self);
++        ctx->suspended = true;
+         monitor->condition.wait(lock);
+     }
+     ctx->suspended = false;
+@@ -92,12 +98,12 @@ void M_java_lang_Object_wait_long_int(jcontext ctx, jobject self, jlong millis,
+     ctx->lock.lock();
+     ctx->blockedBy = self;
+     ctx->lock.unlock();
+-    monitorExit(ctx, self);
+ 
+-    ctx->suspended = true;
+-    auto monitor = (jmonitor) self->monitor;
++    auto monitor = (jmonitor) self->monitor; // warsmash-nx: as in wait()
+     {
+         std::unique_lock<std::mutex> lock(monitor->conditionMutex);
++        monitorExit(ctx, self);
++        ctx->suspended = true;
+         monitor->condition.wait_for(lock, std::chrono::milliseconds(millis) + std::chrono::nanoseconds(nanos));
+     }
+     ctx->suspended = false;
+diff --git a/runtime/res/clearwing/src/PlatformThreads.cpp b/runtime/res/clearwing/src/PlatformThreads.cpp
+new file mode 100644
+index 0000000..00a1b05
+--- /dev/null
++++ b/runtime/res/clearwing/src/PlatformThreads.cpp
+@@ -0,0 +1,46 @@
++// warsmash-nx: where the runtime's own threads run on the Switch.
++//
++// libnx/libounce start every std::thread at priority 0x3B on the process's default core, below
++// the main thread (0x2C) on the same core. Horizon does not time-slice threads there, so while the
++// main thread computes, those threads never run: the GC thread (which frees what a collection
++// found dead) and every java.lang.Thread. Here each one takes the main thread's priority and a
++// core of its own where the process has one (round robin over the allowed cores other than the
++// main thread's), so they run beside the main thread instead of behind it.
++//
++// Called at the start of the GC thread and of every Java thread. Elsewhere it does nothing.
++#include "Clearwing.h"
++
++#if defined(__SWITCH__)
++#include <switch.h>
++#include <atomic>
++#endif
++
++extern "C" void clearwingPlaceThread(void) {
++#if defined(__SWITCH__)
++    static std::atomic<unsigned> next{0};
++
++    s32 priority = 0x2C;
++    s32 mainCore = 0;
++    u64 mainMask = 0;
++    const Handle main = envGetMainThreadHandle();
++    if (R_FAILED(svcGetThreadPriority(&priority, main)))
++        priority = 0x2C;
++    if (R_FAILED(svcGetThreadCoreMask(&mainCore, &mainMask, main)))
++        mainCore = 0;
++
++    u64 allowed = 0;
++    if (R_FAILED(svcGetInfo(&allowed, InfoType_CoreMask, CUR_PROCESS_HANDLE, 0)))
++        allowed = 0;
++    int cores[4];
++    int count = 0;
++    for (int core = 0; core < 4; core++)
++        if ((allowed & (1ull << core)) && core != mainCore)
++            cores[count++] = core;
++
++    (void)svcSetThreadPriority(CUR_THREAD_HANDLE, (u32)priority);
++    if (count > 0) {
++        const int core = cores[next.fetch_add(1) % (unsigned)count];
++        (void)svcSetThreadCoreMask(CUR_THREAD_HANDLE, core, 1u << core);
++    }
++#endif
++}
+diff --git a/runtime/res/clearwing/src/Thread.cpp b/runtime/res/clearwing/src/Thread.cpp
+index e1a9fad..a0ad045 100644
+--- a/runtime/res/clearwing/src/Thread.cpp
++++ b/runtime/res/clearwing/src/Thread.cpp
+@@ -13,6 +13,8 @@ extern "C" {
+ 
+ void threadEntrypoint(jcontext ctx, jthread thread) {
+     attachThread(ctx);
++    clearwingPlaceThread(); // warsmash-nx: run beside the main thread, not starved behind it
++    bool vmExiting = false; // warsmash-nx: left through ExitException (the VM is shutting down)
+ 
+     try {
+         jtype frame[1];
+@@ -40,8 +42,17 @@ void threadEntrypoint(jcontext ctx, jthread thread) {
+         });
+ 
+         popStackFrame(ctx);
+-    } catch (ExitException &) { }
+-
++    } catch (ExitException &) { vmExiting = true; }
++
++    // warsmash-nx: as the JVM does, end with notifyAll on the Thread under its monitor.
++    if (!vmExiting) {
++        monitorEnter(ctx, (jobject) thread);
++        thread->F_alive = false;
++        auto monitor = (jmonitor) ((jobject) thread)->monitor;
++        { std::lock_guard<std::mutex> lock(monitor->conditionMutex); }
++        monitor->condition.notify_all();
++        monitorExit(ctx, (jobject) thread);
++    }
+     thread->F_alive = false;
+     ctx->suspended = true;
+     ctx->dead = true;
+diff --git a/runtime/src/java/lang/Float.java b/runtime/src/java/lang/Float.java
+index 4e320fb..d3f3ec9 100644
+--- a/runtime/src/java/lang/Float.java
++++ b/runtime/src/java/lang/Float.java
+@@ -252,12 +252,14 @@ public final class Float extends Number implements Comparable<Float> {
+      */
+     public static java.lang.String toString(float d){
+         float m = Math.abs(d);
+-        if ( d == POSITIVE_INFINITY ){
++        if ( d != d ){ // warsmash-nx
++            return "NaN";
++        } else if ( d == POSITIVE_INFINITY ){
+             return "Infinity";
+         } else if ( d == NEGATIVE_INFINITY ){
+             return "-Infinity";
+         } else if ( d == 0 ){
+-            return "0.0";
++            return floatToIntBits(d) == 0 ? "0.0" : "-0.0"; // warsmash-nx: keep the sign
+         } else if ( m >= 1e-3 && m < 1e7 ){
+             String str = toStringImpl(d, false);
+             char[] chars = str.toCharArray();
+diff --git a/runtime/src/java/util/Random.java b/runtime/src/java/util/Random.java
+index d79d286..1f14361 100644
+--- a/runtime/src/java/util/Random.java
++++ b/runtime/src/java/util/Random.java
+@@ -124,7 +124,28 @@ public class Random{
+     }
+     
+     public boolean nextBoolean() {
+-        return nextInt() % 2 == 0;
++        return next(1) != 0; // warsmash-nx: as specified (was nextInt() % 2 == 0)
++    }
++
++    // warsmash-nx: missing; the polar method as java.util.Random specifies it.
++    private double nextNextGaussian;
++    private boolean haveNextNextGaussian = false;
++
++    public double nextGaussian() {
++        if (haveNextNextGaussian) {
++            haveNextNextGaussian = false;
++            return nextNextGaussian;
++        }
++        double v1, v2, s;
++        do {
++            v1 = 2 * nextDouble() - 1;
++            v2 = 2 * nextDouble() - 1;
++            s = v1 * v1 + v2 * v2;
++        } while (s >= 1 || s == 0);
++        double multiplier = Math.sqrt(-2 * Math.log(s) / s);
++        nextNextGaussian = v2 * multiplier;
++        haveNextNextGaussian = true;
++        return v1 * multiplier;
+     }
+     
+     public void nextBytes(byte[] bytes) {

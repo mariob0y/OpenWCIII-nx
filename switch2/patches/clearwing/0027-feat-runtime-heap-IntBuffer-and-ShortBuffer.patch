@@ -1,0 +1,304 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:55 +0200
+Subject: [PATCH 27/32] feat: runtime - heap IntBuffer and ShortBuffer
+
+---
+ runtime/src/java/nio/HeapIntBuffer.java   | 112 ++++++++++++++++++++++
+ runtime/src/java/nio/HeapShortBuffer.java | 112 ++++++++++++++++++++++
+ runtime/src/java/nio/IntBuffer.java       |   9 +-
+ runtime/src/java/nio/ShortBuffer.java     |   9 +-
+ 4 files changed, 238 insertions(+), 4 deletions(-)
+ create mode 100644 runtime/src/java/nio/HeapIntBuffer.java
+ create mode 100644 runtime/src/java/nio/HeapShortBuffer.java
+
+diff --git a/runtime/src/java/nio/HeapIntBuffer.java b/runtime/src/java/nio/HeapIntBuffer.java
+new file mode 100644
+index 0000000..3d09bbb
+--- /dev/null
++++ b/runtime/src/java/nio/HeapIntBuffer.java
+@@ -0,0 +1,112 @@
++package java.nio;
++
++/**
++ * warsmash-nx (jdk3c): a Int buffer backed by a int[], as the JDK's HeapIntBuffer (and its
++ * read-only variant, through the isReadOnly field). Its address is the array's data + offset, so
++ * natives that read at address + position also work on it.
++ */
++class HeapIntBuffer extends IntBuffer {
++
++	HeapIntBuffer (int cap, int lim) {
++		this(new int[cap], -1, 0, lim, cap, 0);
++	}
++
++	HeapIntBuffer (int[] buf, int off, int len) {
++		this(buf, -1, off, off + len, buf.length, 0);
++	}
++
++	HeapIntBuffer (int[] buf, int mark, int pos, int lim, int cap, int off) {
++		super(mark, pos, lim, cap, buf, off);
++		this.address = NativeUtils.getArrayAddress(buf) + (long) off * 4;
++	}
++
++	private HeapIntBuffer copy (int mark, int pos, int lim, int cap, int off) {
++		HeapIntBuffer b = new HeapIntBuffer(hb, mark, pos, lim, cap, off);
++		b.isReadOnly = isReadOnly;
++		return b;
++	}
++
++	private void writable () {
++		if (isReadOnly)
++			throw new ReadOnlyBufferException();
++	}
++
++	public IntBuffer slice () {
++		int rem = this.remaining();
++		return copy(-1, 0, rem, rem, this.position() + offset);
++	}
++
++	public IntBuffer duplicate () {
++		return copy(this.markValue(), this.position(), this.limit(), this.capacity(), offset);
++	}
++
++	public IntBuffer asReadOnlyBuffer () {
++		HeapIntBuffer b = new HeapIntBuffer(hb, this.markValue(), this.position(), this.limit(), this.capacity(), offset);
++		b.isReadOnly = true;
++		return b;
++	}
++
++	protected int ix (int i) {
++		return i + offset;
++	}
++
++	public int get () {
++		return hb[ix(nextGetIndex())];
++	}
++
++	public int get (int i) {
++		return hb[ix(checkIndex(i))];
++	}
++
++	public IntBuffer get (int[] dst, int offset, int length) {
++		checkBounds(offset, length, dst.length);
++		if (length > remaining())
++			throw new BufferUnderflowException();
++		System.arraycopy(hb, ix(position()), dst, offset, length);
++		position(position() + length);
++		return this;
++	}
++
++	public boolean isDirect () {
++		return false;
++	}
++
++	public boolean isReadOnly () {
++		return isReadOnly;
++	}
++
++	public IntBuffer put (int x) {
++		writable();
++		hb[ix(nextPutIndex())] = x;
++		return this;
++	}
++
++	public IntBuffer put (int i, int x) {
++		writable();
++		hb[ix(checkIndex(i))] = x;
++		return this;
++	}
++
++	public IntBuffer put (int[] src, int offset, int length) {
++		writable();
++		checkBounds(offset, length, src.length);
++		if (length > remaining())
++			throw new BufferOverflowException();
++		System.arraycopy(src, offset, hb, ix(position()), length);
++		position(position() + length);
++		return this;
++	}
++
++	public IntBuffer compact () {
++		writable();
++		System.arraycopy(hb, ix(position()), hb, ix(0), remaining());
++		position(remaining());
++		limit(capacity());
++		discardMark();
++		return this;
++	}
++
++	public ByteOrder order () {
++		return ByteOrder.nativeOrder();
++	}
++}
+diff --git a/runtime/src/java/nio/HeapShortBuffer.java b/runtime/src/java/nio/HeapShortBuffer.java
+new file mode 100644
+index 0000000..4a6f4ca
+--- /dev/null
++++ b/runtime/src/java/nio/HeapShortBuffer.java
+@@ -0,0 +1,112 @@
++package java.nio;
++
++/**
++ * warsmash-nx (jdk3c): a Short buffer backed by a short[], as the JDK's HeapShortBuffer (and its
++ * read-only variant, through the isReadOnly field). Its address is the array's data + offset, so
++ * natives that read at address + position also work on it.
++ */
++class HeapShortBuffer extends ShortBuffer {
++
++	HeapShortBuffer (int cap, int lim) {
++		this(new short[cap], -1, 0, lim, cap, 0);
++	}
++
++	HeapShortBuffer (short[] buf, int off, int len) {
++		this(buf, -1, off, off + len, buf.length, 0);
++	}
++
++	HeapShortBuffer (short[] buf, int mark, int pos, int lim, int cap, int off) {
++		super(mark, pos, lim, cap, buf, off);
++		this.address = NativeUtils.getArrayAddress(buf) + (long) off * 2;
++	}
++
++	private HeapShortBuffer copy (int mark, int pos, int lim, int cap, int off) {
++		HeapShortBuffer b = new HeapShortBuffer(hb, mark, pos, lim, cap, off);
++		b.isReadOnly = isReadOnly;
++		return b;
++	}
++
++	private void writable () {
++		if (isReadOnly)
++			throw new ReadOnlyBufferException();
++	}
++
++	public ShortBuffer slice () {
++		int rem = this.remaining();
++		return copy(-1, 0, rem, rem, this.position() + offset);
++	}
++
++	public ShortBuffer duplicate () {
++		return copy(this.markValue(), this.position(), this.limit(), this.capacity(), offset);
++	}
++
++	public ShortBuffer asReadOnlyBuffer () {
++		HeapShortBuffer b = new HeapShortBuffer(hb, this.markValue(), this.position(), this.limit(), this.capacity(), offset);
++		b.isReadOnly = true;
++		return b;
++	}
++
++	protected int ix (int i) {
++		return i + offset;
++	}
++
++	public short get () {
++		return hb[ix(nextGetIndex())];
++	}
++
++	public short get (int i) {
++		return hb[ix(checkIndex(i))];
++	}
++
++	public ShortBuffer get (short[] dst, int offset, int length) {
++		checkBounds(offset, length, dst.length);
++		if (length > remaining())
++			throw new BufferUnderflowException();
++		System.arraycopy(hb, ix(position()), dst, offset, length);
++		position(position() + length);
++		return this;
++	}
++
++	public boolean isDirect () {
++		return false;
++	}
++
++	public boolean isReadOnly () {
++		return isReadOnly;
++	}
++
++	public ShortBuffer put (short x) {
++		writable();
++		hb[ix(nextPutIndex())] = x;
++		return this;
++	}
++
++	public ShortBuffer put (int i, short x) {
++		writable();
++		hb[ix(checkIndex(i))] = x;
++		return this;
++	}
++
++	public ShortBuffer put (short[] src, int offset, int length) {
++		writable();
++		checkBounds(offset, length, src.length);
++		if (length > remaining())
++			throw new BufferOverflowException();
++		System.arraycopy(src, offset, hb, ix(position()), length);
++		position(position() + length);
++		return this;
++	}
++
++	public ShortBuffer compact () {
++		writable();
++		System.arraycopy(hb, ix(position()), hb, ix(0), remaining());
++		position(remaining());
++		limit(capacity());
++		discardMark();
++		return this;
++	}
++
++	public ByteOrder order () {
++		return ByteOrder.nativeOrder();
++	}
++}
+diff --git a/runtime/src/java/nio/IntBuffer.java b/runtime/src/java/nio/IntBuffer.java
+index 079f379..75ba895 100644
+--- a/runtime/src/java/nio/IntBuffer.java
++++ b/runtime/src/java/nio/IntBuffer.java
+@@ -256,7 +256,10 @@ public abstract class IntBuffer extends Buffer implements Comparable<IntBuffer>
+ 	 * @throws IllegalArgumentException If the <tt>capacity</tt> is a negative integer
+ 	 */
+ 	public static IntBuffer allocate (int capacity) {
+-		return ByteBuffer.allocate(capacity * 4).asIntBuffer();
++		// warsmash-nx (jdk3c): a heap buffer, as the JDK (was a view over a ByteBuffer: no array())
++		if (capacity < 0)
++			throw new IllegalArgumentException("capacity < 0: (" + capacity + " < 0)");
++		return new HeapIntBuffer(capacity, capacity);
+ 	}
+ 
+ 	/**
+@@ -283,7 +286,9 @@ public abstract class IntBuffer extends Buffer implements Comparable<IntBuffer>
+ 	 *                                   parameters do not hold
+ 	 */
+ 	public static IntBuffer wrap (int[] array, int offset, int length) {
+-		throw new UnsupportedOperationException();
++		// warsmash-nx (jdk3c): was a stub
++		checkBounds(offset, length, array.length);
++		return new HeapIntBuffer(array, offset, length);
+ 	}
+ 
+ 	/**
+diff --git a/runtime/src/java/nio/ShortBuffer.java b/runtime/src/java/nio/ShortBuffer.java
+index f6f1a75..5c017a2 100644
+--- a/runtime/src/java/nio/ShortBuffer.java
++++ b/runtime/src/java/nio/ShortBuffer.java
+@@ -256,7 +256,10 @@ public abstract class ShortBuffer extends Buffer implements Comparable<ShortBuff
+ 	 * @throws IllegalArgumentException If the <tt>capacity</tt> is a negative integer
+ 	 */
+ 	public static ShortBuffer allocate (int capacity) {
+-		return ByteBuffer.allocate(capacity * 2).asShortBuffer();
++		// warsmash-nx (jdk3c): a heap buffer, as the JDK (was a view over a ByteBuffer: no array())
++		if (capacity < 0)
++			throw new IllegalArgumentException("capacity < 0: (" + capacity + " < 0)");
++		return new HeapShortBuffer(capacity, capacity);
+ 	}
+ 
+ 	/**
+@@ -283,7 +286,9 @@ public abstract class ShortBuffer extends Buffer implements Comparable<ShortBuff
+ 	 *                                   parameters do not hold
+ 	 */
+ 	public static ShortBuffer wrap (short[] array, int offset, int length) {
+-		throw new UnsupportedOperationException();
++		// warsmash-nx (jdk3c): was a stub
++		checkBounds(offset, length, array.length);
++		return new HeapShortBuffer(array, offset, length);
+ 	}
+ 
+ 	/**

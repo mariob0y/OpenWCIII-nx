@@ -1,0 +1,179 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:54 +0200
+Subject: [PATCH 26/32] feat: runtime - ByteBuffer.asReadOnlyBuffer
+
+---
+ runtime/src/java/nio/ByteBuffer.java         |   9 +-
+ runtime/src/java/nio/ReadOnlyByteBuffer.java | 124 +++++++++++++++++++
+ 2 files changed, 131 insertions(+), 2 deletions(-)
+ create mode 100644 runtime/src/java/nio/ReadOnlyByteBuffer.java
+
+diff --git a/runtime/src/java/nio/ByteBuffer.java b/runtime/src/java/nio/ByteBuffer.java
+index b05060a..8e454db 100644
+--- a/runtime/src/java/nio/ByteBuffer.java
++++ b/runtime/src/java/nio/ByteBuffer.java
+@@ -103,7 +103,8 @@ public class ByteBuffer extends Buffer implements Comparable<ByteBuffer> {
+ 	}
+ 
+ 	public ByteBuffer asReadOnlyBuffer () {
+-		throw new UnsupportedOperationException();
++		// warsmash-nx (jdk3b): was a stub
++		return new ReadOnlyByteBuffer(this, this.markValue(), this.position(), this.limit(), this.capacity(), 0);
+ 	}
+ 
+ 	public ByteBuffer clear() {
+@@ -189,18 +190,22 @@ public class ByteBuffer extends Buffer implements Comparable<ByteBuffer> {
+ 
+ 	// warsmash-nx: buffers from allocate/wrap (and their slices) have their byte[], as the JDK.
+ 	public final boolean hasArray () {
+-		return array != null;
++		return array != null && !isReadOnly(); // warsmash-nx (jdk3b): read-only views, as the JDK
+ 	}
+ 
+ 	public final byte[] array () {
+ 		if (array == null)
+ 			throw new UnsupportedOperationException();
++		if (isReadOnly())
++			throw new ReadOnlyBufferException();
+ 		return array;
+ 	}
+ 
+ 	public final int arrayOffset () {
+ 		if (array == null)
+ 			throw new UnsupportedOperationException();
++		if (isReadOnly())
++			throw new ReadOnlyBufferException();
+ 		return (int)(address - NativeUtils.getArrayAddress(array));
+ 	}
+ 
+diff --git a/runtime/src/java/nio/ReadOnlyByteBuffer.java b/runtime/src/java/nio/ReadOnlyByteBuffer.java
+new file mode 100644
+index 0000000..55312ce
+--- /dev/null
++++ b/runtime/src/java/nio/ReadOnlyByteBuffer.java
+@@ -0,0 +1,124 @@
++package java.nio;
++
++/**
++ * warsmash-nx (jdk3b): ByteBuffer.asReadOnlyBuffer's view, as the JDK's HeapByteBufferR and
++ * DirectByteBufferR. Shares the content of the buffer it was made from (through the owner
++ * constructor: same address, same backing array), with its own position, limit and mark. Every
++ * write throws ReadOnlyBufferException: the typed puts are overridden one by one because ByteBuffer's
++ * write memory directly rather than through put(byte). Its asXBuffer views are writable (the JDK's
++ * are read-only).
++ */
++final class ReadOnlyByteBuffer extends ByteBuffer {
++
++	ReadOnlyByteBuffer (ByteBuffer owner, int mark, int pos, int lim, int cap, int off) {
++		super(owner, mark, pos, lim, cap, off);
++	}
++
++	@Override
++	public boolean isReadOnly () {
++		return true;
++	}
++
++	@Override
++	public ByteBuffer slice () {
++		int pos = this.position();
++		int lim = this.limit();
++		int rem = (pos <= lim ? lim - pos : 0);
++		return new ReadOnlyByteBuffer(this, -1, 0, rem, rem, pos);
++	}
++
++	@Override
++	public ByteBuffer duplicate () {
++		return new ReadOnlyByteBuffer(this, this.markValue(), this.position(), this.limit(), this.capacity(), 0);
++	}
++
++	@Override
++	public ByteBuffer asReadOnlyBuffer () {
++		return duplicate();
++	}
++
++	@Override
++	public ByteBuffer put (byte b) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer put (int index, byte b) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer put (ByteBuffer src) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer put (byte[] src, int offset, int length) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer compact () {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putChar (char x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putChar (int i, char x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putShort (short x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putShort (int i, short x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putInt (int x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putInt (int i, int x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putLong (long x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putLong (int i, long x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putFloat (float x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putFloat (int i, float x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putDouble (double x) {
++		throw new ReadOnlyBufferException();
++	}
++
++	@Override
++	public ByteBuffer putDouble (int i, double x) {
++		throw new ReadOnlyBufferException();
++	}
++}

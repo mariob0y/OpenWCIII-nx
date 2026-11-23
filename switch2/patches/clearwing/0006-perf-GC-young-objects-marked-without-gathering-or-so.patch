@@ -1,0 +1,168 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:41 +0200
+Subject: [PATCH 06/32] perf: GC - young objects marked without gathering or
+ sorting
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp | 97 ++++++++++---------------
+ runtime/res/clearwing/src/Clearwing.h   |  3 +
+ 2 files changed, 42 insertions(+), 58 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 61c9d6a..83cade7 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -63,50 +63,10 @@ static std::mutex *registryMutex;
+ static std::vector<jcontext> threadContexts;
+ static std::vector<jobject> deepMarkedObjects;
+ 
+-// warsmash-nx (round 5): the objects made since the last collection, gathered from the threads'
+-// lists and sorted by address while a collection runs (runGC only; it runs one at a time).
+-static std::vector<jobject> youngSorted;
+-static std::vector<jobject> youngScratch;
+-
+-// LSD radix sort of object addresses, 11 bits a pass over (address - lowest): ~3 passes for a
+-// heap of a few GB, linear in the count, where std::sort of a million pointers is ~10x slower.
+-static void sortObjectAddresses(std::vector<jobject> &v, std::vector<jobject> &scratch) {
+-    const size_t n = v.size();
+-    if (n < 4096) {
+-        std::sort(v.begin(), v.end());
+-        return;
+-    }
+-    uintptr_t lowest = UINTPTR_MAX, highest = 0;
+-    for (auto object : v) {
+-        const auto address = (uintptr_t) object;
+-        if (address < lowest) lowest = address;
+-        if (address > highest) highest = address;
+-    }
+-    const uintptr_t span = highest - lowest;
+-    static size_t counts[2048];
+-    scratch.resize(n);
+-    jobject *from = v.data(), *to = scratch.data();
+-    for (unsigned shift = 0; shift < sizeof(uintptr_t) * 8 && (span >> shift) != 0; shift += 11) {
+-        memset(counts, 0, sizeof counts);
+-        for (size_t i = 0; i < n; i++)
+-            counts[(((uintptr_t) from[i] - lowest) >> shift) & 2047]++;
+-        size_t sum = 0;
+-        for (auto &count : counts) {
+-            const size_t c = count;
+-            count = sum;
+-            sum += c;
+-        }
+-        for (size_t i = 0; i < n; i++)
+-            to[counts[(((uintptr_t) from[i] - lowest) >> shift) & 2047]++] = from[i];
+-        std::swap(from, to);
+-    }
+-    if (from != v.data())
+-        memcpy(v.data(), from, n * sizeof(jobject));
+-}
++// warsmash-nx (round 5b): stack slot values that are not old objects, i.e. young objects or
++// primitives; runGC only (it runs one at a time).
++static std::vector<jobject> stackCandidates;
+ 
+-static bool isYoungObject(jobject object) {
+-    return std::binary_search(youngSorted.begin(), youngSorted.end(), object);
+-}
+ static bool vmInitialized;
+ static volatile bool exiting;
+ static thread_local jcontext threadContext;
+@@ -707,14 +667,8 @@ void runGC(jcontext ctx) {
+ 
+     acquireCriticalLock();
+ 
+-    // warsmash-nx: every thread is stopped: gather their new objects and sort them by address, so
+-    // the stack scan can tell an object from a primitive without putting them all in the set.
+-    youngSorted.clear();
+-    for (auto threadContext : threadContexts) {
+-        youngSorted.insert(youngSorted.end(), threadContext->youngObjects.begin(), threadContext->youngObjects.end());
+-        threadContext->youngObjects.clear();
+-    }
+-    sortObjectAddresses(youngSorted, youngScratch);
++    // warsmash-nx (round 5b): the young stay in the threads' lists (see the stack scan and sweep)
++    stackCandidates.clear();
+ 
+     static jint mark;
+     if (++mark > GC_MARK_END)
+@@ -759,12 +713,29 @@ void runGC(jcontext ctx) {
+ 
+             for (int j = 0; j < (int)frame.info->size; j++) {
+                 const auto obj = frame.frame[j].o;
+-                if (objects->contains(obj) || isYoungObject(obj)) // warsmash-nx: young ones are not in the set
++                if (objects->contains(obj))
+                     ((gc_mark_ptr) ((jclass) obj->clazz)->markFunction)(obj, mark, 0);
++                else if (obj)
++                    stackCandidates.push_back(obj); // warsmash-nx: a young object, or a primitive
+             }
+         }
+     }
+ 
++    // warsmash-nx (round 5b): which of the set-aside stack values are young objects: one ordered
++    // pass over the threads' young lists against the (few hundred) sorted values.
++    if (!stackCandidates.empty()) {
++        std::sort(stackCandidates.begin(), stackCandidates.end());
++        stackCandidates.erase(std::unique(stackCandidates.begin(), stackCandidates.end()), stackCandidates.end());
++        const auto lowest = (uintptr_t) stackCandidates.front(), highest = (uintptr_t) stackCandidates.back();
++        for (auto threadContext : threadContexts)
++            for (auto obj : threadContext->youngObjects) {
++                const auto address = (uintptr_t) obj;
++                if (address >= lowest && address <= highest
++                    && std::binary_search(stackCandidates.begin(), stackCandidates.end(), obj))
++                    ((gc_mark_ptr) ((jclass) obj->clazz)->markFunction)(obj, mark, 0);
++            }
++    }
++
+     auto markDeepTime = std::chrono::system_clock::now();
+ 
+     // Specially mark deep object chains to avoid stack overflows
+@@ -802,13 +773,17 @@ void runGC(jcontext ctx) {
+     });
+     // warsmash-nx (round 5): the young: survivors (marked, or made a root since) join the set,
+     // the rest go straight to the collector without ever having been in the set.
+-    for (jobject obj : youngSorted) {
+-        if ((obj->gcMark > GC_MARK_COLLECTED && obj->gcMark < GC_MARK_START) || obj->gcMark == mark)
+-            objects->emplace(obj);
+-        else if (obj->gcMark != GC_MARK_COLLECTED)
+-            collect(obj);
++    int64_t youngCount = 0;
++    for (auto threadContext : threadContexts) {
++        youngCount += (int64_t) threadContext->youngObjects.size();
++        for (jobject obj : threadContext->youngObjects) {
++            if ((obj->gcMark > GC_MARK_COLLECTED && obj->gcMark < GC_MARK_START) || obj->gcMark == mark)
++                objects->emplace(obj);
++            else if (obj->gcMark != GC_MARK_COLLECTED)
++                collect(obj);
++        }
++        threadContext->youngObjects.clear();
+     }
+-    youngSorted.clear();
+     objectsLock.unlock();
+ 
+ #if false // Todo: Use macro
+@@ -880,6 +855,12 @@ void runGC(jcontext ctx) {
+         clearwingGcStats.lastCollected = found;
+         clearwingGcStats.liveObjects = (int64_t) objects->size(); // warsmash-nx: the dead are already out
+         clearwingGcStats.lastStopUs = stopUs;
++        clearwingGcStats.lastPrepUs = duration_cast<microseconds>(nonCollectableTime - copyTime).count();
++        clearwingGcStats.lastRootsUs = duration_cast<microseconds>(markStackTime - nonCollectableTime).count();
++        clearwingGcStats.lastStacksUs = duration_cast<microseconds>(markDeepTime - markStackTime).count();
++        clearwingGcStats.lastDeepUs = duration_cast<microseconds>(collectTime - markDeepTime).count();
++        clearwingGcStats.lastSweepUs = duration_cast<microseconds>(now - collectTime).count();
++        clearwingGcStats.lastYoung = youngCount;
+         clearwingGcStats.lastMarkSweepUs = markSweepUs;
+         if (stopUs > clearwingGcStats.maxStopUs) clearwingGcStats.maxStopUs = stopUs;
+         if (markSweepUs > clearwingGcStats.maxMarkSweepUs) clearwingGcStats.maxMarkSweepUs = markSweepUs;
+diff --git a/runtime/res/clearwing/src/Clearwing.h b/runtime/res/clearwing/src/Clearwing.h
+index 4078872..da0ed85 100644
+--- a/runtime/res/clearwing/src/Clearwing.h
++++ b/runtime/res/clearwing/src/Clearwing.h
+@@ -309,6 +309,9 @@ typedef struct ClearwingGcStats {
+     volatile int64_t freedTotal;
+     volatile int64_t threadsFinalized;  // java.lang.Thread finalizers run
+     volatile int threadFinalizeProblems; // of those, a join that threw
++    // round 5b: the last mark+sweep by part (us), and how many young objects it looked at
++    volatile int64_t lastPrepUs, lastRootsUs, lastStacksUs, lastDeepUs, lastSweepUs;
++    volatile int64_t lastYoung;
+ } ClearwingGcStats;
+ extern ClearwingGcStats clearwingGcStats;
+ NORETURN void throwIllegalArgument(jcontext ctx);

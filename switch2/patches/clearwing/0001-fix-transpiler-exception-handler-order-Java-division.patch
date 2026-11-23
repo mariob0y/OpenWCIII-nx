@@ -1,0 +1,144 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:35 +0200
+Subject: [PATCH 01/32] fix: transpiler - exception handler order, Java
+ division and shift semantics
+
+---
+ .../com/thelogicmaster/clearwing/Parser.java  | 20 ++++-------
+ .../thelogicmaster/clearwing/Transpiler.java  |  2 ++
+ .../bytecode/ZeroOperandInstruction.java      | 35 ++++++++++++-------
+ 3 files changed, 31 insertions(+), 26 deletions(-)
+
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/Parser.java b/transpiler/src/com/thelogicmaster/clearwing/Parser.java
+index 5f3f5ba..c3b0fc2 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/Parser.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/Parser.java
+@@ -454,20 +454,12 @@ public class Parser extends ClassVisitor {
+             List<Instruction> instructions = method.getInstructions();
+             List<TryInstruction> tryCatchBlocks = new ArrayList<>(method.getTryCatchBlocks());
+ 
+-            // Invert order for nested try-catch with same start label
+-            for (int i = 0; i < tryCatchBlocks.size(); i++) {
+-                int first = i;
+-                while (i + 1 < tryCatchBlocks.size() && tryCatchBlocks.get(first).getStart() == tryCatchBlocks.get(i + 1).getStart())
+-                    i++;
+-                int last = i;
+-                if (first == last)
+-                    continue;
+-                for (int j = 0; j < (last - first + 1) / 2; j++) {
+-                    TryInstruction temp = tryCatchBlocks.get(first + j);
+-                    tryCatchBlocks.set(first + j, tryCatchBlocks.get(last - j));
+-                    tryCatchBlocks.set(last - j, temp);
+-                }
+-            }
++            // warsmash-nx: no inversion. Each block below is inserted right after its start label, so
++            // blocks sharing a start label already end up in reverse table order: the first table
++            // entry (the innermost handler, or a catch before its finally) is pushed last and so is
++            // matched first by throwException, which searches the exception frames top-down, as the
++            // JVM searches the table in order. The inversion that was here reversed it once more, so
++            // in try { } catch (E e) { } finally { } the finally's catch-all won and the catch never ran.
+ 
+             // Insert "Catch" block instructions
+             for (TryInstruction tryCatch : tryCatchBlocks) {
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/Transpiler.java b/transpiler/src/com/thelogicmaster/clearwing/Transpiler.java
+index ca2d92a..ef024ab 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/Transpiler.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/Transpiler.java
+@@ -29,6 +29,8 @@ public class Transpiler {
+ 
+ 	private final static String[] NATIVE_DEPENDENCIES = {
+ 			"java/lang/ArithmeticException",
++			"java/lang/ArrayIndexOutOfBoundsException", // warsmash-nx: thrown by the runtime's array checks
++			"java/lang/NegativeArraySizeException", // warsmash-nx: likewise
+ 			"java/lang/reflect/Array",
+ 			"java/lang/Boolean",
+ 			"java/nio/Buffer",
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/bytecode/ZeroOperandInstruction.java b/transpiler/src/com/thelogicmaster/clearwing/bytecode/ZeroOperandInstruction.java
+index d8640e1..3b2c0ec 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/bytecode/ZeroOperandInstruction.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/bytecode/ZeroOperandInstruction.java
+@@ -15,6 +15,11 @@ public class ZeroOperandInstruction extends Instruction {
+         super(method, opcode);
+     }
+ 
++    // warsmash-nx: the shift-count mask for this shift opcode
++    private String shiftMask() {
++        return opcode == Opcodes.LSHL || opcode == Opcodes.LSHR ? " & 63" : " & 31";
++    }
++
+     private String getOpcodeConst(int zeroOpcode) {
+         return Integer.toString(opcode - zeroOpcode);
+     }
+@@ -145,26 +150,30 @@ public class ZeroOperandInstruction extends Instruction {
+                 outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" - ").append(inputs.get(1).arg()).append(";\n");
+             case Opcodes.IMUL, Opcodes.LMUL, Opcodes.FMUL, Opcodes.DMUL ->
+                 outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" * ").append(inputs.get(1).arg()).append(";\n");
+-            case Opcodes.IDIV, Opcodes.LDIV, Opcodes.FDIV, Opcodes.DDIV ->
++            // warsmash-nx: integer division checks for zero (ArithmeticException), as INST_IDIV does
++            case Opcodes.IDIV, Opcodes.LDIV ->
++                outputs.get(0).buildAssignment(builder).append("javaDiv(ctx, ").append(inputs.get(0).arg()).append(", ").append(inputs.get(1).arg()).append(");\n");
++            case Opcodes.FDIV, Opcodes.DDIV ->
+                 outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" / ").append(inputs.get(1).arg()).append(";\n");
+             case Opcodes.IREM, Opcodes.LREM ->
+-                outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" % ").append(inputs.get(1).arg()).append(";\n");
++                outputs.get(0).buildAssignment(builder).append("javaRem(ctx, ").append(inputs.get(0).arg()).append(", ").append(inputs.get(1).arg()).append(");\n");
+             case Opcodes.FREM ->
+                 outputs.get(0).buildAssignment(builder).append("fmodf(").append(inputs.get(0).arg()).append(", ").append(inputs.get(1).arg()).append(");\n");
+             case Opcodes.DREM ->
+                 outputs.get(0).buildAssignment(builder).append("fmod(").append(inputs.get(0).arg()).append(", ").append(inputs.get(1).arg()).append(");\n");
+             case Opcodes.INEG, Opcodes.LNEG, Opcodes.FNEG, Opcodes.DNEG ->
+                 outputs.get(0).buildAssignment(builder).append("-").append(inputs.get(0).arg()).append(";\n");
++            // warsmash-nx: Java masks shift counts (& 31 int, & 63 long); unmasked is undefined in C++
+             case Opcodes.ISHL, Opcodes.LSHL ->
+-                outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" << ").append(inputs.get(1).arg()).append(";\n");
++                outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" << (").append(inputs.get(1).arg()).append(shiftMask()).append(");\n");
+             case Opcodes.ISHR, Opcodes.LSHR ->
+-                outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" >> ").append(inputs.get(1).arg()).append(";\n");
++                outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" >> (").append(inputs.get(1).arg()).append(shiftMask()).append(");\n");
+             case Opcodes.IUSHR ->
+                 outputs.get(0).buildAssignment(builder).append("bit_cast<jint>(bit_cast<uint32_t>(").append(inputs.get(0).arg())
+-                        .append(") >> ").append(inputs.get(1).arg()).append(");\n");
++                        .append(") >> (").append(inputs.get(1).arg()).append(" & 31));\n");
+             case Opcodes.LUSHR ->
+                 outputs.get(0).buildAssignment(builder).append("bit_cast<jlong>(bit_cast<uint64_t>(").append(inputs.get(0).arg())
+-                            .append(") >> ").append(inputs.get(1).arg()).append(");\n");
++                            .append(") >> (").append(inputs.get(1).arg()).append(" & 63));\n");
+             case Opcodes.IAND, Opcodes.LAND ->
+                 outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" & ").append(inputs.get(1).arg()).append(";\n");
+             case Opcodes.IOR, Opcodes.LOR ->
+@@ -241,10 +250,12 @@ public class ZeroOperandInstruction extends Instruction {
+                     builder.append(inputs.get(0).arg()).append(" - ").append(inputs.get(1).arg());
+             case Opcodes.IMUL, Opcodes.LMUL, Opcodes.FMUL, Opcodes.DMUL ->
+                     builder.append(inputs.get(0).arg()).append(" * ").append(inputs.get(1).arg());
+-            case Opcodes.IDIV, Opcodes.LDIV, Opcodes.FDIV, Opcodes.DDIV ->
++            case Opcodes.IDIV, Opcodes.LDIV ->
++                    builder.append("javaDiv(ctx, ").append(inputs.get(0).arg()).append(", ").append(inputs.get(1).arg()).append(")");
++            case Opcodes.FDIV, Opcodes.DDIV ->
+                     builder.append(inputs.get(0).arg()).append(" / ").append(inputs.get(1).arg());
+             case Opcodes.IREM, Opcodes.LREM ->
+-                    builder.append(inputs.get(0).arg()).append(" % ").append(inputs.get(1).arg());
++                    builder.append("javaRem(ctx, ").append(inputs.get(0).arg()).append(", ").append(inputs.get(1).arg()).append(")");
+             case Opcodes.FREM ->
+                     builder.append("fmodf(").append(inputs.get(0).arg()).append(", ").append(inputs.get(1).arg()).append(")");
+             case Opcodes.DREM ->
+@@ -252,15 +263,15 @@ public class ZeroOperandInstruction extends Instruction {
+             case Opcodes.INEG, Opcodes.LNEG, Opcodes.FNEG, Opcodes.DNEG ->
+                     builder.append("-").append(inputs.get(0).arg());
+             case Opcodes.ISHL, Opcodes.LSHL ->
+-                    builder.append(inputs.get(0).arg()).append(" << ").append(inputs.get(1).arg());
++                    builder.append(inputs.get(0).arg()).append(" << (").append(inputs.get(1).arg()).append(shiftMask()).append(")");
+             case Opcodes.ISHR, Opcodes.LSHR ->
+-                    builder.append(inputs.get(0).arg()).append(" >> ").append(inputs.get(1).arg());
++                    builder.append(inputs.get(0).arg()).append(" >> (").append(inputs.get(1).arg()).append(shiftMask()).append(")");
+             case Opcodes.IUSHR ->
+                     builder.append("bit_cast<jint>(bit_cast<uint32_t>(").append(inputs.get(0).arg())
+-                            .append(") >> ").append(inputs.get(1).arg()).append(")");
++                            .append(") >> (").append(inputs.get(1).arg()).append(" & 31))");
+             case Opcodes.LUSHR ->
+                     builder.append("bit_cast<jlong>(bit_cast<uint64_t>(").append(inputs.get(0).arg())
+-                            .append(") >> ").append(inputs.get(1).arg()).append(")");
++                            .append(") >> (").append(inputs.get(1).arg()).append(" & 63))");
+             case Opcodes.IAND, Opcodes.LAND ->
+                     builder.append(inputs.get(0).arg()).append(" & ").append(inputs.get(1).arg());
+             case Opcodes.IOR, Opcodes.LOR ->

@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:53 +0200
+Subject: [PATCH 24/32] fix: runtime - malformed UTF-8 replaced as JDK 17 does
+
+---
+ runtime/res/clearwing/src/String.cpp | 93 +++++++++++++++++++++++++++-
+ 1 file changed, 90 insertions(+), 3 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/String.cpp b/runtime/res/clearwing/src/String.cpp
+index 2421fad..4716fe7 100644
+--- a/runtime/res/clearwing/src/String.cpp
++++ b/runtime/res/clearwing/src/String.cpp
+@@ -32,6 +32,93 @@ static int encodeUtf8(const char16_t *s, int length, unsigned char *out) {
+     return count;
+ }
+ 
++/// warsmash-nx (cpp1c): JDK 17's String.decodeUTF8_UTF16 with replacement, step for step (masked
++/// arithmetic instead of the JDK's xor of sign-extended shifts: equal once the continuation checks
++/// pass). Returns the char count, writes the chars when dst is set.
++static int decodeUtf8Java(const signed char *src, int sl, char16_t *dst) {
++    const uint32_t REPL = 0xFFFD;
++    int sp = 0, dp = 0;
++    auto put = [&](uint32_t c) { if (dst) dst[dp] = (char16_t) c; dp++; };
++    auto notCont = [](int b) { return (b & 0xC0) != 0x80; };
++    while (sp < sl) {
++        int b1 = src[sp++];
++        if (b1 >= 0) {
++            put(b1);
++        } else if ((b1 >> 5) == -2 && (b1 & 0x1E) != 0) { // C2..DF
++            if (sp < sl) {
++                int b2 = src[sp++];
++                if (notCont(b2)) {
++                    put(REPL);
++                    sp--;
++                } else {
++                    put((b1 & 0x1F) << 6 | (b2 & 0x3F));
++                }
++                continue;
++            }
++            put(REPL);
++            break;
++        } else if ((b1 >> 4) == -2) { // E0..EF
++            if (sp + 1 < sl) {
++                int b2 = src[sp++];
++                int b3 = src[sp++];
++                bool bad2 = (b1 == -0x20 && (b2 & 0xE0) == 0x80) || notCont(b2);
++                if (bad2 || notCont(b3)) { // isMalformed3
++                    put(REPL);
++                    sp -= 3;
++                    sp += bad2 ? 1 : 2; // malformed3
++                } else {
++                    uint32_t c = (b1 & 0x0F) << 12 | (b2 & 0x3F) << 6 | (b3 & 0x3F);
++                    put(c >= 0xD800 && c <= 0xDFFF ? REPL : c);
++                }
++                continue;
++            }
++            if (sp < sl && ((b1 == -0x20 && (src[sp] & 0xE0) == 0x80) || notCont(src[sp]))) { // isMalformed3_2
++                put(REPL);
++                continue;
++            }
++            put(REPL);
++            break;
++        } else if ((b1 >> 3) == -2) { // F0..F7
++            if (sp + 2 < sl) {
++                int b2 = src[sp++];
++                int b3 = src[sp++];
++                int b4 = src[sp++];
++                uint32_t uc = (b1 & 0x07) << 18 | (b2 & 0x3F) << 12 | (b3 & 0x3F) << 6 | (b4 & 0x3F);
++                if (notCont(b2) || notCont(b3) || notCont(b4) || uc < 0x10000 || uc > 0x10FFFF) {
++                    put(REPL);
++                    sp -= 4;
++                    int u1 = b1 & 0xFF, u2 = b2 & 0xFF; // malformed4
++                    if (u1 > 0xF4 || (u1 == 0xF0 && (u2 < 0x90 || u2 > 0xBF)) || (u1 == 0xF4 && (u2 & 0xF0) != 0x80)
++                            || notCont(u2))
++                        sp += 1;
++                    else if (notCont(b3))
++                        sp += 2;
++                    else
++                        sp += 3;
++                } else {
++                    put(0xD800 + ((uc - 0x10000) >> 10));
++                    put(0xDC00 + ((uc - 0x10000) & 0x3FF));
++                }
++                continue;
++            }
++            int u1 = b1 & 0xFF;
++            if (u1 > 0xF4 || (sp < sl && ((u1 == 0xF0 && ((src[sp] & 0xFF) < 0x90 || (src[sp] & 0xFF) > 0xBF))
++                    || (u1 == 0xF4 && (src[sp] & 0xF0) != 0x80) || notCont(src[sp])))) { // isMalformed4_2
++                put(REPL);
++                continue;
++            }
++            sp++;
++            put(REPL);
++            if (sp < sl && notCont(src[sp])) // isMalformed4_3
++                continue;
++            break;
++        } else {
++            put(REPL);
++        }
++    }
++    return dp;
++}
++
+ extern "C" {
+ 
+ jobject SM_java_lang_String_bytesToChars_Array1_byte_int_int_java_lang_String_R_Array1_char(jcontext ctx, jobject bytesObj, jint offset, jint length, jobject encodingObj) {
+@@ -42,9 +129,9 @@ jobject SM_java_lang_String_bytesToChars_Array1_byte_int_int_java_lang_String_R_
+         throwIndexOutOfBounds(ctx);
+     if (length == 0)
+         return (jobject) createArray(ctx, &class_char, 0);
+-    auto data = (const unsigned char *)bytes->data + offset; // warsmash-nx: never throws
+-    auto array = createArray(ctx, &class_char, decodeUtf8(data, length, nullptr));
+-    decodeUtf8(data, length, (char16_t *) array->data);
++    auto data = (const signed char *)bytes->data + offset; // warsmash-nx: as JDK 17, never throws
++    auto array = createArray(ctx, &class_char, decodeUtf8Java(data, length, nullptr));
++    decodeUtf8Java(data, length, (char16_t *) array->data);
+     return (jobject) array;
+ }
+ 

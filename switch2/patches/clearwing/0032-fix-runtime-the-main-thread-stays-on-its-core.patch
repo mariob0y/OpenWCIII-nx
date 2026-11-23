@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:57 +0200
+Subject: [PATCH 32/32] fix: runtime - the main thread stays on its core
+
+---
+ runtime/res/clearwing/src/PlatformThreads.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/runtime/res/clearwing/src/PlatformThreads.cpp b/runtime/res/clearwing/src/PlatformThreads.cpp
+index 3fa383e..dd3c7a5 100644
+--- a/runtime/res/clearwing/src/PlatformThreads.cpp
++++ b/runtime/res/clearwing/src/PlatformThreads.cpp
+@@ -17,6 +17,10 @@
+ 
+ extern "C" void clearwingPlaceThread(void) {
+ #if defined(__SWITCH__)
++    // warsmash-nx (round 10): the main thread comes through here too (runVM -> threadEntrypoint)
++    // and must stay on its own core; only the other threads are placed beside it.
++    if (threadGetCurHandle() == envGetMainThreadHandle())
++        return;
+     static std::atomic<unsigned> next{0};
+ 
+     s32 priority = 0x2C;

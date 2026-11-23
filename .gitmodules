@@ -1,0 +1,8 @@
+[submodule "switch2/external/clearwing-vm"]
+	path = switch2/external/clearwing-vm
+	url = https://github.com/TheLogicMaster/clearwing-vm.git
+	ignore = dirty
+[submodule "switch2/external/switch-gdx"]
+	path = switch2/external/switch-gdx
+	url = https://github.com/TheLogicMaster/switch-gdx.git
+	ignore = dirty

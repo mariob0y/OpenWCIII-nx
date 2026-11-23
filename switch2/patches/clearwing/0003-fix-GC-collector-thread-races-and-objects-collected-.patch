@@ -1,0 +1,254 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:38 +0200
+Subject: [PATCH 03/32] fix: GC - collector thread races and objects collected
+ twice
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp       | 63 ++++++++++++++++++-
+ runtime/res/clearwing/src/Clearwing.h         | 19 ++++++
+ runtime/res/clearwing/src/Thread.cpp          | 15 ++++-
+ .../com/thelogicmaster/clearwing/Utils.java   | 13 ++--
+ 4 files changed, 97 insertions(+), 13 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index bd747af..1a4e155 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -73,6 +73,8 @@ extern "C" {
+ 
+ bool volatile suspendVM;
+ 
++ClearwingGcStats clearwingGcStats{}; // warsmash-nx
++
+ static void collectionThreadFunc(jcontext ctx);
+ 
+ static void markPrimitive(jobject object, jint mark, jint depth) {}
+@@ -128,6 +130,7 @@ jcontext initVM() {
+     collectionThread->F_nativeContext = (intptr_t) collectionCtx;
+     collectionCtx->thread = collectionThread;
+     collectionThread->F_started = true;
++    collectionThread->F_alive = true; // warsmash-nx: else runGC never waits for this thread (see runGC)
+     collectionThread->F_name = (intptr_t) stringFromNative(mainContext, "GC");
+     collectionCtx->nativeThread = new std::thread;
+     *collectionCtx->nativeThread = std::thread(collectionThreadFunc, collectionCtx);
+@@ -535,13 +538,28 @@ static void collectionThreadFunc(jcontext ctx) {
+             objectsLock.unlock();
+ 
+             if (!collected.empty()) {
++                clearwingGcStats.collectorBatch = (int64_t) collected.size(); // warsmash-nx
++                clearwingGcStats.collectorDone = 0;
++                clearwingGcStats.collectorPhase = 1;
++                int64_t done = 0;
+                 for (jobject obj : collected) {
+                     tryCatch(frameRef, [&]{
+                         ((finalizer_ptr)((void **)obj->vtable)[VTABLE_java_lang_Object_finalize])(ctx, obj);
+                     }, &class_java_lang_Throwable, [](jobject ignored){});
++                    if ((++done & 4095) == 0) {
++                        clearwingGcStats.collectorDone = done;
++                        SAFEPOINT();
++                    }
+                 }
+ 
++                clearwingGcStats.collectorDone = 0;
++                clearwingGcStats.collectorPhase = 2;
++                done = 0;
+                 for (jobject obj : collected) {
++                    if ((++done & 4095) == 0) {
++                        clearwingGcStats.collectorDone = done;
++                        SAFEPOINT();
++                    }
+                     objectsLock.lock();
+                     objects->erase(obj);
+                     objectsLock.unlock();
+@@ -556,6 +574,8 @@ static void collectionThreadFunc(jcontext ctx) {
+                     delete[] (char *) obj;
+                 }
+ 
++                clearwingGcStats.freedTotal += (int64_t) collected.size(); // warsmash-nx
++                clearwingGcStats.collectorPhase = 0;
+                 collected.clear();
+             }
+ 
+@@ -587,23 +607,33 @@ void runGC(jcontext ctx) {
+         std::lock_guard lock(suspendMutex);
+         suspendVM = true;
+     }
++    clearwingGcStats.phase = 1; // warsmash-nx
+     while (true) {
+         if (exiting) throw ExitException();
+         bool blocked = false;
++        int blocking = 0; // warsmash-nx
++        int blockingIsCollector = 0;
+         acquireCriticalLock();
+         for (auto threadContext : threadContexts) {
+             if (threadContext == ctx)
+                 continue;
+-            if (!threadContext->suspended && threadContext->thread->F_alive)
++            if (!threadContext->suspended && threadContext->thread->F_alive) {
+                 blocked = true;
++                blocking++;
++                if (threadContext->thread == collectionThread)
++                    blockingIsCollector = 1;
++            }
+         }
+         releaseCriticalLock();
++        clearwingGcStats.blockingThreads = blocking;
++        clearwingGcStats.blockingIsCollector = blockingIsCollector;
+         if (!blocked)
+             break;
+         std::this_thread::sleep_for(std::chrono::microseconds(50)); // warsmash-nx: let them run
+     }
+ 
+     auto copyTime = std::chrono::system_clock::now();
++    clearwingGcStats.phase = 2; // warsmash-nx
+ 
+     acquireCriticalLock();
+ 
+@@ -667,11 +697,15 @@ void runGC(jcontext ctx) {
+     }
+ 
+     auto collectTime = std::chrono::system_clock::now();
++    clearwingGcStats.phase = 3; // warsmash-nx
++    const size_t queuedBefore = collectedObjects.size();
+ 
+     // Collect unreachable objects
+     for (jobject obj : *objects) {
+         if ((obj->gcMark > GC_MARK_COLLECTED && obj->gcMark < GC_MARK_START) || obj->gcMark == mark)
+             continue;
++        if (obj->gcMark == GC_MARK_COLLECTED) // warsmash-nx: already queued for the collector
++            continue;
+         obj->gcMark = GC_MARK_COLLECTED;
+         collectedObjects.emplace_back(obj);
+ 
+@@ -740,6 +774,22 @@ void runGC(jcontext ctx) {
+ 
+     allocationsSinceCollection = 0;
+ 
++    { // warsmash-nx: statistics for the watchdog
++        using namespace std::chrono;
++        const auto now = system_clock::now();
++        const int64_t stopUs = duration_cast<microseconds>(copyTime - blockTime).count();
++        const int64_t markSweepUs = duration_cast<microseconds>(now - copyTime).count();
++        const int64_t found = (int64_t) (collectedObjects.size() - queuedBefore);
++        clearwingGcStats.lastCollected = found;
++        clearwingGcStats.liveObjects = (int64_t) objects->size() - (int64_t) collectedObjects.size();
++        clearwingGcStats.lastStopUs = stopUs;
++        clearwingGcStats.lastMarkSweepUs = markSweepUs;
++        if (stopUs > clearwingGcStats.maxStopUs) clearwingGcStats.maxStopUs = stopUs;
++        if (markSweepUs > clearwingGcStats.maxMarkSweepUs) clearwingGcStats.maxMarkSweepUs = markSweepUs;
++        clearwingGcStats.collections = clearwingGcStats.collections + 1;
++        clearwingGcStats.phase = 0;
++    }
++
+     releaseCriticalLock();
+     {
+         std::lock_guard lock(suspendMutex);
+@@ -841,6 +891,9 @@ jobject clearCurrentException(jframe frame) {
+ 
+ /// Throws an exception. This function does not return.
+ void throwException(jcontext ctx, jobject exception) {
++    // warsmash-nx: remembered for the message below if nothing catches it
++    const char *thrownIn = ctx->stackDepth > 0 && ctx->frames[ctx->stackDepth - 1].info
++                           ? ctx->frames[ctx->stackDepth - 1].info->method : nullptr;
+     while (ctx->stackDepth > 0) {
+         auto &frame = ctx->frames[ctx->stackDepth - 1];
+         while (frame.exceptionFrameDepth > 0) {
+@@ -857,8 +910,12 @@ void throwException(jcontext ctx, jobject exception) {
+         }
+         ctx->stackDepth -= 1;
+     }
+-    // Todo: Include exception details
+-    throw std::runtime_error("Uncaught exception");
++    // warsmash-nx: the class and the method it was thrown in
++    std::string what = "Uncaught ";
++    what += exception ? (const char *) ((jclass) exception->clazz)->nativeName : "null";
++    what += " thrown in ";
++    what += thrownIn ? thrownIn : "?";
++    throw std::runtime_error(what);
+ }
+ 
+ void throwDivisionByZero(jcontext ctx) {
+diff --git a/runtime/res/clearwing/src/Clearwing.h b/runtime/res/clearwing/src/Clearwing.h
+index 85b34cf..4d6f86a 100644
+--- a/runtime/res/clearwing/src/Clearwing.h
++++ b/runtime/res/clearwing/src/Clearwing.h
+@@ -291,6 +291,25 @@ NORETURN void throwIndexOutOfBounds(jcontext ctx);
+ NORETURN void throwArrayIndexOutOfBounds(jcontext ctx); // warsmash-nx
+ NORETURN void throwNegativeArraySize(jcontext ctx); // warsmash-nx
+ void clearwingPlaceThread(void); // warsmash-nx: PlatformThreads.cpp
++
++// warsmash-nx: what the collector is doing, for a watchdog on another thread. Plain aligned
++// 64/32-bit stores and loads (atomic on AArch64); a reader may see fields of two moments.
++typedef struct ClearwingGcStats {
++    volatile int64_t collections;       // runGC passes that marked and swept
++    volatile int phase;                 // 0 idle, 1 stopping threads, 2 marking, 3 sweeping
++    volatile int blockingThreads;       // while stopping: threads not yet at a safepoint
++    volatile int blockingIsCollector;   // 1 if the collector thread is one of them
++    volatile int64_t lastCollected;     // objects the last pass found dead
++    volatile int64_t liveObjects;       // collectable objects left after the last pass
++    volatile int64_t lastStopUs, lastMarkSweepUs, maxStopUs, maxMarkSweepUs;
++    volatile int collectorPhase;        // collector thread: 0 waiting, 1 finalizing, 2 freeing
++    volatile int64_t collectorBatch;    // objects in the batch it works on
++    volatile int64_t collectorDone;     // of those, done (updated every 4096)
++    volatile int64_t freedTotal;
++    volatile int64_t threadsFinalized;  // java.lang.Thread finalizers run
++    volatile int threadFinalizeProblems; // of those, a join that threw
++} ClearwingGcStats;
++extern ClearwingGcStats clearwingGcStats;
+ NORETURN void throwIllegalArgument(jcontext ctx);
+ NORETURN void throwIOException(jcontext ctx, const char *message);
+ NORETURN void throwRuntimeException(jcontext ctx, const char *message);
+diff --git a/runtime/res/clearwing/src/Thread.cpp b/runtime/res/clearwing/src/Thread.cpp
+index a0ad045..4813f9e 100644
+--- a/runtime/res/clearwing/src/Thread.cpp
++++ b/runtime/res/clearwing/src/Thread.cpp
+@@ -102,8 +102,19 @@ void M_java_lang_Thread_interrupt(jcontext ctx, jobject self) {
+ void M_java_lang_Thread_finalize(jcontext ctx, jobject selfObj) {
+     auto self = (jthread) selfObj;
+     auto context = (jcontext) self->F_nativeContext;
+-    context->nativeThread->join();
+-    delete context->nativeThread;
++    clearwingGcStats.threadsFinalized = clearwingGcStats.threadsFinalized + 1; // warsmash-nx
++    if (!context) // warsmash-nx: never started
++        return;
++    if (context->nativeThread) {
++        try {
++            if (context->nativeThread->joinable())
++                context->nativeThread->join();
++        } catch (const std::exception &) { // warsmash-nx: a C++ exception here would end the process
++            clearwingGcStats.threadFinalizeProblems = clearwingGcStats.threadFinalizeProblems + 1;
++            try { context->nativeThread->detach(); } catch (...) { }
++        }
++        delete context->nativeThread;
++    }
+     destroyContext(context);
+ }
+ 
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/Utils.java b/transpiler/src/com/thelogicmaster/clearwing/Utils.java
+index 11b681a..04ada0e 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/Utils.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/Utils.java
+@@ -171,17 +171,14 @@ public class Utils {
+ 			throw new TranspilerException("Invalid annotation parameter object of type: " + o.getClass());
+ 	}
+ 	
++	// warsmash-nx: hexadecimal floating literals (C++17) are exact and need no locale. "%e" kept
++	// 7 significant digits (2^53 came out as 9.007199e+15, Float.MAX_VALUE as 3.402823e+38f) and
++	// printed a decimal comma under some default locales. -0.0, subnormals: exact as well.
+ 	private static String formatFloatLiteral(float value) {
+-		float abs = Math.abs(value);
+-		if (abs > 10e7 || abs < 10e-3)
+-			return String.format("%e", value);
+-		return Float.toString(value);
++		return Float.toHexString(value);
+ 	}
+ 
+ 	private static String formatDoubleLiteral(double value) {
+-		double abs = Math.abs(value);
+-		if (abs > 10e7 || abs < 10e-3)
+-			return String.format("%e", value);
+-		return Double.toString(value);
++		return Double.toHexString(value);
+ 	}
+ }

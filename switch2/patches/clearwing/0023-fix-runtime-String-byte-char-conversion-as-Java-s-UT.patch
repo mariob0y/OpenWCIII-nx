@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:52 +0200
+Subject: [PATCH 23/32] fix: runtime - String byte/char conversion as Java's
+ UTF-8 coder
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp |  3 +-
+ runtime/res/clearwing/src/String.cpp    | 54 ++++++++++++++++---------
+ 2 files changed, 36 insertions(+), 21 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 3c05bd0..b021eae 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -249,7 +249,8 @@ jint longCompare(jlong value1, jlong value2) {
+ }
+ 
+ /// warsmash-nx: generalized UTF-8 to UTF-16; returns the char count, writes them when out is set.
+-static int decodeUtf8(const unsigned char *s, int length, char16_t *out) {
++/// Malformed input becomes U+FFFD. Also used by String.cpp.
++int decodeUtf8(const unsigned char *s, int length, char16_t *out) {
+     static const uint32_t minimum[] = {0, 0x80, 0x800, 0x10000};
+     int count = 0;
+     for (int i = 0; i < length;) {
+diff --git a/runtime/res/clearwing/src/String.cpp b/runtime/res/clearwing/src/String.cpp
+index 730d6a1..2421fad 100644
+--- a/runtime/res/clearwing/src/String.cpp
++++ b/runtime/res/clearwing/src/String.cpp
+@@ -6,6 +6,32 @@
+ #include <cstring>
+ #include <string>
+ 
++// warsmash-nx: Clearwing.cpp's decoder (malformed input -> U+FFFD).
++int decodeUtf8(const unsigned char *s, int length, char16_t *out);
++
++/// warsmash-nx: UTF-16 to UTF-8 as Java's encoder: a surrogate without its partner becomes '?'.
++static int encodeUtf8(const char16_t *s, int length, unsigned char *out) {
++    int count = 0;
++    auto put = [&](uint32_t b) { if (out) out[count] = (unsigned char) b; count++; };
++    for (int i = 0; i < length; i++) {
++        uint32_t c = s[i];
++        if (c >= 0xD800 && c <= 0xDBFF && i + 1 < length && s[i + 1] >= 0xDC00 && s[i + 1] <= 0xDFFF)
++            c = 0x10000 + ((c - 0xD800) << 10) + (s[++i] - 0xDC00);
++        else if (c >= 0xD800 && c <= 0xDFFF)
++            c = '?';
++        if (c < 0x80) {
++            put(c);
++        } else if (c < 0x800) {
++            put(0xC0 | c >> 6); put(0x80 | (c & 0x3F));
++        } else if (c < 0x10000) {
++            put(0xE0 | c >> 12); put(0x80 | (c >> 6 & 0x3F)); put(0x80 | (c & 0x3F));
++        } else {
++            put(0xF0 | c >> 18); put(0x80 | (c >> 12 & 0x3F)); put(0x80 | (c >> 6 & 0x3F)); put(0x80 | (c & 0x3F));
++        }
++    }
++    return count;
++}
++
+ extern "C" {
+ 
+ jobject SM_java_lang_String_bytesToChars_Array1_byte_int_int_java_lang_String_R_Array1_char(jcontext ctx, jobject bytesObj, jint offset, jint length, jobject encodingObj) {
+@@ -16,16 +42,10 @@ jobject SM_java_lang_String_bytesToChars_Array1_byte_int_int_java_lang_String_R_
+         throwIndexOutOfBounds(ctx);
+     if (length == 0)
+         return (jobject) createArray(ctx, &class_char, 0);
+-    auto data = (char *)bytes->data + offset;
+-    try {
+-        auto string = std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t>{}.from_bytes(data, data + length);
+-        auto array = createArray(ctx, &class_char, (int) string.length());
+-        memcpy(array->data, string.c_str(), string.length() * 2);
+-        return (jobject) array;
+-    } catch (std::exception &ex) {
+-        throwIOException(ctx, "Failed to decode bytes");
+-        return nullptr;
+-    }
++    auto data = (const unsigned char *)bytes->data + offset; // warsmash-nx: never throws
++    auto array = createArray(ctx, &class_char, decodeUtf8(data, length, nullptr));
++    decodeUtf8(data, length, (char16_t *) array->data);
++    return (jobject) array;
+ }
+ 
+ jobject M_java_lang_String_getBytes_java_lang_String_R_Array1_byte(jcontext ctx, jobject self, jobject encodingObj) {
+@@ -33,16 +53,10 @@ jobject M_java_lang_String_getBytes_java_lang_String_R_Array1_byte(jcontext ctx,
+     auto charArray = (jarray)((java_lang_String *) NULL_CHECK(self))->F_value;
+     if (charArray->length == 0)
+         return (jobject) createArray(ctx, &class_byte, 0);
+-    auto data = (char16_t *)charArray->data;
+-    try {
+-        auto string = std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t>{}.to_bytes(data, data + charArray->length);
+-        auto array = createArray(ctx, &class_byte, (int) string.length());
+-        memcpy(array->data, string.data(), string.length());
+-        return (jobject) array;
+-    } catch (std::exception &ex) {
+-        throwIOException(ctx, "Failed to encode bytes");
+-        return nullptr;
+-    }
++    auto data = (const char16_t *)charArray->data; // warsmash-nx: never throws
++    auto array = createArray(ctx, &class_byte, encodeUtf8(data, charArray->length, nullptr));
++    encodeUtf8(data, charArray->length, (unsigned char *) array->data);
++    return (jobject) array;
+ }
+ 
+ jbool M_java_lang_String_equals_java_lang_Object_R_boolean(jcontext ctx, jobject self, jobject other) {

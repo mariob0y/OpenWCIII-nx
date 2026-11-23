@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:56 +0200
+Subject: [PATCH 29/32] fix: transpiler - getstatic initializes the field's
+ declaring class
+
+---
+ .../clearwing/bytecode/FieldInstruction.java           | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/bytecode/FieldInstruction.java b/transpiler/src/com/thelogicmaster/clearwing/bytecode/FieldInstruction.java
+index dfd482a..90a144b 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/bytecode/FieldInstruction.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/bytecode/FieldInstruction.java
+@@ -77,8 +77,8 @@ public class FieldInstruction extends Instruction {
+         if (realOwnerClass == null)
+             throw new TranspilerException("Failed to find owner class for: " + name + " needed for " + method.getName());
+         
+-        if (isStatic) // Todo: Skip on same class for clinit
+-            builder.append("\tclinit_").append(qualifiedOwner).append("(ctx);\n");
++        if (isStatic) // warsmash-nx (transpiler2): the declaring class, as JVMS 5.5
++            builder.append("\tclinit_").append(realOwnerClass.getQualifiedName()).append("(ctx);\n");
+         
+         switch (opcode) {
+             case Opcodes.GETSTATIC ->
+@@ -103,8 +103,8 @@ public class FieldInstruction extends Instruction {
+         if (realOwnerClass == null)
+             throw new TranspilerException("Failed to find owner class for: " + name + " needed for " + method.getName());
+         
+-        if (isStatic) // Todo: Skip on same class for clinit
+-            builder.append("\tclinit_").append(qualifiedOwner).append("(ctx);\n");
++        if (isStatic) // warsmash-nx (transpiler2): the declaring class, as JVMS 5.5
++            builder.append("\tclinit_").append(realOwnerClass.getQualifiedName()).append("(ctx);\n");
+ 
+         switch (opcode) {
+             case Opcodes.GETSTATIC -> outputs.get(0).buildAssignment(builder).append("(")
+@@ -125,7 +125,7 @@ public class FieldInstruction extends Instruction {
+     @Override
+     public void appendInlined(StringBuilder builder) {
+         switch (opcode) {
+-            case Opcodes.GETSTATIC -> builder.append("clinit_").append(qualifiedOwner).append("(ctx), (")
++            case Opcodes.GETSTATIC -> builder.append("clinit_").append(realOwnerClass.getQualifiedName()).append("(ctx), (")
+                     .append(type.getArithmeticType()).append(")").append(realName);
+             case Opcodes.GETFIELD -> builder.append("(").append(type.getBasicType().getArithmeticType()).append(")")
+                     .append("((").append(realOwnerClass.getQualifiedName()).append(" *) NULL_CHECK(")

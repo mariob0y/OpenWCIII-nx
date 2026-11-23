@@ -1,0 +1,170 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:43 +0200
+Subject: [PATCH 09/32] perf: runtime - synchronized as an owner pointer and a
+ depth
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp | 61 +++++++++++++++++++------
+ runtime/res/clearwing/src/Clearwing.h   | 10 ++--
+ runtime/res/clearwing/src/Object.cpp    |  6 +++
+ 3 files changed, 61 insertions(+), 16 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 777111f..26c8b9b 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -1058,25 +1058,55 @@ NORETURN void throwRuntimeException(jcontext ctx, const char *message) {
+ }
+ 
+ /// Lock on a monitor. Throws exceptions.
++static inline void monitorSpinPause() {
++#if defined(__aarch64__)
++    __asm__ volatile("yield");
++#endif
++}
++
+ void monitorEnter(jcontext ctx, jobject object) {
+     NULL_CHECK(object);
+     auto monitor = getMonitor(object); // warsmash-nx: made on first use
+ 
+-    // Race condition here is fine, fall back to slower/blocking acquire
+-    if (monitor->lock.try_lock()) {
+-        monitor->owner = ctx;
++    // warsmash-nx (round 7): re-entry only counts; a free monitor takes one compare-and-swap.
++    if (monitor->owner.load(std::memory_order_relaxed) == ctx) {
+         monitor->depth++;
+         return;
+     }
++    jcontext expected = nullptr;
++    if (monitor->owner.compare_exchange_strong(expected, ctx, std::memory_order_acquire, std::memory_order_relaxed)) {
++        monitor->depth = 1;
++        return;
++    }
++
++    // Contended: spin a moment, so a running thread takes a freed monitor instead of the kernel
++    // handing it to a sleeping one (a lock convoy, ~2 us a handoff on the console).
++    for (int i = 0; i < 2000; i++) {
++        monitorSpinPause();
++        if (monitor->owner.load(std::memory_order_relaxed) == nullptr) {
++            expected = nullptr;
++            if (monitor->owner.compare_exchange_weak(expected, ctx, std::memory_order_acquire, std::memory_order_relaxed)) {
++                monitor->depth = 1;
++                return;
++            }
++        }
++    }
+ 
+-    // Suspend thread to avoid deadlock blocking GC and deadlocking system
++    // Park. Suspend thread to avoid deadlock blocking GC and deadlocking system
+     ctx->blockedBy = object;
+     ctx->suspended = true;
+-
+-    monitor->lock.lock();
+-    monitor->owner = ctx;
+-    monitor->depth++;
+-
++    {
++        std::unique_lock<std::mutex> park(monitor->parkMutex);
++        monitor->waiters.fetch_add(1, std::memory_order_seq_cst);
++        while (true) {
++            expected = nullptr;
++            if (monitor->owner.compare_exchange_strong(expected, ctx, std::memory_order_seq_cst))
++                break;
++            monitor->parkCondition.wait(park);
++        }
++        monitor->waiters.fetch_sub(1, std::memory_order_relaxed);
++    }
++    monitor->depth = 1;
+     ctx->blockedBy = nullptr;
+     ctx->suspended = false;
+ 
+@@ -1088,15 +1118,20 @@ void monitorExit(jcontext ctx, jobject object) {
+     NULL_CHECK(object);
+     monitorOwnerCheck(ctx, object);
+     auto monitor = getMonitor(object); // warsmash-nx: exists, the owner check passed
+-    if (--monitor->depth == 0)
+-        monitor->owner = nullptr;
+-    monitor->lock.unlock();
++    if (--monitor->depth > 0)
++        return;
++    // warsmash-nx (round 7): free it, then wake a parked thread if there is one (see monitorEnter)
++    monitor->owner.store(nullptr, std::memory_order_seq_cst);
++    if (monitor->waiters.load(std::memory_order_seq_cst) > 0) {
++        { std::lock_guard<std::mutex> park(monitor->parkMutex); }
++        monitor->parkCondition.notify_one();
++    }
+ }
+ 
+ /// Checks if the current thread owns a given monitor. Throws exceptions.
+ void monitorOwnerCheck(jcontext ctx, jobject object) {
+     auto monitor = (jmonitor) object->monitor; // warsmash-nx: none yet = not owned
+-    if (!monitor or !monitor->owner or monitor->owner != ctx)
++    if (!monitor or monitor->owner.load(std::memory_order_relaxed) != ctx)
+         constructAndThrow<&class_java_lang_IllegalMonitorStateException, init_java_lang_IllegalMonitorStateException>(ctx);
+ }
+ 
+diff --git a/runtime/res/clearwing/src/Clearwing.h b/runtime/res/clearwing/src/Clearwing.h
+index da0ed85..51bc634 100644
+--- a/runtime/res/clearwing/src/Clearwing.h
++++ b/runtime/res/clearwing/src/Clearwing.h
+@@ -913,10 +913,14 @@ public:
+     ExitException() : std::runtime_error("Exiting") { }
+ };
+ 
++// warsmash-nx (round 7): an owner pointer and a depth instead of a std::recursive_mutex (see
++// monitorEnter); the park mutex and condition are only used by contended threads.
+ struct ObjectMonitor {
+-    std::recursive_mutex lock;
+-    std::atomic_int32_t depth;
+-    std::atomic<jcontext> owner;
++    std::atomic<jcontext> owner{nullptr};
++    int32_t depth = 0; // only the owner reads or writes it
++    std::atomic_int32_t waiters{0}; // threads parked in monitorEnter
++    std::mutex parkMutex;
++    std::condition_variable parkCondition;
+     std::condition_variable condition;
+     std::mutex conditionMutex;
+ };
+diff --git a/runtime/res/clearwing/src/Object.cpp b/runtime/res/clearwing/src/Object.cpp
+index 602f9b4..4d7042c 100644
+--- a/runtime/res/clearwing/src/Object.cpp
++++ b/runtime/res/clearwing/src/Object.cpp
+@@ -72,8 +72,10 @@ void M_java_lang_Object_wait(jcontext ctx, jobject self) {
+     // warsmash-nx: the condition mutex is taken before the monitor is released, so a notify (which
+     // needs the monitor, then this mutex) cannot fall between the two and be lost.
+     auto monitor = getMonitor(self);
++    const int32_t depth = monitor->depth; // warsmash-nx (round 7): wait releases every level
+     {
+         std::unique_lock<std::mutex> lock(monitor->conditionMutex);
++        monitor->depth = 1;
+         monitorExit(ctx, self);
+         ctx->suspended = true;
+         monitor->condition.wait(lock);
+@@ -82,6 +84,7 @@ void M_java_lang_Object_wait(jcontext ctx, jobject self) {
+     SAFEPOINT();
+ 
+     monitorEnter(ctx, self);
++    monitor->depth = depth;
+     ctx->lock.lock();
+     ctx->blockedBy = nullptr;
+     ctx->lock.unlock();
+@@ -100,8 +103,10 @@ void M_java_lang_Object_wait_long_int(jcontext ctx, jobject self, jlong millis,
+     ctx->lock.unlock();
+ 
+     auto monitor = getMonitor(self); // warsmash-nx: as in wait()
++    const int32_t depth = monitor->depth; // warsmash-nx (round 7): wait releases every level
+     {
+         std::unique_lock<std::mutex> lock(monitor->conditionMutex);
++        monitor->depth = 1;
+         monitorExit(ctx, self);
+         ctx->suspended = true;
+         monitor->condition.wait_for(lock, std::chrono::milliseconds(millis) + std::chrono::nanoseconds(nanos));
+@@ -110,6 +115,7 @@ void M_java_lang_Object_wait_long_int(jcontext ctx, jobject self, jlong millis,
+     SAFEPOINT();
+ 
+     monitorEnter(ctx, self);
++    monitor->depth = depth;
+     ctx->lock.lock();
+     ctx->blockedBy = nullptr;
+     ctx->lock.unlock();

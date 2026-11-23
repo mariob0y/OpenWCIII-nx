@@ -1,0 +1,153 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:40 +0200
+Subject: [PATCH 05/32] perf: GC - young objects kept out of the object set
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp | 87 +++++++++++++++++++++----
+ 1 file changed, 73 insertions(+), 14 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 397c061..61c9d6a 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -38,6 +38,7 @@
+ #include <mutex>
+ #include <iostream>
+ #include <cstring>
++#include <algorithm> // warsmash-nx: std::sort, std::binary_search (round 5)
+ #include <locale>
+ #include <codecvt>
+ #include <atomic>
+@@ -61,6 +62,51 @@ static std::recursive_mutex criticalLock;
+ static std::mutex *registryMutex;
+ static std::vector<jcontext> threadContexts;
+ static std::vector<jobject> deepMarkedObjects;
++
++// warsmash-nx (round 5): the objects made since the last collection, gathered from the threads'
++// lists and sorted by address while a collection runs (runGC only; it runs one at a time).
++static std::vector<jobject> youngSorted;
++static std::vector<jobject> youngScratch;
++
++// LSD radix sort of object addresses, 11 bits a pass over (address - lowest): ~3 passes for a
++// heap of a few GB, linear in the count, where std::sort of a million pointers is ~10x slower.
++static void sortObjectAddresses(std::vector<jobject> &v, std::vector<jobject> &scratch) {
++    const size_t n = v.size();
++    if (n < 4096) {
++        std::sort(v.begin(), v.end());
++        return;
++    }
++    uintptr_t lowest = UINTPTR_MAX, highest = 0;
++    for (auto object : v) {
++        const auto address = (uintptr_t) object;
++        if (address < lowest) lowest = address;
++        if (address > highest) highest = address;
++    }
++    const uintptr_t span = highest - lowest;
++    static size_t counts[2048];
++    scratch.resize(n);
++    jobject *from = v.data(), *to = scratch.data();
++    for (unsigned shift = 0; shift < sizeof(uintptr_t) * 8 && (span >> shift) != 0; shift += 11) {
++        memset(counts, 0, sizeof counts);
++        for (size_t i = 0; i < n; i++)
++            counts[(((uintptr_t) from[i] - lowest) >> shift) & 2047]++;
++        size_t sum = 0;
++        for (auto &count : counts) {
++            const size_t c = count;
++            count = sum;
++            sum += c;
++        }
++        for (size_t i = 0; i < n; i++)
++            to[counts[(((uintptr_t) from[i] - lowest) >> shift) & 2047]++] = from[i];
++        std::swap(from, to);
++    }
++    if (from != v.data())
++        memcpy(v.data(), from, n * sizeof(jobject));
++}
++
++static bool isYoungObject(jobject object) {
++    return std::binary_search(youngSorted.begin(), youngSorted.end(), object);
++}
+ static bool vmInitialized;
+ static volatile bool exiting;
+ static thread_local jcontext threadContext;
+@@ -661,15 +707,14 @@ void runGC(jcontext ctx) {
+ 
+     acquireCriticalLock();
+ 
+-    // warsmash-nx: every thread is stopped: their new objects join the set before marking (the
+-    // stack scan asks the set whether a slot holds an object).
+-    objectsLock.lock();
++    // warsmash-nx: every thread is stopped: gather their new objects and sort them by address, so
++    // the stack scan can tell an object from a primitive without putting them all in the set.
++    youngSorted.clear();
+     for (auto threadContext : threadContexts) {
+-        for (auto object : threadContext->youngObjects)
+-            objects->emplace(object);
++        youngSorted.insert(youngSorted.end(), threadContext->youngObjects.begin(), threadContext->youngObjects.end());
+         threadContext->youngObjects.clear();
+     }
+-    objectsLock.unlock();
++    sortObjectAddresses(youngSorted, youngScratch);
+ 
+     static jint mark;
+     if (++mark > GC_MARK_END)
+@@ -714,7 +759,7 @@ void runGC(jcontext ctx) {
+ 
+             for (int j = 0; j < (int)frame.info->size; j++) {
+                 const auto obj = frame.frame[j].o;
+-                if (objects->contains(obj))
++                if (objects->contains(obj) || isYoungObject(obj)) // warsmash-nx: young ones are not in the set
+                     ((gc_mark_ptr) ((jclass) obj->clazz)->markFunction)(obj, mark, 0);
+             }
+         }
+@@ -736,20 +781,34 @@ void runGC(jcontext ctx) {
+ 
+     // Collect unreachable objects (warsmash-nx: and remove them from the set here, with every
+     // thread stopped, instead of one locked erase per object in the collector thread)
++    const bool anyWeak = !weakReferences.empty();
++    auto collect = [&](jobject obj) {
++        obj->gcMark = GC_MARK_COLLECTED;
++        collectedObjects.emplace_back(obj);
++
++        // Update weak references
++        if (anyWeak)
++            for (auto[it, end] = weakReferences.equal_range(obj); it != end; ++it)
++                it->second->F_ptr = 0; // Todo: Always updating weak references here rather than at finalization may be problematic in some cases for JNI
++    };
+     objectsLock.lock();
+     std::erase_if(*objects, [&](jobject obj) {
+         if ((obj->gcMark > GC_MARK_COLLECTED && obj->gcMark < GC_MARK_START) || obj->gcMark == mark)
+             return false;
+         if (obj->gcMark == GC_MARK_COLLECTED) // warsmash-nx: already queued (cannot happen now)
+             return true;
+-        obj->gcMark = GC_MARK_COLLECTED;
+-        collectedObjects.emplace_back(obj);
+-
+-        // Update weak references
+-        for (auto[it, end] = weakReferences.equal_range(obj); it != end; ++it)
+-            it->second->F_ptr = 0; // Todo: Always updating weak references here rather than at finalization may be problematic in some cases for JNI
++        collect(obj);
+         return true;
+     });
++    // warsmash-nx (round 5): the young: survivors (marked, or made a root since) join the set,
++    // the rest go straight to the collector without ever having been in the set.
++    for (jobject obj : youngSorted) {
++        if ((obj->gcMark > GC_MARK_COLLECTED && obj->gcMark < GC_MARK_START) || obj->gcMark == mark)
++            objects->emplace(obj);
++        else if (obj->gcMark != GC_MARK_COLLECTED)
++            collect(obj);
++    }
++    youngSorted.clear();
+     objectsLock.unlock();
+ 
+ #if false // Todo: Use macro
+@@ -819,7 +878,7 @@ void runGC(jcontext ctx) {
+         const int64_t markSweepUs = duration_cast<microseconds>(now - copyTime).count();
+         const int64_t found = (int64_t) (collectedObjects.size() - queuedBefore);
+         clearwingGcStats.lastCollected = found;
+-        clearwingGcStats.liveObjects = (int64_t) objects->size() - (int64_t) collectedObjects.size();
++        clearwingGcStats.liveObjects = (int64_t) objects->size(); // warsmash-nx: the dead are already out
+         clearwingGcStats.lastStopUs = stopUs;
+         clearwingGcStats.lastMarkSweepUs = markSweepUs;
+         if (stopUs > clearwingGcStats.maxStopUs) clearwingGcStats.maxStopUs = stopUs;

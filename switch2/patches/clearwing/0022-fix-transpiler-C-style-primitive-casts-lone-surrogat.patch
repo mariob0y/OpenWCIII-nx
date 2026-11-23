@@ -1,0 +1,151 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 09:01:52 +0200
+Subject: [PATCH 22/32] fix: transpiler - C-style primitive casts, lone
+ surrogates in string constants
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp       | 36 +++++++++++++++++--
+ .../com/thelogicmaster/clearwing/Utils.java   | 17 ++++++---
+ .../bytecode/ZeroOperandInstruction.java      | 28 +++++++--------
+ 3 files changed, 59 insertions(+), 22 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 26c8b9b..3c05bd0 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -248,15 +248,45 @@ jint longCompare(jlong value1, jlong value2) {
+     return 0;
+ }
+ 
++/// warsmash-nx: generalized UTF-8 to UTF-16; returns the char count, writes them when out is set.
++static int decodeUtf8(const unsigned char *s, int length, char16_t *out) {
++    static const uint32_t minimum[] = {0, 0x80, 0x800, 0x10000};
++    int count = 0;
++    for (int i = 0; i < length;) {
++        uint32_t c = s[i++];
++        int extra = c < 0x80 ? 0 : (c & 0xE0) == 0xC0 ? 1 : (c & 0xF0) == 0xE0 ? 2 : (c & 0xF8) == 0xF0 ? 3 : -1;
++        uint32_t cp = extra < 0 ? 0xFFFD : extra == 0 ? c : c & (0x3F >> extra);
++        if (extra > 0) {
++            int j = 0;
++            for (; j < extra && i < length && (s[i] & 0xC0) == 0x80; j++, i++)
++                cp = cp << 6 | (s[i] & 0x3F);
++            if (j < extra || cp < minimum[extra] || cp > 0x10FFFF)
++                cp = 0xFFFD;
++        }
++        if (cp >= 0x10000) {
++            if (out) {
++                out[count] = char16_t(0xD800 + ((cp - 0x10000) >> 10));
++                out[count + 1] = char16_t(0xDC00 + ((cp - 0x10000) & 0x3FF));
++            }
++            count += 2;
++        } else {
++            if (out)
++                out[count] = char16_t(cp);
++            count++;
++        }
++    }
++    return count;
++}
++
+ static jstring createString(jcontext ctx, const char *string, int length, bool protect) {
+-    auto encoded = std::wstring_convert<std::codecvt_utf8_utf16<char16_t>, char16_t>{}.from_bytes(string, string + length);
+-    int encodedLength = (int)encoded.length();
++    auto bytes = (const unsigned char *) string;
++    int encodedLength = decodeUtf8(bytes, length, nullptr);
+     auto inst = (jstring) gcAllocProtected(ctx, &class_java_lang_String); // This leaks if createArray throws an exception
+     inst->F_value = (intptr_t) createArray(ctx, &class_char, encodedLength);
+     if (!protect)
+         unprotectObject((jobject)inst);
+     inst->F_count = encodedLength;
+-    memcpy(((jarray) inst->F_value)->data, encoded.c_str(), encoded.length() * 2);
++    decodeUtf8(bytes, length, (char16_t *) ((jarray) inst->F_value)->data);
+     return inst;
+ }
+ 
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/Utils.java b/transpiler/src/com/thelogicmaster/clearwing/Utils.java
+index 04ada0e..8132ce1 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/Utils.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/Utils.java
+@@ -111,17 +111,24 @@ public class Utils {
+ 			char c = chars[i];
+ 			if (c >= 32 && c <= 127)
+ 				builder.append(c);
+-			else if (Character.isHighSurrogate(c)) {
+-				byte[] bytes = string.substring(i, i + 2).getBytes(StandardCharsets.UTF_8);
+-				builder.append(String.format("\\x%02x\\x%02x\\x%02x\\x%02x", bytes[0], bytes[1], bytes[2], bytes[3]));
+-				i++;
+-			} else
++			else if (Character.isHighSurrogate(c) && i + 1 < chars.length && Character.isLowSurrogate(chars[i + 1])) {
++				int cp = Character.toCodePoint(c, chars[++i]); // warsmash-nx: octal, pairs only
++				appendOctalBytes(builder, 0xF0 | cp >> 18, 0x80 | cp >> 12 & 0x3F, 0x80 | cp >> 6 & 0x3F, 0x80 | cp & 0x3F);
++			} else if (Character.isSurrogate(c)) // warsmash-nx: lone surrogate, generalized UTF-8
++				appendOctalBytes(builder, 0xE0 | c >> 12, 0x80 | c >> 6 & 0x3F, 0x80 | c & 0x3F);
++			else
+ 				builder.append("\\u").append(String.format("%04x", (int)c));
+ 		}
+ 		builder.append("\"_j");
+ 		return builder.toString();
+ 	}
+ 
++	/** warsmash-nx: octal escapes (at most 3 digits, so they never run into the next character). */
++	private static void appendOctalBytes(StringBuilder builder, int... bytes) {
++		for (int b : bytes)
++			builder.append('\\').append((char)('0' + (b >> 6 & 3))).append((char)('0' + (b >> 3 & 7))).append((char)('0' + (b & 7)));
++	}
++
+ 	/**
+ 	 * Get a value representation of a Number, String, or Type
+ 	 */
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/bytecode/ZeroOperandInstruction.java b/transpiler/src/com/thelogicmaster/clearwing/bytecode/ZeroOperandInstruction.java
+index 3b2c0ec..59ed12c 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/bytecode/ZeroOperandInstruction.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/bytecode/ZeroOperandInstruction.java
+@@ -181,16 +181,16 @@ public class ZeroOperandInstruction extends Instruction {
+             case Opcodes.IXOR, Opcodes.LXOR ->
+                 outputs.get(0).buildAssignment(builder).append(inputs.get(0).arg()).append(" ^ ").append(inputs.get(1).arg()).append(";\n");
+             case Opcodes.I2L, Opcodes.F2L, Opcodes.D2L ->
+-                outputs.get(0).buildAssignment(builder).append("jlong(").append(inputs.get(0).arg()).append(");\n");
++                outputs.get(0).buildAssignment(builder).append("((jlong)(").append(inputs.get(0).arg()).append("));\n");
+             case Opcodes.I2F, Opcodes.L2F, Opcodes.D2F ->
+-                outputs.get(0).buildAssignment(builder).append("jfloat(").append(inputs.get(0).arg()).append(");\n");
++                outputs.get(0).buildAssignment(builder).append("((jfloat)(").append(inputs.get(0).arg()).append("));\n");
+             case Opcodes.I2D, Opcodes.L2D, Opcodes.F2D ->
+-                outputs.get(0).buildAssignment(builder).append("jdouble(").append(inputs.get(0).arg()).append(");\n");
++                outputs.get(0).buildAssignment(builder).append("((jdouble)(").append(inputs.get(0).arg()).append("));\n");
+             case Opcodes.L2I, Opcodes.F2I, Opcodes.D2I ->
+-                outputs.get(0).buildAssignment(builder).append("jint(").append(inputs.get(0).arg()).append(");\n");
+-            case Opcodes.I2B -> outputs.get(0).buildAssignment(builder).append("jbyte(").append(inputs.get(0).arg()).append(");\n");
+-            case Opcodes.I2C -> outputs.get(0).buildAssignment(builder).append("jchar(").append(inputs.get(0).arg()).append(");\n");
+-            case Opcodes.I2S -> outputs.get(0).buildAssignment(builder).append("jshort(").append(inputs.get(0).arg()).append(");\n");
++                outputs.get(0).buildAssignment(builder).append("((jint)(").append(inputs.get(0).arg()).append("));\n");
++            case Opcodes.I2B -> outputs.get(0).buildAssignment(builder).append("((jbyte)(").append(inputs.get(0).arg()).append("));\n");
++            case Opcodes.I2C -> outputs.get(0).buildAssignment(builder).append("((jchar)(").append(inputs.get(0).arg()).append("));\n");
++            case Opcodes.I2S -> outputs.get(0).buildAssignment(builder).append("((jshort)(").append(inputs.get(0).arg()).append("));\n");
+             case Opcodes.LCMP ->
+                 outputs.get(0).buildAssignment(builder).append("longCompare(").append(inputs.get(0).arg()).append(", ").append(inputs.get(1).arg()).append(");\n");
+             case Opcodes.FCMPL ->
+@@ -279,16 +279,16 @@ public class ZeroOperandInstruction extends Instruction {
+             case Opcodes.IXOR, Opcodes.LXOR ->
+                     builder.append(inputs.get(0).arg()).append(" ^ ").append(inputs.get(1).arg());
+             case Opcodes.I2L, Opcodes.F2L, Opcodes.D2L ->
+-                    builder.append("jlong(").append(inputs.get(0).arg()).append(")");
++                    builder.append("((jlong)(").append(inputs.get(0).arg()).append("))");
+             case Opcodes.I2F, Opcodes.L2F, Opcodes.D2F ->
+-                    builder.append("jfloat(").append(inputs.get(0).arg()).append(")");
++                    builder.append("((jfloat)(").append(inputs.get(0).arg()).append("))");
+             case Opcodes.I2D, Opcodes.L2D, Opcodes.F2D ->
+-                    builder.append("jdouble(").append(inputs.get(0).arg()).append(")");
++                    builder.append("((jdouble)(").append(inputs.get(0).arg()).append("))");
+             case Opcodes.L2I, Opcodes.F2I, Opcodes.D2I ->
+-                    builder.append("jint(").append(inputs.get(0).arg()).append(")");
+-            case Opcodes.I2B -> builder.append("jbyte(").append(inputs.get(0).arg()).append(")");
+-            case Opcodes.I2C -> builder.append("jchar(").append(inputs.get(0).arg()).append(")");
+-            case Opcodes.I2S -> builder.append("jshort(").append(inputs.get(0).arg()).append(")");
++                    builder.append("((jint)(").append(inputs.get(0).arg()).append("))");
++            case Opcodes.I2B -> builder.append("((jbyte)(").append(inputs.get(0).arg()).append("))");
++            case Opcodes.I2C -> builder.append("((jchar)(").append(inputs.get(0).arg()).append("))");
++            case Opcodes.I2S -> builder.append("((jshort)(").append(inputs.get(0).arg()).append("))");
+             case Opcodes.LCMP ->
+                     builder.append("longCompare(").append(inputs.get(0).arg()).append(", ").append(inputs.get(1).arg()).append(")");
+             case Opcodes.FCMPL ->
