@@ -5442,6 +5442,11 @@ public class CUnit extends CWidget {
 		this.defenseType = defenseType;
 	}
 
+	/** warsmash-nx: read by UnitVision on the game thread (packed level << 8 | detection bits). */
+	public List<Integer> getDetectorLevels() {
+		return this.detectorLevels;
+	}
+
 	public float getSightRadius(final CSimulation game, final boolean dayVision) {
 		if (dayVision) return this.unitType.getSightRadiusDay();
 		for (final CAbility ability : this.abilities) {

@@ -69,7 +69,24 @@ public class SplatModel implements Comparable<SplatModel> {
 		}
 	}
 
+	/**
+	 * warsmash-nx: a splat added or removed since the batches were last built. add() and destroy()
+	 * only mark it; the batches are rebuilt once, before the next draw or before any splat of this
+	 * model is touched (a pending splat has no place in the buffers yet, and the others' places
+	 * change). Before, every unit created rebuilt every unit shadow's geometry: a few hundred units
+	 * made map load and spawn waves quadratic (OrcX01 console profile: 7-10% of the game thread).
+	 */
+	private float[] pendingCenterOffset;
+
+	/** Rebuilds the batches if a splat was added or removed since (see pendingCenterOffset). */
+	public void flush(final GL30 gl) {
+		if (this.pendingCenterOffset != null) {
+			compact(gl, this.pendingCenterOffset);
+		}
+	}
+
 	public void compact(final GL30 gl, final float[] centerOffset) {
+		this.pendingCenterOffset = null;
 		// delete all the batches
 		for (final Batch b : this.batches) {
 			// Vertices
@@ -236,6 +253,7 @@ public class SplatModel implements Comparable<SplatModel> {
 	}
 
 	public void render(final GL30 gl, final ShaderProgram shader) {
+		flush(gl);
 		// Texture
 
 		if (this.noDepthTest) {
@@ -285,7 +303,7 @@ public class SplatModel implements Comparable<SplatModel> {
 		else {
 			splatMover = null;
 		}
-		compact(Gdx.gl30, centerOffset);
+		this.pendingCenterOffset = centerOffset;
 		return splatMover;
 	}
 
@@ -348,6 +366,7 @@ public class SplatModel implements Comparable<SplatModel> {
 		}
 
 		public void move(final float deltaX, final float deltaY, final float[] centerOffset) {
+			this.splatModel.flush(Gdx.gl30);
 			this.locs[0] += deltaX;
 			this.locs[2] += deltaX;
 			this.locs[1] += deltaY;
@@ -358,6 +377,7 @@ public class SplatModel implements Comparable<SplatModel> {
 		}
 
 		public void setLocation(final float x, final float y, final float[] centerOffset) {
+			this.splatModel.flush(Gdx.gl30);
 			final float width = this.locs[2] - this.locs[0];
 			final float height = this.locs[3] - this.locs[1];
 			this.locs[0] = x - (width / 2);
@@ -467,15 +487,20 @@ public class SplatModel implements Comparable<SplatModel> {
 		}
 
 		public void destroy(final GL30 gl, final float[] centerOffset) {
-			this.splatModel.locations.remove(this.index);
-			this.splatModel.splatInstances.remove(this.index);
-			this.splatModel.compact(gl, centerOffset);
+			// by identity: this.index is only up to date right after a rebuild
+			final int at = this.splatModel.splatInstances.indexOf(this);
+			if (at >= 0) {
+				this.splatModel.locations.remove(at);
+				this.splatModel.splatInstances.remove(at);
+				this.splatModel.pendingCenterOffset = centerOffset;
+			}
 		}
 
 		public void hide() {
 			// does not remove the shadow, just makes it not show, so it would still be
 			// using GPU resources
 			final GL30 gl = Gdx.gl30;
+			this.splatModel.flush(gl);
 			for (final float[] vertex : this.vertices) {
 				for (int i = 0; i < vertex.length; i++) {
 					vertex[i] = 0.0f;
@@ -511,6 +536,7 @@ public class SplatModel implements Comparable<SplatModel> {
 		}
 
 		public void setHeightAbsolute(final boolean absolute, final float absoluteHeightValue) {
+			this.splatModel.flush(Gdx.gl30);
 			this.absoluteHeightValue = absoluteHeightValue;
 			if (absolute != this.heightIsAbsolute) {
 				this.heightIsAbsolute = absolute;

@@ -72,6 +72,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CRaceManage
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CRacePreference;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CFogModifier;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CPlayerFogOfWar;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.UnitVision;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.region.CRegionManager;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.state.FalseTimeOfDay;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
@@ -538,13 +539,18 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 		this.pathfindingProcessors[playerIndex].removeFromPathfindingQueue(behaviorMove);
 	}
 
+	private final UnitVision unitVision = new UnitVision();
+
 	protected void updateFogOfWar() {
 		for (final CPlayer player : this.players) {
 			player.getFogOfWar().convertVisibleToFogged();
 			player.updateFogModifiers(this);
 		}
-		for (final CUnit unit : this.units) {
-			unit.updateFogOfWar(this);
+		// warsmash-nx: the same cells with the same result, much faster (UnitVision)
+		if (!this.unitVision.run(this, this.units)) {
+			for (final CUnit unit : this.units) {
+				unit.updateFogOfWar(this);
+			}
 		}
 		for (final CPlayer player : this.players) {
 			player.updateFogModifiersAfterUnits(this);

@@ -195,6 +195,24 @@ public class PathingGrid {
 		return this.pathingGridSizes[0];
 	}
 
+	/**
+	 * warsmash-nx: the buildings' and trees' pathing, as isCellBlockVision reads it (index
+	 * cellY * getWidth() + cellX), for UnitVision. Read only.
+	 */
+	public short[] getDynamicPathingOverlay() {
+		return this.dynamicPathingOverlay;
+	}
+
+	/** warsmash-nx: the map's center offset, x (the terrain's too: the same array). */
+	public float getCenterOffsetX() {
+		return this.centerOffset[0];
+	}
+
+	/** warsmash-nx: the map's center offset, y. */
+	public float getCenterOffsetY() {
+		return this.centerOffset[1];
+	}
+
 	public int getHeight() {
 		return this.pathingGridSizes[1];
 	}

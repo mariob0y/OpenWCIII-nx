@@ -46,6 +46,16 @@ public class CPlayerFogOfWar {
 		return this.fogOfWarBuffer;
 	}
 
+	/** warsmash-nx: the grid's states, for UnitVision (absolute gets and puts only). */
+	ByteBuffer fogBuffer() {
+		return this.fogOfWarBuffer;
+	}
+
+	/** warsmash-nx: the grid's detection levels, for UnitVision (absolute gets and puts only). */
+	ByteBuffer detectionBuffer() {
+		return this.detectionBuffer;
+	}
+
 	private byte getState(CFogMaskSettings fogMaskSettings, final PathingGrid pathingGrid, final float x,
 			final float y) {
 		final int indexX = pathingGrid.getFogOfWarIndexX(x);
