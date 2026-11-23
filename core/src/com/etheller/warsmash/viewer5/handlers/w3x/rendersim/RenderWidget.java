@@ -131,6 +131,10 @@ public interface RenderWidget {
 			}
 		}
 
+		public PrimaryTag getCurrentAnimation() {
+			return this.currentAnimation;
+		}
+
 		@Override
 		public EnumSet<SecondaryTag> getSecondaryTags() {
 			return this.secondaryAnimationTags;

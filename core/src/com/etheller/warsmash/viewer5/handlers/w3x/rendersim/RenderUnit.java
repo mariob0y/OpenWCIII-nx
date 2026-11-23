@@ -315,20 +315,33 @@ public class RenderUnit implements RenderWidget {
 				removeSplats(map);
 			}
 		}
-		else if (building != this.building) {
-			if (building) {
-				if (this.shadow != null) {
-					this.shadow.hide();
+		else {
+			if (this.dead) {
+				// Revived (ReviveHero, an altar, Resurrection): the death, decay or dissipate sequence
+				// would otherwise keep playing until an order changes the animation, leaving the hero
+				// on its last frame (a dissipated hero up in the sky).
+				final PrimaryTag current = this.unitAnimationListenerImpl.getCurrentAnimation();
+				if ((current == PrimaryTag.DEATH) || (current == PrimaryTag.DECAY)
+						|| (current == PrimaryTag.DISSIPATE)) {
+					this.unitAnimationListenerImpl.playAnimation(true, PrimaryTag.STAND, SequenceUtils.EMPTY,
+							1.0f, true);
 				}
-				createBuildingDecalSplats(map);
 			}
-			else {
-				if (this.shadow != null) {
-					this.shadow.show(map.terrain.centerOffset);
+			if (building != this.building) {
+				if (building) {
+					if (this.shadow != null) {
+						this.shadow.hide();
+					}
+					createBuildingDecalSplats(map);
 				}
-				removeBuildingDecalSplats(map);
+				else {
+					if (this.shadow != null) {
+						this.shadow.show(map.terrain.centerOffset);
+					}
+					removeBuildingDecalSplats(map);
+				}
+				this.building = building;
 			}
-			this.building = building;
 		}
 		if (boneCorpse && !this.boneCorpse) {
 			if (this.simulationUnit.getUnitType().isHero()) {
