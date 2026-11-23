@@ -28,6 +28,10 @@ if [ ! -f "$RT" ] || [ ! -f "$TRANSPILER" ]; then
 	(cd ../external/clearwing-vm && JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8 ./gradlew --offline -q :runtime:jar :transpiler:shadowJar)
 fi
 SGDX=../external/switch-gdx/switch-gdx
+if [ ! -f ../third_party/jars/gson-2.10.jar ]; then
+	echo "third-party jars missing: run third_party/fetch.sh in devkitPro's MSYS2 shell" >&2
+	exit 1
+fi
 W=../..
 JAVAC=("$J/javac" -encoding UTF-8 -nowarn -proc:none -source 8 -target 8 -Xlint:-options -Xmaxerrs 10000)
 
