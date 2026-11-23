@@ -9,11 +9,14 @@ import com.badlogic.gdx.input.NativeInputConfiguration;
 import java.util.function.Consumer;
 
 /**
- * warsmash-nx: replaces SwitchGDX's SwitchInput. Pointer 0 is the Joy-Con 2 mouse (libounce's
- * PadPointer, read by getMouseData in backend/native/nx_switchgdx.cpp, already in surface pixels):
- * mouseMoved while no button is held, touchDown/touchDragged/touchUp with Buttons.LEFT (the Joy-Con's
- * own click: L/ZL or R/ZR) and Buttons.RIGHT (a pad button, see getMouseData), scrolled from its
- * wheel. Touches use pointers 1..15, so the two never share a slot. No software keyboard or dialog
+ * warsmash-nx: replaces SwitchGDX's SwitchInput. One cursor, pointer 0, as a mouse: mouseMoved while no
+ * button is held, touchDown/touchDragged/touchUp with Buttons.LEFT and Buttons.RIGHT. It moves with
+ * the Joy-Con 2 mouse (libounce's PadPointer, read by getMouseData in backend/native/nx_switchgdx.cpp),
+ * the right stick, the touch screen and setCursorPosition (the game's D-pad menu navigation).
+ * Left = the Joy-Con mouse's own click, L, R or A; right = ZL or ZR. A finger moves the cursor to it;
+ * dragging it past a few pixels holds the left button from where it went down, so a drag draws the
+ * selection rectangle. The left stick is the camera stick (cameraStickX/Y). Pad buttons are also keys
+ * (BUTTON_*, DPAD_*): the game reads + as its menu key and B as back. No software keyboard or dialog
  * (no applets on this console): text input is cancelled, confirmations answer null.
  */
 public class SwitchInput implements Input {
@@ -25,12 +28,26 @@ public class SwitchInput implements Input {
 		Keys.BUTTON_THUMBL, Keys.BUTTON_THUMBR, Keys.BUTTON_SELECT, Keys.BUTTON_START,
 		Keys.BUTTON_L1, Keys.BUTTON_L2, Keys.BUTTON_R1, Keys.BUTTON_R2
 	};
+	// libnx's HidNpadButton bits (see keyToButton)
+	private static final int BIT_A = 0, BIT_L = 6, BIT_R = 7, BIT_ZL = 8, BIT_ZR = 9;
+	/** Stick tilt below this is rest. */
+	private static final float STICK_DEAD_ZONE = 0.15f;
+	/** Right stick at full tilt, in surface widths per second. */
+	private static final float CURSOR_SPEED = 0.85f;
+	/** The Joy-Con mouse's wheel is that Joy-Con's stick: no cursor from the stick this soon after it. */
+	private static final long WHEEL_HOLDS_STICK_NANOS = 400_000_000L;
+	/** A finger moved this far (surface pixels, x plus y) from where it went down is a drag. */
+	private static final int TOUCH_DRAG_DISTANCE = 24;
+
+	/**
+	 * The left stick past its dead zone, -1..1, x right and y up: the camera stick. The launcher copies
+	 * it to the game each frame (this backend is compiled before the game and cannot see it).
+	 */
+	public static volatile float cameraStickX, cameraStickY;
 
 	private InputProcessor inputProcessor;
 	private long currentEventTimeStamp;
 	private final int[] touchData = new int[MAX_TOUCHES * 3];
-	private final int[] previousTouchData = new int[MAX_TOUCHES * 3];
-	private final int[] rawTouchIds = new int[MAX_TOUCHES];
 	private final int[] touchX = new int[MAX_TOUCHES];
 	private final int[] touchY = new int[MAX_TOUCHES];
 	private final int[] deltaX = new int[MAX_TOUCHES];
@@ -38,156 +55,185 @@ public class SwitchInput implements Input {
 	private final boolean[] touched = new boolean[MAX_TOUCHES];
 	private boolean wasJustTouched;
 
-	// Joy-Con mouse: active, x, y, left, wheel delta, right
-	private final int[] mouseData = new int[6];
-	private boolean mouseActive;
-	private boolean mouseLeft, mouseRight;
-	private boolean mouseJustLeft, mouseJustRight;
+	/** The cursor, surface pixels; touchX[0]/touchY[0] is where the game last saw it. */
+	private float cursorX = -1, cursorY = -1;
+	// Joy-Con mouse: active, x, y, its own click, the wheel's running total
+	private final int[] mouseData = new int[5];
+	private boolean pointerSeen;
+	private int pointerX, pointerY, wheelTotal;
+	private long lastWheelNanos;
+	// the finger that drives the cursor
+	private int fingerId = -1;
+	private int fingerStartX, fingerStartY;
+	private boolean fingerDragging;
+	private boolean buttonLeft, buttonRight;
+	private boolean justLeft, justRight;
 
 	public SwitchInput () {
-		for (int i = 0; i < MAX_TOUCHES; i++) {
-			previousTouchData[i * 3] = -1;
-			rawTouchIds[i] = -1;
-		}
 	}
 
 	void update() {
 		currentEventTimeStamp = System.nanoTime();
 		wasJustTouched = false;
+		justLeft = justRight = false;
+		final SwitchController pad = (SwitchController)SwitchControllerManager.getInstance().getCurrentController();
+		final int width = Gdx.graphics.getWidth(), height = Gdx.graphics.getHeight();
+		if (cursorX < 0) {
+			cursorX = width / 2f;
+			cursorY = height / 2f;
+			touchX[0] = (int) cursorX;
+			touchY[0] = (int) cursorY;
+		}
+
+		// the Joy-Con mouse moves the cursor by its own movement, so the other ways of moving it
+		// never make it jump
+		getMouseData(mouseData);
+		final boolean mouseActive = mouseData[0] != 0;
+		if (mouseActive) {
+			if (pointerSeen) {
+				cursorX += mouseData[1] - pointerX;
+				cursorY += mouseData[2] - pointerY;
+			}
+			pointerX = mouseData[1];
+			pointerY = mouseData[2];
+		}
+		pointerSeen = mouseActive;
+		final int wheel = mouseData[4] - wheelTotal;
+		wheelTotal = mouseData[4];
+		if (wheel != 0)
+			lastWheelNanos = currentEventTimeStamp;
+
+		// the right stick, unless it is the Joy-Con mouse's wheel just now
+		if (currentEventTimeStamp - lastWheelNanos > WHEEL_HOLDS_STICK_NANOS) {
+			final float rx = pad.getAxis(2), ry = pad.getAxis(3);
+			final float tilt = stickTilt(rx, ry);
+			if (tilt > 0) {
+				final float length = (float) Math.sqrt(rx * rx + ry * ry);
+				// squared: slow and precise near the centre, fast at full tilt
+				final float step = CURSOR_SPEED * width * tilt * tilt * Math.min(Gdx.graphics.getDeltaTime(), 0.1f);
+				cursorX += rx / length * step;
+				cursorY += ry / length * step;
+			}
+		}
+
+		// the left stick pans the camera (the launcher hands it to the game)
+		final float lx = pad.getAxis(0), ly = pad.getAxis(1);
+		final float camera = stickTilt(lx, ly);
+		final float cameraLength = (float) Math.sqrt(lx * lx + ly * ly);
+		cameraStickX = camera > 0 ? lx / cameraLength * camera : 0;
+		cameraStickY = camera > 0 ? -ly / cameraLength * camera : 0;
+
+		// a finger puts the cursor where it is
 		getTouchData(touchData);
-
-		// Todo: There's probably a better way to optimize this
-
+		int finger = -1;
 		for (int i = 0; i < MAX_TOUCHES; i++) {
-			int rawIndex = touchData[i * 3];
-			if (rawIndex == -1)
+			final int id = touchData[i * 3];
+			if (id == -1)
 				continue;
-			int previousIndex = -1;
-			for (int j = 0; j < MAX_TOUCHES; j++)
-				if (previousTouchData[j * 3] == rawIndex) {
-					previousIndex = j;
-					break;
-				}
-			if (previousIndex == -1) {
-				wasJustTouched = true;
-				for (int j = 1; j < MAX_TOUCHES; j++)
-					if (rawTouchIds[j] == -1) {
-						touchX[j] = touchData[i * 3 + 1];
-						touchY[j] = touchData[i * 3 + 2];
-						touched[j] = true;
-						rawTouchIds[j] = rawIndex;
-						if (inputProcessor != null)
-							inputProcessor.touchDown(touchData[i * 3 + 1], touchData[i * 3 + 2], j, 0);
-						break;
-					}
-			} else if (touchData[i * 3 + 1] != previousTouchData[previousIndex * 3 + 1] || touchData[i * 3 + 2] != previousTouchData[previousIndex * 3 + 2]) {
-				for (int j = 0; j < MAX_TOUCHES; j++)
-					if (rawTouchIds[j] == rawIndex) {
-						deltaX[j] = touchData[i * 3 + 1] - touchX[j];
-						deltaY[j] = touchData[i * 3 + 2] - touchY[j];
-						touchX[j] = touchData[i * 3 + 1];
-						touchY[j] = touchData[i * 3 + 2];
-						if (inputProcessor != null)
-							inputProcessor.touchDragged(touchData[i * 3 + 1], touchData[i * 3 + 2], j);
-						break;
-					}
+			if (fingerId == -1 || id == fingerId) {
+				finger = i;
+				break;
 			}
 		}
-
-		for (int i = 0; i < MAX_TOUCHES; i++) {
-			int rawPreviousIndex = previousTouchData[i * 3];
-			if (rawPreviousIndex == -1)
-				continue;
-			int index = -1;
-			for (int j = 0; j < MAX_TOUCHES; j++)
-				if (touchData[j * 3] == rawPreviousIndex) {
-					index = j;
-					break;
-				}
-			if (index == -1) {
-				for (int j = 0; j < MAX_TOUCHES; j++)
-					if (rawTouchIds[j] == rawPreviousIndex) {
-						touchX[j] = previousTouchData[i * 3 + 1];
-						touchY[j] = previousTouchData[i * 3 + 2];
-						deltaX[j] = 0;
-						deltaY[j] = 0;
-						touched[j] = false;
-						rawTouchIds[j] = -1;
-						if (inputProcessor != null)
-							inputProcessor.touchUp(previousTouchData[i * 3 + 1], previousTouchData[i * 3 + 2], j, 0);
-						break;
-					}
+		boolean dragStarts = false;
+		if (finger == -1) {
+			fingerId = -1;
+			fingerDragging = false;
+		} else {
+			final int fx = touchData[finger * 3 + 1], fy = touchData[finger * 3 + 2];
+			if (fingerId == -1) {
+				fingerId = touchData[finger * 3];
+				fingerStartX = fx;
+				fingerStartY = fy;
+				fingerDragging = false;
+			} else if (!fingerDragging && Math.abs(fx - fingerStartX) + Math.abs(fy - fingerStartY) > TOUCH_DRAG_DISTANCE) {
+				fingerDragging = true;
+				dragStarts = true;
 			}
+			cursorX = fx;
+			cursorY = fy;
 		}
 
-		System.arraycopy(touchData, 0, previousTouchData, 0, MAX_TOUCHES * 3);
+		cursorX = Math.max(0, Math.min(width - 1, cursorX));
+		cursorY = Math.max(0, Math.min(height - 1, cursorY));
+		final boolean padLeft = (mouseActive && mouseData[3] != 0) || pad.getButton(BIT_A) || pad.getButton(BIT_L)
+				|| pad.getButton(BIT_R);
+		final boolean padRight = pad.getButton(BIT_ZL) || pad.getButton(BIT_ZR);
 
-		updateMouse();
+		// a drag goes down where the finger did, then follows it
+		if (dragStarts && !buttonLeft) {
+			moveCursorTo(fingerStartX, fingerStartY);
+			setLeft(true);
+		}
+		moveCursorTo((int) cursorX, (int) cursorY);
+		setLeft(padLeft || fingerDragging);
+		setRight(padRight);
+		touched[0] = buttonLeft || buttonRight;
 
-		SwitchController currentController = (SwitchController)SwitchControllerManager.getInstance().getCurrentController();
+		// gdx: amountY > 0 scrolls down. PadPointer's wheel (the Joy-Con's stick) is positive upward.
+		if (wheel != 0 && inputProcessor != null)
+			inputProcessor.scrolled(0, -Integer.signum(wheel));
+
 		for (int key: SWITCH_KEYS) {
 			int button = keyToButton(key);
-			if (currentController.getButtonPressed(button) && inputProcessor != null) {
+			if (pad.getButtonPressed(button) && inputProcessor != null)
 				inputProcessor.keyDown(key);
-				// warsmash-nx: + is also Escape, the game's key for skipping a cinematic (and for
-				// cancelling a target or closing a menu). + and - together still quit.
-				if (key == Keys.BUTTON_START)
-					inputProcessor.keyDown(Keys.ESCAPE);
-			}
-			if (currentController.getButtonReleased(button) && inputProcessor != null) {
+			if (pad.getButtonReleased(button) && inputProcessor != null)
 				inputProcessor.keyUp(key);
-				if (key == Keys.BUTTON_START)
-					inputProcessor.keyUp(Keys.ESCAPE);
-			}
 		}
 	}
 
-	private void updateMouse () {
-		getMouseData(mouseData);
-		mouseJustLeft = mouseJustRight = false;
-		if (mouseData[0] == 0 && !mouseActive)
+	/** How far a stick is tilted past its dead zone, 0..1. */
+	private static float stickTilt (float x, float y) {
+		final float length = (float) Math.sqrt(x * x + y * y);
+		if (length <= STICK_DEAD_ZONE)
+			return 0;
+		return Math.min(1, (length - STICK_DEAD_ZONE) / (1 - STICK_DEAD_ZONE));
+	}
+
+	private void moveCursorTo (int x, int y) {
+		if (x == touchX[0] && y == touchY[0])
 			return;
-		mouseActive = mouseData[0] != 0;
-		final int x = mouseData[1], y = mouseData[2];
-		final boolean moved = x != touchX[0] || y != touchY[0];
 		deltaX[0] = x - touchX[0];
 		deltaY[0] = y - touchY[0];
 		touchX[0] = x;
 		touchY[0] = y;
-		final boolean left = mouseActive && mouseData[3] != 0;
-		final boolean right = mouseActive && mouseData[5] != 0;
-		if (moved && inputProcessor != null) {
-			if (mouseLeft || mouseRight)
+		if (inputProcessor != null) {
+			if (buttonLeft || buttonRight)
 				inputProcessor.touchDragged(x, y, 0);
 			else
 				inputProcessor.mouseMoved(x, y);
 		}
-		if (left != mouseLeft) {
-			mouseLeft = left;
-			mouseJustLeft = left;
-			if (left)
-				wasJustTouched = true;
-			if (inputProcessor != null) {
-				if (left)
-					inputProcessor.touchDown(x, y, 0, Buttons.LEFT);
-				else
-					inputProcessor.touchUp(x, y, 0, Buttons.LEFT);
-			}
+	}
+
+	private void setLeft (boolean down) {
+		if (down == buttonLeft)
+			return;
+		buttonLeft = down;
+		if (down) {
+			justLeft = true;
+			wasJustTouched = true;
 		}
-		if (right != mouseRight) {
-			mouseRight = right;
-			mouseJustRight = right;
-			if (inputProcessor != null) {
-				if (right)
-					inputProcessor.touchDown(x, y, 0, Buttons.RIGHT);
-				else
-					inputProcessor.touchUp(x, y, 0, Buttons.RIGHT);
-			}
+		if (inputProcessor != null) {
+			if (down)
+				inputProcessor.touchDown(touchX[0], touchY[0], 0, Buttons.LEFT);
+			else
+				inputProcessor.touchUp(touchX[0], touchY[0], 0, Buttons.LEFT);
 		}
-		touched[0] = mouseLeft || mouseRight;
-		// gdx: amountY > 0 scrolls down. PadPointer's wheel (the Joy-Con's stick) is positive upward.
-		if (mouseData[4] != 0 && inputProcessor != null)
-			inputProcessor.scrolled(0, -Integer.signum(mouseData[4]));
+	}
+
+	private void setRight (boolean down) {
+		if (down == buttonRight)
+			return;
+		buttonRight = down;
+		if (down)
+			justRight = true;
+		if (inputProcessor != null) {
+			if (down)
+				inputProcessor.touchDown(touchX[0], touchY[0], 0, Buttons.RIGHT);
+			else
+				inputProcessor.touchUp(touchX[0], touchY[0], 0, Buttons.RIGHT);
+		}
 	}
 
 	@Override
@@ -293,22 +339,15 @@ public class SwitchInput implements Input {
 	@Override
 	public boolean isButtonPressed (int button) {
 		if (button == Buttons.LEFT)
-			return mouseLeft || anyTouch();
-		return button == Buttons.RIGHT && mouseRight;
-	}
-
-	private boolean anyTouch () {
-		for (int i = 1; i < MAX_TOUCHES; i++)
-			if (touched[i])
-				return true;
-		return false;
+			return buttonLeft;
+		return button == Buttons.RIGHT && buttonRight;
 	}
 
 	@Override
 	public boolean isButtonJustPressed (int button) {
 		if (button == Buttons.LEFT)
-			return mouseJustLeft || justTouched();
-		return button == Buttons.RIGHT && mouseJustRight;
+			return justLeft;
+		return button == Buttons.RIGHT && justRight;
 	}
 
 	@Override
@@ -455,9 +494,25 @@ public class SwitchInput implements Input {
 		return false;
 	}
 
+	/**
+	 * Moves the cursor without an event (the caller sends its own mouseMoved) and puts the Joy-Con
+	 * mouse's pointer there too, so moving the Joy-Con carries on from here.
+	 */
 	@Override
 	public void setCursorPosition (int x, int y) {
-
+		cursorX = Math.max(0, Math.min(Gdx.graphics.getWidth() - 1, x));
+		cursorY = Math.max(0, Math.min(Gdx.graphics.getHeight() - 1, y));
+		deltaX[0] = (int) cursorX - touchX[0];
+		deltaY[0] = (int) cursorY - touchY[0];
+		touchX[0] = (int) cursorX;
+		touchY[0] = (int) cursorY;
+		setMousePosition(touchX[0], touchY[0]);
+		getMouseData(mouseData);
+		if (mouseData[0] != 0) {
+			pointerSeen = true;
+			pointerX = mouseData[1];
+			pointerY = mouseData[2];
+		}
 	}
 
 	private static int keyToButton(int key) {
@@ -508,8 +563,11 @@ public class SwitchInput implements Input {
 		});
 	}
 
-	/** active, x, y (surface pixels), left button, wheel delta since the last call, right button. */
+	/** The Joy-Con mouse: active, x, y (surface pixels), its own click, the wheel's running total. */
 	private static native void getMouseData(int[] mouseData);
+
+	/** Puts the Joy-Con mouse's pointer at x, y (surface pixels). */
+	private static native void setMousePosition(int x, int y);
 
 	private static native void getTouchData(int[] touchData);
 }

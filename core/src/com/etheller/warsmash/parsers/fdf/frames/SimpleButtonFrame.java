@@ -55,6 +55,10 @@ public class SimpleButtonFrame extends AbstractRenderableFrame implements Clicka
 		this.highlightOnMouseOver |= controlMouseOverHighlight != null;
 	}
 
+	public boolean isEnabled() {
+		return this.enabled;
+	}
+
 	public void setEnabled(final boolean enabled) {
 		this.enabled = enabled;
 		if (this.enabled) {

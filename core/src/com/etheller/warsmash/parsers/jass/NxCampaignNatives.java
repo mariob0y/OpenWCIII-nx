@@ -115,6 +115,111 @@ public final class NxCampaignNatives {
 		return shot;
 	}
 
+	private static float menuSeconds;
+
+	/**
+	 * The same steps on the main menu, under the name "Menu" and timed from the menu's first frame:
+	 * NX_DEBUG="Menu@4:key:DPAD_DOWN,shot;Menu@5:click". Only the input steps, "shot" and "quit".
+	 */
+	public static void debugMenuTick(final float deltaTime) {
+		final String spec = System.getenv("NX_DEBUG");
+		if (spec == null) {
+			return;
+		}
+		menuSeconds += deltaTime;
+		for (final String step : spec.split(";")) {
+			final int at = step.indexOf('@');
+			final int colon = step.indexOf(':');
+			if ((at < 0) || (colon < at) || DEBUG_DONE.contains(step) || !step.startsWith("Menu@")
+					|| (menuSeconds < Float.parseFloat(step.substring(at + 1, colon)))) {
+				continue;
+			}
+			DEBUG_DONE.add(step);
+			for (final String action : step.substring(colon + 1).split(",")) {
+				System.err.println("NXDEBUG Menu t=" + menuSeconds + ": " + action);
+				if ("shot".equals(action)) {
+					pendingShot = "nxshots/Menu_" + (int) menuSeconds + ".png";
+				}
+				else if ("quit".equals(action)) {
+					com.badlogic.gdx.Gdx.app.exit();
+				}
+				else {
+					inputAction(action);
+				}
+			}
+		}
+	}
+
+	/**
+	 * Input steps for PC tests of the console's pad: key:NAME presses and releases a pad key
+	 * (BUTTON_START, BUTTON_A, BUTTON_B, DPAD_UP/DOWN/LEFT/RIGHT); lstick:X/Y sets the camera stick
+	 * (-1..1, y forward; lstick:0/0 releases it); cursor:X/Y moves the cursor (pixels, y down); click
+	 * presses and releases the left button where the cursor is.
+	 */
+	private static boolean inputAction(final String action) {
+		final com.badlogic.gdx.InputProcessor input = com.badlogic.gdx.Gdx.input.getInputProcessor();
+		if (action.startsWith("key:")) {
+			final int key = padKey(action.substring(4));
+			if ((key >= 0) && (input != null)) {
+				input.keyDown(key);
+				input.keyUp(key);
+			}
+			System.err.println("NXDEBUG cursor now " + com.badlogic.gdx.Gdx.input.getX() + ","
+					+ com.badlogic.gdx.Gdx.input.getY());
+			return true;
+		}
+		if (action.startsWith("lstick:")) {
+			final String[] xy = action.substring(7).split("/");
+			com.etheller.warsmash.util.PadSticks.cameraX = Float.parseFloat(xy[0]);
+			com.etheller.warsmash.util.PadSticks.cameraY = Float.parseFloat(xy[1]);
+			return true;
+		}
+		if (action.startsWith("cursor:")) {
+			final String[] xy = action.substring(7).split("/");
+			final int x = Integer.parseInt(xy[0]);
+			final int y = Integer.parseInt(xy[1]);
+			com.badlogic.gdx.Gdx.input.setCursorPosition(x, y);
+			if (input != null) {
+				input.mouseMoved(x, y);
+			}
+			return true;
+		}
+		if ("click".equals(action)) {
+			final int x = com.badlogic.gdx.Gdx.input.getX();
+			final int y = com.badlogic.gdx.Gdx.input.getY();
+			if (input != null) {
+				input.touchDown(x, y, 0, com.badlogic.gdx.Input.Buttons.LEFT);
+				input.touchUp(x, y, 0, com.badlogic.gdx.Input.Buttons.LEFT);
+			}
+			return true;
+		}
+		return false;
+	}
+
+	private static int padKey(final String name) {
+		switch (name) {
+		case "BUTTON_START":
+			return com.badlogic.gdx.Input.Keys.BUTTON_START;
+		case "BUTTON_A":
+			return com.badlogic.gdx.Input.Keys.BUTTON_A;
+		case "BUTTON_B":
+			return com.badlogic.gdx.Input.Keys.BUTTON_B;
+		case "DPAD_UP":
+			return com.badlogic.gdx.Input.Keys.DPAD_UP;
+		case "DPAD_DOWN":
+			return com.badlogic.gdx.Input.Keys.DPAD_DOWN;
+		case "DPAD_LEFT":
+			return com.badlogic.gdx.Input.Keys.DPAD_LEFT;
+		case "DPAD_RIGHT":
+			return com.badlogic.gdx.Input.Keys.DPAD_RIGHT;
+		case "ESCAPE":
+			return com.badlogic.gdx.Input.Keys.ESCAPE;
+		default:
+			System.err.println("NXDEBUG unknown key " + name);
+			return -1;
+		}
+	}
+
 	public static void debugTick(final CSimulation sim) {
 		final String spec = System.getenv("NX_DEBUG");
 		if ((spec == null) || (currentMap == null) || (sim.getGlobalScope() == null)) {
@@ -170,6 +275,10 @@ public final class NxCampaignNatives {
 					args.add(new StringJassValue(pf[0]));
 					args.add(new StringJassValue(pf.length > 1 ? pf[1] : "main"));
 					loader.call(args, globals, com.etheller.interpreter.ast.scope.TriggerExecutionScope.EMPTY);
+				}
+				else if (inputAction(action)) {
+					// a pad key, the camera stick, the cursor or a click (inputAction)
+					System.err.println("NXDEBUG   game paused " + sim.isGamePaused());
 				}
 				else if (action.contains("=")) {
 					final String[] kv = action.split("=", 2);

@@ -277,6 +277,7 @@ public class MenuUI {
 	private StringFrame battleNetConnectInfoText;
 	private GlueTextButtonFrame battleNetConnectCancelButton;
 	private DialogWar3 dialog;
+	private final int[] padCursor = new int[2];
 	private Task gameListQueryTask;
 	private boolean hideUI;
 	private final DataTable miscData;
@@ -3313,6 +3314,19 @@ public class MenuUI {
 			return true;
 		}
 		return false;
+	}
+
+	/**
+	 * warsmash-nx: the D-pad moves the cursor between the buttons on screen (or of the open dialog);
+	 * the pad's click then presses the one under it.
+	 */
+	public boolean padNavigate(final int direction) {
+		final UIFrame root = ((this.dialog != null) && this.dialog.isVisible()) ? this.dialog.getFrame()
+				: this.rootFrame;
+		if (PadNavigation.move(root, this.uiViewport, direction, this.padCursor)) {
+			mouseMoved(this.padCursor[0], this.padCursor[1], Gdx.graphics.getHeight() - this.padCursor[1]);
+		}
+		return true;
 	}
 
 	public boolean keyUp(final int keycode) {

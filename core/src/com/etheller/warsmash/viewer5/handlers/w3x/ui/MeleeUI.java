@@ -75,6 +75,7 @@ import com.etheller.warsmash.util.RenderMathUtils;
 import com.etheller.warsmash.util.StringBundle;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WarsmashConstants;
+import com.etheller.warsmash.util.PadSticks;
 import com.etheller.warsmash.viewer5.Bounds;
 import com.etheller.warsmash.viewer5.Scene;
 import com.etheller.warsmash.viewer5.ViewerTextureRenderable;
@@ -397,6 +398,16 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	private final CampaignPresentationEvents campaignPresentationEvents = new CampaignPresentationEvents();
 	private java.util.function.BiConsumer<String, Boolean> changeLevelHandler;
 	private SimpleFrame smashEscMenu;
+	// warsmash-nx: the game menu's panels and their way back, for a game pad's + and B (padMenuKey)
+	private UIFrame escMenuMainPanel;
+	private UIFrame escMenuEndGamePanel;
+	private UIFrame escMenuConfirmQuitPanel;
+	private GlueTextButtonFrame escMenuReturnButton;
+	private GlueTextButtonFrame escMenuEndGamePreviousButton;
+	private GlueTextButtonFrame escMenuConfirmQuitCancelButton;
+	/** The menu paused the game when it opened, so closing it resumes the game. */
+	private boolean escMenuPausedGame;
+	private final int[] padCursor = new int[2];
 	private RenderWidget mouseOverUnit;
 	private RenderWidget currentHoverTipUnit;
 	private final Vector3 lastMouseDragStart = new Vector3();
@@ -813,6 +824,12 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		escMenuInnerHelpPanel.setVisible(false);
 		escMenuInnerTipsPanel.setVisible(false);
 
+		this.escMenuMainPanel = escMenuMainPanel;
+		this.escMenuEndGamePanel = escMenuInnerEndGamePanel;
+		this.escMenuConfirmQuitPanel = escMenuInnerConfirmQuitPanel;
+		this.escMenuReturnButton = returnButton;
+		this.escMenuEndGamePreviousButton = endGamePreviousButton;
+		this.escMenuConfirmQuitCancelButton = confirmQuitCancelButton;
 		this.menuButton.setOnClick(new Runnable() {
 			@Override
 			public void run() {
@@ -821,6 +838,12 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 				MeleeUI.this.smashEscMenu.setVisible(true);
 				escMenuInnerMainPanel.setVisible(true);
 				updateEscMenuCurrentPanel(escMenuBackdrop, escMenuMainPanel, escMenuInnerMainPanel);
+				// warsmash-nx: the menu pauses the game (single player), unless a script paused it already
+				final CSimulation simulation = MeleeUI.this.war3MapViewer.simulation;
+				if (!MeleeUI.this.escMenuPausedGame && !simulation.isGamePaused()) {
+					simulation.setGamePaused(true);
+					MeleeUI.this.escMenuPausedGame = true;
+				}
 			}
 		});
 		returnButton.setOnClick(new Runnable() {
@@ -830,6 +853,10 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 				escMenuMainPanel.setVisible(false);
 				MeleeUI.this.smashEscMenu.setVisible(false);
 				escMenuInnerMainPanel.setVisible(false);
+				if (MeleeUI.this.escMenuPausedGame) {
+					MeleeUI.this.escMenuPausedGame = false;
+					MeleeUI.this.war3MapViewer.simulation.setGamePaused(false);
+				}
 			}
 		});
 		endGameButton.setOnClick(new Runnable() {
@@ -1787,6 +1814,9 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		final boolean up = (mouseY <= (minY + 3)) && WarsmashConstants.CATCH_CURSOR && this.userControlEnabled;
 		final boolean down = (mouseY >= (maxY - 3)) && WarsmashConstants.CATCH_CURSOR && this.userControlEnabled;
 		if (getVisibleScriptDialog() == null) {
+			// warsmash-nx: a game pad's camera stick, while the player has control and no menu is open
+			final boolean stickPans = this.userControlEnabled && !isEscMenuOpen();
+			this.cameraManager.setAnalogPan(stickPans ? PadSticks.cameraX : 0, stickPans ? PadSticks.cameraY : 0);
 			this.cameraManager.applyVelocity(deltaTime, up, down, left, right);
 		}
 
@@ -4311,6 +4341,13 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public boolean keyDown(final int keycode) {
+		if ((keycode == Input.Keys.BUTTON_START) || (keycode == Input.Keys.BUTTON_B)) {
+			return padMenuKey(keycode);
+		}
+		final int padDirection = PadNavigation.direction(keycode);
+		if (padDirection != PadNavigation.NONE) {
+			return padNavigate(padDirection);
+		}
 		final CScriptDialog modalDialog = getVisibleScriptDialog();
 		if (modalDialog != null) {
 			if (keycode == Input.Keys.ESCAPE && modalDialog == this.loadPicker && this.loadPickerBack != null) {
@@ -4405,6 +4442,72 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			}
 		}
 		return this.cameraManager.keyDown(keycode);
+	}
+
+	/**
+	 * warsmash-nx: a game pad's + (BUTTON_START) and B. + opens the game menu (which pauses the game)
+	 * and closes it again; B goes back one panel in it. Elsewhere both are Escape: they skip a
+	 * cinematic and close a script dialog, as before, and + does that instead of opening the menu
+	 * while a cinematic runs or the interface is hidden.
+	 */
+	private boolean padMenuKey(final int keycode) {
+		if (getVisibleScriptDialog() != null) {
+			// a dialog (the load picker too) is on top of everything, the menu included
+			return keyDown(Input.Keys.ESCAPE);
+		}
+		if (isEscMenuOpen()) {
+			final GlueTextButtonFrame back;
+			if (keycode == Input.Keys.BUTTON_START) {
+				back = this.escMenuReturnButton;
+			}
+			else if (this.escMenuConfirmQuitPanel.isVisible()) {
+				back = this.escMenuConfirmQuitCancelButton;
+			}
+			else if (this.escMenuEndGamePanel.isVisible()) {
+				back = this.escMenuEndGamePreviousButton;
+			}
+			else {
+				back = this.escMenuReturnButton;
+			}
+			if (keycode == Input.Keys.BUTTON_START) {
+				// + closes the whole menu from any panel
+				this.escMenuEndGamePanel.setVisible(false);
+				this.escMenuConfirmQuitPanel.setVisible(false);
+			}
+			back.onClick(Input.Buttons.LEFT);
+			return true;
+		}
+		if ((keycode == Input.Keys.BUTTON_START) && this.userControlEnabled
+				&& !this.moviePlaying && (this.cinematicCameraInstance == null) && this.consoleUI.isVisible()
+				&& this.menuButton.isVisibleOnScreen()) {
+			this.menuButton.onClick(Input.Buttons.LEFT);
+			return true;
+		}
+		return keyDown(Input.Keys.ESCAPE);
+	}
+
+	/** The game menu is showing (its outer frame stays visible when closed; the panels do not). */
+	private boolean isEscMenuOpen() {
+		return this.smashEscMenu.isVisible() && this.escMenuMainPanel.isVisible();
+	}
+
+	/** warsmash-nx: the D-pad moves the cursor between the buttons of the game menu or a script dialog. */
+	private boolean padNavigate(final int direction) {
+		final UIFrame root;
+		final CScriptDialog dialog = getVisibleScriptDialog();
+		if (dialog != null) {
+			root = dialog.getScriptDialogFrame();
+		}
+		else if (isEscMenuOpen()) {
+			root = this.smashEscMenu;
+		}
+		else {
+			return false;
+		}
+		if (PadNavigation.move(root, this.uiViewport, direction, this.padCursor)) {
+			mouseMoved(this.padCursor[0], this.padCursor[1], Gdx.graphics.getHeight() - this.padCursor[1]);
+		}
+		return true;
 	}
 
 	@Override

@@ -249,6 +249,15 @@ public final class GameCameraManager extends CameraManager {
 		this.camera.viewport(viewport);
 	}
 
+	// warsmash-nx: a game pad's camera stick (PadSticks), -1..1 per axis, x right and y forward
+	private float analogPanX;
+	private float analogPanY;
+
+	public void setAnalogPan(final float x, final float y) {
+		this.analogPanX = x;
+		this.analogPanY = y;
+	}
+
 	public void applyVelocity(final float deltaTime, boolean up, boolean down, boolean left, boolean right) {
 		if (this.targetControllerUnit != null) {
 			this.target.x = this.targetControllerUnit.getX() + this.targetControllerXOffset;
@@ -293,7 +302,13 @@ public final class GameCameraManager extends CameraManager {
 			else {
 				velocityX = 0;
 			}
-			this.target.add(velocityX * deltaTime, velocityY * deltaTime, 0);
+			// the stick pans at the keys' rates scaled by its tilt, where no key or edge already does
+			final float analogX = (velocityX == 0) ? this.cameraRates.strafe * this.analogPanX : 0;
+			final float analogY = (velocityY == 0) ? this.cameraRates.forward * this.analogPanY : 0;
+			if ((analogX != 0) || (analogY != 0)) {
+				clearPan();
+			}
+			this.target.add((velocityX + analogX) * deltaTime, (velocityY + analogY) * deltaTime, 0);
 		}
 		if (this.cameraBounds != null) {
 			if (this.target.x < this.cameraBounds.x) {

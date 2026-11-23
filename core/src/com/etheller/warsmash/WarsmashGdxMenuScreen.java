@@ -615,6 +615,16 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 		this.viewer.webGL.useShaderProgram(null);
 
 		Gdx.gl30.glActiveTexture(GL30.GL_TEXTURE0);
+		// warsmash-nx: NX_DEBUG "Menu@" steps and their shots (PC tests; inert without NX_DEBUG)
+		com.etheller.warsmash.parsers.jass.NxCampaignNatives.debugMenuTick(deltaTime);
+		final String shot = com.etheller.warsmash.parsers.jass.NxCampaignNatives.takePendingShot();
+		if (shot != null) {
+			final com.badlogic.gdx.graphics.Pixmap pixmap = com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixmap(0, 0,
+					Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+			com.badlogic.gdx.graphics.PixmapIO.writePNG(Gdx.files.local(shot), pixmap);
+			pixmap.dispose();
+			System.err.println("NXDEBUG saved " + shot);
+		}
 	}
 
 	@Override
@@ -754,6 +764,14 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 	@Override
 	public boolean keyDown(final int keycode) {
+		// warsmash-nx: a game pad. B and + go back (Escape); the D-pad moves between the buttons.
+		if (isPadBack(keycode)) {
+			return this.menuUI.keyDown(Input.Keys.ESCAPE);
+		}
+		final int padDirection = com.etheller.warsmash.viewer5.handlers.w3x.ui.PadNavigation.direction(keycode);
+		if (padDirection != com.etheller.warsmash.viewer5.handlers.w3x.ui.PadNavigation.NONE) {
+			return this.menuUI.padNavigate(padDirection);
+		}
 		if (keycode == Input.Keys.ENTER) {
 			if (Gdx.input.isKeyPressed(Input.Keys.ALT_LEFT) || Gdx.input.isKeyPressed(Input.Keys.ALT_RIGHT)) {
 				WarsmashUtils.toggleFullScreen();
@@ -765,7 +783,14 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 
 	@Override
 	public boolean keyUp(final int keycode) {
+		if (isPadBack(keycode)) {
+			return this.menuUI.keyUp(Input.Keys.ESCAPE);
+		}
 		return this.menuUI.keyUp(keycode);
+	}
+
+	private static boolean isPadBack(final int keycode) {
+		return (keycode == Input.Keys.BUTTON_B) || (keycode == Input.Keys.BUTTON_START);
 	}
 
 	@Override

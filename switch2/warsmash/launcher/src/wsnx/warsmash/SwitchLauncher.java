@@ -65,6 +65,9 @@ public class SwitchLauncher {
 			@Override
 			public void render() {
 				NxCrumbs.crumb("render");
+				// the pad's camera stick, read by SwitchInput this frame, for the game camera
+				com.etheller.warsmash.util.PadSticks.cameraX = com.thelogicmaster.switchgdx.SwitchInput.cameraStickX;
+				com.etheller.warsmash.util.PadSticks.cameraY = com.thelogicmaster.switchgdx.SwitchInput.cameraStickY;
 				super.render();
 				NxCrumbs.crumb("rendered");
 				NxCrumbs.endFrame();

@@ -93,6 +93,8 @@ public class DialogWar3 {
 
 	public boolean isVisible() { return this.responseState.isOpen(); }
 
+	public UIFrame getFrame() { return this.dialogWar3; }
+
 	public boolean keyDown(final int keycode) {
 		if (!isVisible()) return false;
 		if (keycode == com.badlogic.gdx.Input.Keys.ESCAPE) this.responseState.respond(false);

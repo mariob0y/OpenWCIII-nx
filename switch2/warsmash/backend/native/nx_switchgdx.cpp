@@ -90,6 +90,7 @@ static PadState combinedPad;
 static PadState pads[8];
 static PadPointer pointer;
 static bool pointerOk;
+// The Joy-Con mouse's wheel since the start (Java takes the difference, so reading has no side effect).
 static int pointerWheel;
 
 // When the program started (its first own code), for the log: the boot before the loading screen.
@@ -861,14 +862,13 @@ void SM_com_thelogicmaster_switchgdx_SwitchInput_getTouchData_Array1_int(jcontex
     memcpy((void *) ((jarray) touchData)->data, touches, sizeof(touches));
 }
 
-// active, x, y (surface pixels), left button, wheel since the last call, right button. Left is the
-// Joy-Con's own click (the only mouse button the system reports, probe A; on the console that is
-// R, and ZR gave nothing, 2026-11-22); right comes from the pad: ZR (ZL on the left Joy-Con), or A /
-// the D-pad's right.
+// The Joy-Con mouse: active, x, y (surface pixels), its own click, the wheel since the start. The
+// click is the only mouse button the system reports (probe A; on the console that is R, and ZR gave
+// nothing, 2026-11-22); SwitchInput takes the other buttons from the pad (left L/R/A, right ZL/ZR).
 void SM_com_thelogicmaster_switchgdx_SwitchInput_getMouseData_Array1_int(jcontext ctx, jobject mouseData) {
     auto out = (jint *) ((jarray) mouseData)->data;
     if (!pointerOk) {
-        memset(out, 0, 6 * sizeof(jint));
+        memset(out, 0, 5 * sizeof(jint));
         return;
     }
     out[0] = pointer.active ? 1 : 0;
@@ -880,9 +880,17 @@ void SM_com_thelogicmaster_switchgdx_SwitchInput_getMouseData_Array1_int(jcontex
         out[2] = surfaceHeight - 1;
     out[3] = (padPointerGetButtons(&pointer) & 1) ? 1 : 0;
     out[4] = pointerWheel;
-    pointerWheel = 0;
-    out[5] = (padGetButtons(&combinedPad)
-              & (HidNpadButton_ZR | HidNpadButton_ZL | HidNpadButton_A | HidNpadButton_Right)) ? 1 : 0;
+}
+
+// The Joy-Con mouse's pointer to x, y (surface pixels), when the cursor moved some other way (stick,
+// touch, D-pad). PadPointer keeps the position in its public x/y and moves it from there.
+void SM_com_thelogicmaster_switchgdx_SwitchInput_setMousePosition_int_int(jcontext ctx, jint x, jint y) {
+    if (!pointerOk)
+        return;
+    const int64_t px = (int64_t) x * kPointerSpanX / surfaceWidth;
+    const int64_t py = (int64_t) y * kPointerHeight / surfaceHeight;
+    pointer.x = (s32) (px < 0 ? 0 : px >= kPointerWidth ? kPointerWidth - 1 : px);
+    pointer.y = (s32) (py < 0 ? 0 : py >= kPointerHeight ? kPointerHeight - 1 : py);
 }
 
 
