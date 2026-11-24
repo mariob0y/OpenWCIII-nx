@@ -47,9 +47,15 @@ public class ClientBuffer {
 	}
 
 	public void bindAndUpdate(final int size) {
+		if (size <= 0) {
+			return;
+		}
 		final GL20 gl = this.gl;
 
 		gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, this.buffer);
-		gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, 0, size, this.byteView);
+		this.byteView.position(0);
+		this.byteView.limit(size);
+		gl.glBufferData(GL20.GL_ARRAY_BUFFER, size, this.byteView, GL20.GL_STREAM_DRAW);
+		this.byteView.limit(this.byteView.capacity());
 	}
 }

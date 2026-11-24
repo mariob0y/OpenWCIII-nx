@@ -20,7 +20,10 @@ import com.etheller.warsmash.viewer5.handlers.w3x.ui.OptionsSettingsStore;
 public final class UnitSound {
 	private static final UnitSound SILENT = new UnitSound(0, 0, 0, 0, 0, 0, false);
 
+	/** Decoded sounds; null until first played (see sound()). Same indices as soundPaths. */
 	private final List<Sound> sounds = new ArrayList<>();
+	private final List<String> soundPaths = new ArrayList<>();
+	private DataSource dataSource;
 	private final float volume;
 	private final float pitch;
 	private final float pitchVariance;
@@ -60,39 +63,60 @@ public final class UnitSound {
 		}
 		final UnitSound sound = new UnitSound(volume, pitch, pitchVariance, minDistance, maxDistance, distanceCutoff,
 				looping);
+		// warsmash-nx: only find the files here; each is decoded the first time it plays (sound()). A new
+		// unit type used to decode its whole soundset (15-25 files) in one frame: 135-500 ms hitches.
+		sound.dataSource = dataSource;
 		for (final String fileName : fileNames.split(",")) {
-			final String filePath = directoryBase + fileName;
-			final Sound newSound = createSound(dataSource, filePath);
-			if (newSound != null) {
-				sound.sounds.add(newSound);
+			final String loadPath = resolveSoundPath(dataSource, directoryBase + fileName);
+			if (loadPath != null) {
+				sound.soundPaths.add(loadPath);
+				sound.sounds.add(null);
 			}
 		}
 		return sound;
 	}
 
-	public static Sound createSound(final DataSource dataSource, String filePath) {
+	/** The file a sound path loads from (extension replaced by .wav or .mp3), or null if there is none. */
+	private static String resolveSoundPath(final DataSource dataSource, String filePath) {
 		final int lastDotIndex = filePath.lastIndexOf('.');
 		if (lastDotIndex != -1) {
 			filePath = filePath.substring(0, lastDotIndex);
 		}
-		Sound newSound = null;
 		if (dataSource.has(filePath + ".wav") || dataSource.has(filePath + ".flac")) {
-			try {
-				newSound = Gdx.audio.newSound(new DataSourceFileHandle(dataSource, filePath + ".wav"));
-			}
-			catch (final Exception exc) {
-				exc.printStackTrace();
-			}
+			return filePath + ".wav";
 		}
 		else if (dataSource.has(filePath + ".mp3")) {
-			try {
-				newSound = Gdx.audio.newSound(new DataSourceFileHandle(dataSource, filePath + ".mp3"));
-			}
-			catch (final Exception exc) {
-				exc.printStackTrace();
-			}
+			return filePath + ".mp3";
 		}
-		return newSound;
+		return null;
+	}
+
+	private static Sound loadSound(final DataSource dataSource, final String loadPath) {
+		try {
+			return Gdx.audio.newSound(new DataSourceFileHandle(dataSource, loadPath));
+		}
+		catch (final Exception exc) {
+			exc.printStackTrace();
+			return null;
+		}
+	}
+
+	public static Sound createSound(final DataSource dataSource, final String filePath) {
+		final String loadPath = resolveSoundPath(dataSource, filePath);
+		return loadPath == null ? null : loadSound(dataSource, loadPath);
+	}
+
+	/** The decoded sound at an index, decoding it on first use; null if it does not decode. */
+	private Sound sound(final int index) {
+		Sound sound = this.sounds.get(index);
+		if ((sound == null) && (this.soundPaths.get(index) != null)) {
+			sound = loadSound(this.dataSource, this.soundPaths.get(index));
+			if (sound == null) {
+				this.soundPaths.set(index, null); // do not try again
+			}
+			this.sounds.set(index, sound);
+		}
+		return sound;
 	}
 
 	public UnitSound(final float volume, final float pitch, final float pitchVariation, final float minDistance,
@@ -152,6 +176,10 @@ public final class UnitSound {
 		if (audioContext == null) {
 			return -1;
 		}
+		final Sound buffer = sound(index);
+		if (buffer == null) {
+			return -1;
+		}
 		final AudioPanner panner = audioContext.createPanner();
 		final AudioBufferSource source = audioContext.createBufferSource();
 
@@ -161,7 +189,7 @@ public final class UnitSound {
 		panner.connect(audioContext.destination);
 
 		// Source.
-		source.buffer = this.sounds.get(index);
+		source.buffer = buffer;
 		source.connect(panner);
 
 		// Make a sound.
@@ -183,7 +211,8 @@ public final class UnitSound {
 			final AudioContext context, final boolean loop, final boolean spatial, final boolean stopOutOfRange,
 			final int fadeIn, final int fadeOut) {
 		if (this.sounds.isEmpty()) return null;
-		final Sound buffer = this.sounds.get((int) (Math.random() * this.sounds.size()));
+		final Sound buffer = sound((int) (Math.random() * this.sounds.size()));
+		if (buffer == null) return null;
 		final com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename playback = new com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename(
 				buffer, context, loop, stopOutOfRange, fadeIn, fadeOut, "");
 		playback.setNormalizedVolume(this.volume);
@@ -204,7 +233,9 @@ public final class UnitSound {
 
 	public void stop() {
 		for (final Sound sound : this.sounds) {
-			sound.stop();
+			if (sound != null) {
+				sound.stop();
+			}
 		}
 	}
 
@@ -213,7 +244,9 @@ public final class UnitSound {
 		// index used when starting?
 		// Not sure if IDs are unique per source
 		for (final Sound sound : this.sounds) {
-			sound.stop(soundId);
+			if (sound != null) {
+				sound.stop(soundId);
+			}
 		}
 	}
 }

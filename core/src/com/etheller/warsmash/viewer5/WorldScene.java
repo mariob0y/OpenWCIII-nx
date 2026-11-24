@@ -1,6 +1,7 @@
 package com.etheller.warsmash.viewer5;
 
 import java.util.ArrayList;
+import java.util.List;
 
 import com.etheller.warsmash.util.ParallelJobs;
 
@@ -35,6 +36,20 @@ public class WorldScene extends Scene {
 	 * Turn off with PARALLEL_POSES = false or zero workers.
 	 */
 	public static boolean PARALLEL_POSES = true;
+
+	/**
+	 * warsmash-nx: skip the grid cells whose whole box is off screen (GridCell.isVisible) instead of
+	 * testing every instance of the map every frame. PC check: NX_CULL_VERIFY=1 tests the instances
+	 * of the skipped cells too and logs any that would have been drawn.
+	 */
+	public static boolean GRID_CULLING = true;
+	private static final boolean CULL_VERIFY = System.getenv("NX_CULL_VERIFY") != null;
+	private final ArrayList<ModelInstance> cellScratch = new ArrayList<>();
+	private final ArrayList<ModelInstance> cullSuspects = new ArrayList<>();
+	private int cullVerifyFrames;
+	private long cullVerifyCulledCells;
+	private long cullVerifyCells;
+	private long cullVerifyMisses;
 	private final ArrayList<ModelInstance> deferredPoses = new ArrayList<>();
 	private final ArrayList<ModelInstance> postponedInstances = new ArrayList<>();
 	private boolean collectingPoses;
@@ -82,18 +97,41 @@ public class WorldScene extends Scene {
 		instanceProcessor.reset(dt, frame);
 		this.collectingPoses = PARALLEL_POSES && (ParallelJobs.workerCount() > 0);
 		try {
-			for (final GridCell cell : this.grid.cells) {
-				if (cell.isVisible(this.camera) || true) {
+			final GridCell[] cells = this.grid.cells;
+			final ArrayList<ModelInstance> scratch = this.cellScratch;
+			for (int c = 0; c < cells.length; c++) {
+				final GridCell cell = cells[c];
+				final List<ModelInstance> cellInstances = cell.instances;
+				if (cellInstances.isEmpty()) {
+					continue;
+				}
+				if (!GRID_CULLING || cell.isVisible(this.camera)) {
 					this.visibleCells += 1;
 
-					for (final ModelInstance instance : new ArrayList<>(cell.instances)) {
-						instanceProcessor.call(instance);
+					// a copy: an instance that moves while it updates may change this cell's list
+					scratch.clear();
+					for (int i = 0, l = cellInstances.size(); i < l; i++) {
+						scratch.add(cellInstances.get(i));
 					}
+					for (int i = 0, l = scratch.size(); i < l; i++) {
+						instanceProcessor.call(scratch.get(i));
+					}
+					scratch.clear();
+				}
+				else if (CULL_VERIFY) {
+					this.cullVerifyCulledCells++;
+					this.cullSuspects.addAll(cellInstances);
+				}
+				if (CULL_VERIFY) {
+					this.cullVerifyCells++;
 				}
 			}
 		}
 		finally {
 			this.collectingPoses = false;
+		}
+		if (CULL_VERIFY) {
+			verifyCulling(frame);
 		}
 
 		final ArrayList<ModelInstance> deferred = this.deferredPoses;
@@ -126,6 +164,30 @@ public class WorldScene extends Scene {
 			finally {
 				postponed.clear();
 			}
+		}
+	}
+
+	/**
+	 * NX_CULL_VERIFY: an instance of a skipped cell that no other cell walked, and that isVisible
+	 * would have let through, was wrongly culled.
+	 */
+	private void verifyCulling(final int frame) {
+		final ArrayList<ModelInstance> suspects = this.cullSuspects;
+		for (int i = 0, l = suspects.size(); i < l; i++) {
+			final ModelInstance instance = suspects.get(i);
+			if (instance.rendered && (instance.cullFrame < frame) && instance.isVisible(this.camera)) {
+				this.cullVerifyMisses++;
+				if (this.cullVerifyMisses <= 20) {
+					System.out.println("NX_CULL_VERIFY: wrongly culled " + instance.model + " at "
+							+ instance.worldLocation + " r " + instance.model.bounds.r);
+				}
+			}
+		}
+		suspects.clear();
+		if ((++this.cullVerifyFrames % 300) == 0) {
+			System.out.println("NX_CULL_VERIFY: " + this.cullVerifyFrames + " frames, cells skipped "
+					+ this.cullVerifyCulledCells + " of " + this.cullVerifyCells + ", wrongly culled "
+					+ this.cullVerifyMisses);
 		}
 	}
 

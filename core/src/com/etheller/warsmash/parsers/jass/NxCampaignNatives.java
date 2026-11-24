@@ -154,7 +154,7 @@ public final class NxCampaignNatives {
 	 * Input steps for PC tests of the console's pad: key:NAME presses and releases a pad key
 	 * (BUTTON_START, BUTTON_A, BUTTON_B, DPAD_UP/DOWN/LEFT/RIGHT); lstick:X/Y sets the camera stick
 	 * (-1..1, y forward; lstick:0/0 releases it); cursor:X/Y moves the cursor (pixels, y down); click
-	 * presses and releases the left button where the cursor is.
+	 * presses and releases the left button where the cursor is, rclick the right one.
 	 */
 	private static boolean inputAction(final String action) {
 		final com.badlogic.gdx.InputProcessor input = com.badlogic.gdx.Gdx.input.getInputProcessor();
@@ -184,12 +184,14 @@ public final class NxCampaignNatives {
 			}
 			return true;
 		}
-		if ("click".equals(action)) {
+		if ("click".equals(action) || "rclick".equals(action)) {
 			final int x = com.badlogic.gdx.Gdx.input.getX();
 			final int y = com.badlogic.gdx.Gdx.input.getY();
+			final int button = "click".equals(action) ? com.badlogic.gdx.Input.Buttons.LEFT
+					: com.badlogic.gdx.Input.Buttons.RIGHT;
 			if (input != null) {
-				input.touchDown(x, y, 0, com.badlogic.gdx.Input.Buttons.LEFT);
-				input.touchUp(x, y, 0, com.badlogic.gdx.Input.Buttons.LEFT);
+				input.touchDown(x, y, 0, button);
+				input.touchUp(x, y, 0, button);
 			}
 			return true;
 		}

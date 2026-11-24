@@ -600,9 +600,11 @@ public class MdxComplexInstance extends ModelInstance {
 			}
 		}
 
-		final int glGetError = Gdx.gl.glGetError();
-		if ((glGetError != GL20.GL_NO_ERROR) && WarsmashConstants.ENABLE_DEBUG) {
-			throw new IllegalStateException("GL ERROR: " + glGetError + " ON " + model.name + " (Opaque)");
+		if (WarsmashConstants.ENABLE_DEBUG) {
+			final int glGetError = Gdx.gl.glGetError();
+			if (glGetError != GL20.GL_NO_ERROR) {
+				throw new IllegalStateException("GL ERROR: " + glGetError + " ON " + model.name + " (Opaque)");
+			}
 		}
 	}
 
@@ -628,9 +630,11 @@ public class MdxComplexInstance extends ModelInstance {
 			groupIndex++;
 			group.render(this, this.scene.camera.viewProjectionMatrix);
 
-			final int glGetError = Gdx.gl.glGetError();
-			if ((glGetError != GL20.GL_NO_ERROR) && WarsmashConstants.ENABLE_DEBUG) {
-				throw new IllegalStateException("GL ERROR: " + glGetError + " ON " + model.name + " (Translucent)");
+			if (WarsmashConstants.ENABLE_DEBUG) {
+				final int glGetError = Gdx.gl.glGetError();
+				if (glGetError != GL20.GL_NO_ERROR) {
+					throw new IllegalStateException("GL ERROR: " + glGetError + " ON " + model.name + " (Translucent)");
+				}
 			}
 		}
 	}

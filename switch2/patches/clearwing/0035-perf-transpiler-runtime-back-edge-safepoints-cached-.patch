@@ -1,0 +1,294 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Tue, 24 Nov 2026 13:28:57 +0200
+Subject: [PATCH] perf: transpiler+runtime - back-edge safepoints, cached
+ string literals, static FrameInfo, fast casts
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp       | 13 +++--
+ runtime/res/clearwing/src/Clearwing.h         | 52 ++++++++++---------
+ .../clearwing/BytecodeClass.java              |  2 +-
+ .../clearwing/BytecodeMethod.java             | 33 ++++++++++++
+ .../bytecode/JumpingInstruction.java          | 13 +++--
+ .../bytecode/LoadConstantInstruction.java     |  4 +-
+ 6 files changed, 82 insertions(+), 35 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index b021eae..0a5d1e4 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -200,16 +200,18 @@ bool registerClass(jclass clazz) {
+             .vtable = (intptr_t) vtable_java_lang_Class,
+             .monitor = (intptr_t) new ObjectMonitor,
+     };
+-    auto instanceCache = new std::set<jclass>;
++    std::set<jclass> seenClasses;
+     std::function<void(jclass)> processClass;
+     processClass = [&](jclass cls) {
+-        instanceCache->emplace(cls);
++        if (!seenClasses.emplace(cls).second)
++            return;
+         if (cls->parentClass)
+             processClass((jclass)cls->parentClass);
+         for (int i = 0; i < cls->interfaceCount; i++)
+             processClass(((jclass *)cls->nativeInterfaces)[i]);
+     };
+     processClass(clazz);
++    auto instanceCache = new std::vector<jclass>(seenClasses.begin(), seenClasses.end());
+     clazz->instanceOfCache = (intptr_t) instanceCache;
+     registryMutex->unlock();
+     return true;
+@@ -375,7 +377,12 @@ bool isAssignableFrom(jcontext ctx, jclass type, jclass assignee) {
+     if (type->arrayDimensions > 0 and assignee->arrayDimensions > 0)
+         return isAssignableFrom(ctx, (jclass) type->componentClass, (jclass) assignee->componentClass);
+ 
+-    return ((std::set<jclass> *)assignee->instanceOfCache)->contains(type);
++    const auto *cache = (const std::vector<jclass> *)assignee->instanceOfCache;
++    for (jclass c : *cache) {
++        if (c == type)
++            return true;
++    }
++    return false;
+ }
+ 
+ /// Checks whether an object is an instance or inherits from a given type. Does not throw exceptions.
+diff --git a/runtime/res/clearwing/src/Clearwing.h b/runtime/res/clearwing/src/Clearwing.h
+index a31093b..9199f68 100644
+--- a/runtime/res/clearwing/src/Clearwing.h
++++ b/runtime/res/clearwing/src/Clearwing.h
+@@ -33,14 +33,22 @@ extern "C" {
+ #define MAX_GC_MARK_DEPTH 1000
+ #endif
+ 
++#ifdef __GNUC__
++#define CW_COLD __attribute__((cold))
++#define CW_UNLIKELY(x) __builtin_expect(!!(x), 0)
++#else
++#define CW_COLD
++#define CW_UNLIKELY(x) (x)
++#endif
++
+ // Max number of object allocations between collections
+ #ifndef GC_OBJECT_THRESHOLD
+-#define GC_OBJECT_THRESHOLD 1000000
++#define GC_OBJECT_THRESHOLD 4000000
+ #endif
+ 
+ // Max memory allocated between collections
+ #ifndef GC_MEM_THRESHOLD
+-#define GC_MEM_THRESHOLD 100000000
++#define GC_MEM_THRESHOLD 256000000
+ #endif
+ 
+ // Max total memory before always collecting (Will run on every allocation past this threshold)
+@@ -267,7 +275,7 @@ jstring concatStringsRecipe(jcontext ctx, const char *recipe, int argCount, ...)
+ 
+ void acquireCriticalLock();
+ void releaseCriticalLock();
+-void safepointSuspend(jcontext ctx);
++CW_COLD void safepointSuspend(jcontext ctx);
+ 
+ jmp_buf *pushExceptionFrame(jframe frame, jclass type);
+ jobject popExceptionFrame(jframe frame);
+@@ -282,14 +290,14 @@ int64_t getHeapUsage();
+ void adjustHeapUsage(int64_t amount);
+ void initializeJniClasses(jcontext ctx);
+ 
+-NORETURN void throwException(jcontext ctx, jobject exception);
+-NORETURN void throwDivisionByZero(jcontext ctx);
+-NORETURN void throwClassCast(jcontext ctx);
+-NORETURN void throwNullPointer(jcontext ctx);
+-NORETURN void throwStackOverflow(jcontext ctx);
+-NORETURN void throwIndexOutOfBounds(jcontext ctx);
+-NORETURN void throwArrayIndexOutOfBounds(jcontext ctx); // warsmash-nx
+-NORETURN void throwNegativeArraySize(jcontext ctx); // warsmash-nx
++CW_COLD NORETURN void throwException(jcontext ctx, jobject exception);
++CW_COLD NORETURN void throwDivisionByZero(jcontext ctx);
++CW_COLD NORETURN void throwClassCast(jcontext ctx);
++CW_COLD NORETURN void throwNullPointer(jcontext ctx);
++CW_COLD NORETURN void throwStackOverflow(jcontext ctx);
++CW_COLD NORETURN void throwIndexOutOfBounds(jcontext ctx);
++CW_COLD NORETURN void throwArrayIndexOutOfBounds(jcontext ctx); // warsmash-nx
++CW_COLD NORETURN void throwNegativeArraySize(jcontext ctx); // warsmash-nx
+ void clearwingPlaceThread(void); // warsmash-nx: PlatformThreads.cpp
+ void clearwingRaiseThreadPriority(void); // warsmash-nx: PlatformThreads.cpp, for the collector
+ 
+@@ -396,7 +404,7 @@ jint longCompare(jlong value1, jlong value2);
+ 
+ // When calling this, all objects must be safely stored, either on a stack frame, a class/object field, or have the mark value set to one of the special constants
+ #define SAFEPOINT() \
+-    if (suspendVM)\
++    if (CW_UNLIKELY(suspendVM))\
+         safepointSuspend(ctx)
+ 
+ #define POP_N(count) \
+@@ -981,21 +989,21 @@ struct Context {
+ 
+ /// Checks if an object is null. Throws exceptions.
+ template<typename T>
+-T *nullCheck(jcontext ctx, T *object) {
+-    if (!object)
++inline T *nullCheck(jcontext ctx, T *object) {
++    if (CW_UNLIKELY(!object))
+         throwNullPointer(ctx);
+     return object;
+ }
+ 
+ inline jobject checkCast(jcontext ctx, jclass type, jobject object) {
+-    if (object && !isInstance(ctx, object, type))
++    if (object && (jclass) object->clazz != type && CW_UNLIKELY(!isInstance(ctx, object, type)))
+         throwClassCast(ctx);
+     return object;
+ }
+ 
+ inline jarray arrayBoundsCheck(jcontext ctx, jarray array, int index) {
+     nullCheck(ctx, (jobject)array);
+-    if ((uint32_t) index >= (uint32_t) array->length) // warsmash-nx: negative indices too
++    if (CW_UNLIKELY((uint32_t) index >= (uint32_t) array->length)) // warsmash-nx: negative indices too
+         throwArrayIndexOutOfBounds(ctx);
+     return array;
+ }
+@@ -1004,14 +1012,14 @@ inline jarray arrayBoundsCheck(jcontext ctx, jarray array, int index) {
+ // (MIN / -1 is MIN and MIN % -1 is 0 on AArch64, as in Java.)
+ template <typename T>
+ inline T javaDiv(jcontext ctx, T a, T b) {
+-    if (b == 0)
++    if (CW_UNLIKELY(b == 0))
+         throwDivisionByZero(ctx);
+     return a / b;
+ }
+ 
+ template <typename T>
+ inline T javaRem(jcontext ctx, T a, T b) {
+-    if (b == 0)
++    if (CW_UNLIKELY(b == 0))
+         throwDivisionByZero(ctx);
+     return a % b;
+ }
+@@ -1019,12 +1027,10 @@ inline T javaRem(jcontext ctx, T a, T b) {
+ inline jframe pushStackFrame(jcontext ctx, const FrameInfo *info, volatile jtype *frame, jobject monitor = nullptr) {
+     SAFEPOINT();
+     auto frameRef = &ctx->frames[ctx->stackDepth++];
+-    if (frameRef->exceptionFrameDepth != 0) // Todo: Make debug assertion
+-        throw std::runtime_error("Exception frame was not popped");
+     frameRef->frame = frame;
+     frameRef->info = info;
+     LINE_NUMBER(0);
+-    if (ctx->stackDepth == MAX_STACK_DEPTH - 10)
++    if (CW_UNLIKELY(ctx->stackDepth >= MAX_STACK_DEPTH - 10))
+         throwStackOverflow(ctx);
+     if (monitor) {
+         frameRef->monitor = monitor;
+@@ -1035,10 +1041,6 @@ inline jframe pushStackFrame(jcontext ctx, const FrameInfo *info, volatile jtype
+ 
+ inline void popStackFrame(jcontext ctx, jobject monitor = nullptr) {
+     SAFEPOINT();
+-    if (ctx->stackDepth == 0)
+-        throw std::runtime_error("No stack frame to pop");
+-    if (ctx->frames[ctx->stackDepth - 1].exceptionFrameDepth != 0) // Todo: Make debug assertion
+-        throw std::runtime_error("Exception frame was not popped");
+     if (monitor) {
+         monitorExit(ctx, monitor);
+         ctx->frames[ctx->stackDepth - 1].monitor = nullptr;
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/BytecodeClass.java b/transpiler/src/com/thelogicmaster/clearwing/BytecodeClass.java
+index e659541..da46a3c 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/BytecodeClass.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/BytecodeClass.java
+@@ -450,7 +450,7 @@ public class BytecodeClass {
+ 				builder.append("\tauto stack = &frame[").append(method.getLocalCount()).append("];\n");
+ 				builder.append("\t").append(qualifier).append("jtype *sp = stack;\n");
+ 			}
+-			builder.append("\tFrameInfo frameInfo { ").append("\"").append(name).append(":")
++			builder.append("\tstatic const FrameInfo frameInfo { ").append("\"").append(name).append(":")
+ 					.append(method.getOriginalName()).append("\", ").append(stackSize).append(" };\n");
+ 			builder.append("\tauto frameRef = pushStackFrame(ctx, &frameInfo, ")
+ 					.append(stackSize > 0 ? "frame" : "nullptr").append(", ");
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/BytecodeMethod.java b/transpiler/src/com/thelogicmaster/clearwing/BytecodeMethod.java
+index 63d16c6..ab5a53f 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/BytecodeMethod.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/BytecodeMethod.java
+@@ -173,6 +173,39 @@ public class BytecodeMethod {
+ 		return findInstruction(0, instructions.size(), true, func);
+ 	}
+ 
++	private HashMap<Integer, Integer> labelPositions;
++	private IdentityHashMap<Instruction, Integer> instructionPositions;
++
++	/**
++	 * warsmash-nx: returns whether jumping from `from` to `targetLabel` is a backward jump (a loop back-edge)
++	 * or an unresolved jump. Walks into InstructionGroup children so optimized JumpInstructions are found.
++	 */
++	public boolean isBackwardJump(Instruction from, int targetLabel) {
++		if (labelPositions == null) {
++			labelPositions = new HashMap<>();
++			instructionPositions = new IdentityHashMap<>();
++			int pos = 0;
++			for (Instruction instr : instructions) {
++				if (instr instanceof InstructionGroup) {
++					instructionPositions.put(instr, pos);
++					for (Instruction child : ((InstructionGroup) instr).getInstructions()) {
++						instructionPositions.put(child, pos++);
++						if (child instanceof LabelInstruction)
++							labelPositions.put(((LabelInstruction) child).getLabel(), pos - 1);
++					}
++				} else {
++					instructionPositions.put(instr, pos);
++					if (instr instanceof LabelInstruction)
++						labelPositions.put(((LabelInstruction) instr).getLabel(), pos);
++					pos++;
++				}
++			}
++		}
++		Integer fromPos = instructionPositions.get(from);
++		Integer targetPos = labelPositions.get(targetLabel);
++		return fromPos == null || targetPos == null || targetPos <= fromPos;
++	}
++
+ 	/**
+ 	 * Finds the index of the label instruction corresponding to `label`, throwing an exception if not found
+ 	 */
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/bytecode/JumpingInstruction.java b/transpiler/src/com/thelogicmaster/clearwing/bytecode/JumpingInstruction.java
+index 7717c31..b8e95cd 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/bytecode/JumpingInstruction.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/bytecode/JumpingInstruction.java
+@@ -12,17 +12,20 @@ public interface JumpingInstruction {
+     
+     List<Integer> getJumpLabels();
+ 
+-    // warsmash-nx: every jump is a safepoint. Clearwing had them only at method entry and exit, so a
+-    // loop without calls kept a collection (and so every other thread) waiting until it ended.
+-    // Values live across a jump are in the frame the collector scans, never only in C++
+-    // temporaries, which are scoped to the statement block the jump leaves.
++    // warsmash-nx: emit a safepoint only on backward jumps (loop back-edges), not forward branches.
++    // A loop without calls still yields promptly to the GC, while forward if/switch/try jumps no
++    // longer force GCC to spill/reload locals across every branch.
+     default void appendGoto(StringBuilder builder, int bypass, int label, int originalLabel, int pops) {
+         builder.append("{ ");
+         if (pops > 0)
+             builder.append("popExceptionFrames(frameRef, ").append(pops).append("); ");
+         if (bypass != -1)
+             builder.append("bypasses[").append(bypass).append("] = true; ");
+-        builder.append("SAFEPOINT(); goto ").append(LABEL_PREFIX).append(label).append(";");
++        boolean isBackEdge = !(this instanceof Instruction)
++                || ((Instruction) this).getMethod().isBackwardJump((Instruction) this, label);
++        if (isBackEdge)
++            builder.append("SAFEPOINT(); ");
++        builder.append("goto ").append(LABEL_PREFIX).append(label).append(";");
+         builder.append(" }");
+         if (bypass != -1)
+             builder.append(" // goto ").append(LABEL_PREFIX).append(originalLabel);
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/bytecode/LoadConstantInstruction.java b/transpiler/src/com/thelogicmaster/clearwing/bytecode/LoadConstantInstruction.java
+index 1f892b1..446df3a 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/bytecode/LoadConstantInstruction.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/bytecode/LoadConstantInstruction.java
+@@ -35,7 +35,9 @@ public class LoadConstantInstruction extends Instruction {
+         if (value instanceof Integer || value instanceof Long || value instanceof Float || value instanceof Double || value instanceof Type)
+             return Utils.getObjectValue(value);
+         else if (value instanceof String)
+-            return "((jobject) createStringLiteral(ctx, " + Utils.encodeStringLiteral((String)value) + "))";
++            return "({ static jstring _s = nullptr; jstring _v = __atomic_load_n(&_s, __ATOMIC_ACQUIRE); if (__builtin_expect(!_v, 0)) { _v = createStringLiteral(ctx, "
++                    + Utils.encodeStringLiteral((String)value)
++                    + "); __atomic_store_n(&_s, _v, __ATOMIC_RELEASE); } (jobject) _v; })";
+         else if (value instanceof Handle) {
+             throw new TranspilerException("Unsupported value: " + value); // Todo
+         }

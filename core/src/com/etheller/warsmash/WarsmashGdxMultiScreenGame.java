@@ -12,6 +12,8 @@ public class WarsmashGdxMultiScreenGame extends Game implements CanvasProvider {
 
 	@Override
 	public void create() {
+		// warsmash-nx: drop GL calls that only repeat the current state (StateCachingGL30)
+		com.etheller.warsmash.viewer5.gl.StateCachingGL30.install();
 		StartupDiagnostics.reportGLCapabilities();
 		StartupDiagnostics.checkGLRequirements();
 	}

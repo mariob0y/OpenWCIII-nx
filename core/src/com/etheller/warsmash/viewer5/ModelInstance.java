@@ -25,6 +25,9 @@ public abstract class ModelInstance extends Node {
 
 	public Scene scene;
 
+	/** warsmash-nx: the game object this instance draws, where the game sets one (doodads). */
+	public Object owner;
+
 	public List<ModelInstance> childrenInstances;
 
 	public ModelInstance(final Model<?> model) {

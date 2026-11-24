@@ -256,7 +256,22 @@ public class DesktopLauncher {
 		if (fileToLoad != null) {
 			System.out.println("About to run loading file: " + fileToLoad);
 		}
-		final WarsmashGdxMultiScreenGame warsmashGdxMultiScreenGame = new WarsmashGdxMultiScreenGame();
+		final WarsmashGdxMultiScreenGame warsmashGdxMultiScreenGame = !GlCallCounter.ENABLED
+				? new WarsmashGdxMultiScreenGame()
+				: new WarsmashGdxMultiScreenGame() {
+					// NX_GLCOUNT (PC test tool): count the GL calls per function
+					@Override
+					public void create() {
+						GlCallCounter.install();
+						super.create();
+					}
+
+					@Override
+					public void render() {
+						super.render();
+						GlCallCounter.endFrame();
+					}
+				};
 		new LwjglApplication(warsmashGdxMultiScreenGame, config);
 		final String finalFileToLoad = fileToLoad;
 		Gdx.app.postRunnable(new Runnable() {

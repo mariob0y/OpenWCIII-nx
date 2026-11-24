@@ -169,6 +169,21 @@ import mpq.MPQException;
 public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoader {
 	/** warsmash-nx: simulation speed multiplier for PC test runs (env NX_SPEED, default 1). */
 	private static final float NX_SPEED = nxSpeed();
+	/** warsmash-nx: at most this many simulation ticks per drawn frame (more with NX_SPEED). */
+	private static final int MAX_TICKS_PER_FRAME = 2 * Math.max(1, (int) Math.ceil(NX_SPEED));
+	/**
+	 * warsmash-nx: the simulation's ticks run after the frame is drawn, not before. The console's GL
+	 * runs the drawing on a driver thread on another core, and eglSwapBuffers waits for it; with the
+	 * ticks after the drawing, the driver works through the frame while the game thread simulates,
+	 * instead of waiting at the swap and then simulating with the driver idle. What a frame shows is
+	 * the same: the units, doodads and effects were already updated from the simulation before its
+	 * ticks (update()); what a tick starts (a new unit, the fog's upload) is drawn one frame later.
+	 * PC tests: env NX_SIM_BEFORE_RENDER=1 keeps the old order.
+	 */
+	private static final boolean SIMULATE_AFTER_RENDER = System.getenv("NX_SIM_BEFORE_RENDER") == null;
+	/** warsmash-nx: time spent in the simulation's ticks, for the console's frame log (it resets it). */
+	public static long nxSimulationNs;
+	private boolean simulationPending;
 
 	private static float nxSpeed() {
 		final String v = System.getenv("NX_SPEED");
@@ -218,6 +233,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	public MappedData doodadMetaData = new MappedData();
 	public MappedData destructableMetaData = new MappedData();
 	public List<RenderDoodad> doodads = new ArrayList<>();
+	/** warsmash-nx: the next update walks every doodad, not only the ones drawn (restartDoodadSequences). */
+	private boolean doodadsFullPass = true;
+	/** warsmash-nx: frame counter and rotating eighth for the destructables' updateAnimations. */
+	private int widgetFrame;
+	private int destructableSlice;
 	public List<RenderDoodad> decals = new ArrayList<>();
 	public List<TerrainDoodad> terrainDoodads = new ArrayList<>();
 	public boolean doodadsReady;
@@ -279,6 +299,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	private final Map<CDestructable, RenderDestructable> destructableToRenderPeer = new HashMap<>();
 	private final Map<CItem, RenderItem> itemToRenderPeer = new HashMap<>();
 	private GameUI gameUI;
+	private boolean fogGpuUpdateReady;
+	private float fogGpuUpdateElapsed;
+	private int fogGpuUpdateFires;
 	private Vector3 lightDirection;
 
 	private Quadtree<MdxComplexInstance> walkableObjectsTree;
@@ -851,24 +874,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		fogUpdateTimer.setTimeoutTime(1.0f);
 		fogUpdateTimer.setRepeats(true);
 		fogUpdateTimer.start(this.simulation);
-		final CTimer fogGpuUpdateTimer = new CTimer() {
-			private int fires;
-
-			@Override
-			public void onFire(final CSimulation simulation) {
-				// warsmash-nx: doodads take the terrain's faded fog at their cell, and only when it
-				// moved (or once a second).
-				final boolean terrainChanged = War3MapViewer.this.terrain.reloadFogOfWarDataToGPU(simulation);
-				if (terrainChanged || ((++this.fires % 32) == 0)) {
-					for (final RenderDoodad doodad : War3MapViewer.this.decals) {
-						doodad.updateFogFromTerrain(War3MapViewer.this);
-					}
-				}
-			}
-		};
-		fogGpuUpdateTimer.setTimeoutTime(0.03f);
-		fogGpuUpdateTimer.setRepeats(true);
-		fogGpuUpdateTimer.start(this.simulation);
+		// warsmash-nx: visual fog fading & GPU upload moved from simulation CTimer to update()
+		// so it runs at most once per rendered frame before render() instead of inside simulation ticks.
+		this.fogGpuUpdateReady = true;
+		this.fogGpuUpdateElapsed = 0f;
+		this.fogGpuUpdateFires = 0;
 	}
 
 	private void loadDoodadsAndDestructibles(final Warcraft3MapRuntimeObjectData modifications,
@@ -966,7 +976,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		final RenderDoodad renderDoodad = new RenderDoodad(this, model, row, location, scale, facingRadians, maxPitch,
 				maxRoll, defScale, doodadVariation);
 		renderDoodad.instance.uniformScale(defScale);
+		renderDoodad.instance.owner = renderDoodad;
 		this.doodads.add(renderDoodad);
+		this.doodadsFullPass = true;
 		this.decals.add(renderDoodad);
 	}
 
@@ -1015,6 +1027,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		final RenderDestructable renderDestructable = new RenderDestructable(this, model, portraitModel, row, location,
 				scale, facingRadians, selectionScale, maxPitch, maxRoll, lifePercent, destructableShadow,
 				simulationDestructable, doodadVariation);
+		renderDestructable.instance.owner = renderDestructable;
 		if (row.readSLKTagBoolean("walkable")) {
 			final float angle = facingRadians;
 			BoundingBox boundingBox = model.bounds.getBoundingBox();
@@ -1341,9 +1354,27 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 					textTagIterator.remove();
 				}
 			}
-			for (final RenderWidget unit : this.widgets) {
-				unit.updateAnimations(this);
+			// warsmash-nx: units and items every frame; a destructable (mostly trees, ~3000 on a
+			// campaign map) every frame it is drawn (its animation only advances then, and a tree
+			// hit or killed on screen reacts at once) and otherwise one frame in eight, which still
+			// catches deaths, damage and blight off screen. Before, every tree ran every frame.
+			final int frame = ++this.widgetFrame;
+			final int slice = this.destructableSlice = (this.destructableSlice + 1) & 7;
+			int destructableIndex = 0;
+			final List<RenderWidget> widgetList = this.widgets;
+			for (int i = 0, l = widgetList.size(); i < l; i++) {
+				final RenderWidget widget = widgetList.get(i);
+				if (widget instanceof RenderDestructable) {
+					if ((destructableIndex++ & 7) == slice) {
+						updateDestructableOnce((RenderDestructable) widget, frame);
+					}
+				}
+				else {
+					widget.updateAnimations(this);
+				}
 			}
+			updateDrawnDestructables(this.worldScene.instances, this.worldScene.currentInstance, frame);
+			updateDrawnDestructables(this.worldScene.batchedInstances, this.worldScene.currentBatchedInstance, frame);
 			this.treeOcclusion.update(this, deltaTime);
 			final Iterator<RenderEffect> projectileIterator = this.projectiles.iterator();
 			while (projectileIterator.hasNext()) {
@@ -1352,40 +1383,27 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 					projectileIterator.remove();
 				}
 			}
-			for (final RenderDoodad item : this.doodads) {
-				final ModelInstance instance = item.instance;
-				if (instance instanceof MdxComplexInstance) {
-					final MdxComplexInstance mdxComplexInstance = (MdxComplexInstance) instance;
-					if ((mdxComplexInstance.sequence == -1) || (mdxComplexInstance.sequenceEnded
-							&& ((item.getAnimation() != AnimationTokens.PrimaryTag.DEATH)
-									|| (((MdxModel) mdxComplexInstance.model).sequences.get(mdxComplexInstance.sequence)
-											.getFlags() == 0)))) {
-						SequenceUtils.randomSequence(mdxComplexInstance, item.getAnimation(), SequenceUtils.EMPTY,
-								true);
-
-					}
+			// warsmash-nx: a doodad's sequence only advances, and so only ends, on a frame its instance
+			// is drawn (the scene updates only the visible ones), so after one pass over all of them
+			// only the instances the scene drew this frame need the check. Before, every frame walked
+			// every doodad of the map (5448 on OrcX01).
+			if (this.doodadsFullPass) {
+				this.doodadsFullPass = false;
+				for (final RenderDoodad item : this.doodads) {
+					restartDoodadSequence(item);
 				}
 			}
-
-			if (this.simulation.getMissionCheckpoint() != null && this.simulation.getMissionCheckpoint().isRestoring()) {
-				this.updateTime = 0;
-				this.simulation.getMissionCheckpoint().replayFrame();
+			else {
+				final Scene doodadScene = this.worldScene;
+				restartDrawnDoodadSequences(doodadScene.instances, doodadScene.currentInstance);
+				restartDrawnDoodadSequences(doodadScene.batchedInstances, doodadScene.currentBatchedInstance);
 			}
-			else while (this.updateTime >= WarsmashConstants.SIMULATION_STEP_TIME) {
-				if (this.gameTurnManager.getLatestCompletedTurn() >= this.simulation.getGameTurnTick()) {
-					this.updateTime -= WarsmashConstants.SIMULATION_STEP_TIME;
-					final long simStart = this.simulationBudgetTracker.beginTick();
-					this.simulation.update();
-					this.simulationBudgetTracker.endTick(simStart);
-					this.gameTurnManager.turnCompleted(this.simulation.getGameTurnTick());
-				}
-				else {
-					if (this.updateTime > (WarsmashConstants.SIMULATION_STEP_TIME * 3)) {
-						this.gameTurnManager.framesSkipped(this.updateTime / WarsmashConstants.SIMULATION_STEP_TIME);
-						this.updateTime = 0;
-					}
-					break;
-				}
+
+			if (SIMULATE_AFTER_RENDER) {
+				this.simulationPending = true;
+			}
+			else {
+				runSimulationTicks();
 			}
 			if (this.dncTerrain != null) {
 				this.dncTerrain.setFrameByRatio(
@@ -1407,6 +1425,109 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				// Sky domes are authored around the origin; keep the dome centered
 				// on the game camera so the terrain never leaves it behind.
 				this.skyInstance.setLocation(this.worldScene.camera.location);
+			}
+			// warsmash-nx: update portrait/UI SpriteFrame2 bone textures before the 3D render pass starts
+			if (this.gameUI != null) {
+				this.gameUI.updateSpriteFrames(deltaTime);
+			}
+			// warsmash-nx: fade and upload fog-of-war texture at most once per rendered frame (~33 Hz),
+			// before render(), rather than inside simulation ticks.
+			if (this.fogGpuUpdateReady) {
+				this.fogGpuUpdateElapsed += rawDeltaTime;
+				if (this.fogGpuUpdateElapsed >= 0.03f) {
+					this.fogGpuUpdateElapsed = this.fogGpuUpdateElapsed >= 0.06f ? 0f : (this.fogGpuUpdateElapsed - 0.03f);
+					final boolean terrainChanged = this.terrain.reloadFogOfWarDataToGPU(this.simulation);
+					if (terrainChanged || ((++this.fogGpuUpdateFires & 31) == 0)) {
+						for (int i = 0, l = this.decals.size(); i < l; i++) {
+							this.decals.get(i).updateFogFromTerrain(this);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	@Override
+	public void updateAndRender() {
+		super.updateAndRender();
+		if (this.simulationPending) {
+			this.simulationPending = false;
+			// warsmash-nx: kick the queued frame to the GPU before running CPU simulation ticks so
+			// GPU rasterization overlaps with simulation work.
+			Gdx.gl.glFlush();
+			runSimulationTicks();
+		}
+	}
+
+	/** The simulation's ticks for the time update() added (none while a checkpoint is restored). */
+	private void runSimulationTicks() {
+		final long start = System.nanoTime();
+		if (this.simulation.getMissionCheckpoint() != null && this.simulation.getMissionCheckpoint().isRestoring()) {
+			this.updateTime = 0;
+			this.simulation.getMissionCheckpoint().replayFrame();
+		}
+		else for (int ticks = 0; this.updateTime >= WarsmashConstants.SIMULATION_STEP_TIME; ) {
+			if (ticks >= MAX_TICKS_PER_FRAME) {
+				// warsmash-nx: after a long frame (a load, a hitch) the game time it missed is dropped
+				// instead of caught up: catching up made the next frame run up to 5 ticks (~110 ms on
+				// the console), a second hitch right after the first.
+				this.updateTime %= WarsmashConstants.SIMULATION_STEP_TIME;
+				break;
+			}
+			if (this.gameTurnManager.getLatestCompletedTurn() >= this.simulation.getGameTurnTick()) {
+				this.updateTime -= WarsmashConstants.SIMULATION_STEP_TIME;
+				ticks++;
+				final long simStart = this.simulationBudgetTracker.beginTick();
+				this.simulation.update();
+				this.simulationBudgetTracker.endTick(simStart);
+				this.gameTurnManager.turnCompleted(this.simulation.getGameTurnTick());
+			}
+			else {
+				if (this.updateTime > (WarsmashConstants.SIMULATION_STEP_TIME * 3)) {
+					this.gameTurnManager.framesSkipped(this.updateTime / WarsmashConstants.SIMULATION_STEP_TIME);
+					this.updateTime = 0;
+				}
+				break;
+			}
+		}
+		nxSimulationNs += System.nanoTime() - start;
+	}
+
+	private void updateDrawnDestructables(final List<ModelInstance> drawn, final int count, final int frame) {
+		for (int i = 0, l = Math.min(count, drawn.size()); i < l; i++) {
+			final Object owner = drawn.get(i).owner;
+			if (owner instanceof RenderDestructable) {
+				updateDestructableOnce((RenderDestructable) owner, frame);
+			}
+		}
+	}
+
+	private void updateDestructableOnce(final RenderDestructable destructable, final int frame) {
+		if (destructable.animatedFrame != frame) {
+			destructable.animatedFrame = frame;
+			destructable.updateAnimations(this);
+		}
+	}
+
+	private static void restartDrawnDoodadSequences(final List<ModelInstance> drawn, final int count) {
+		for (int i = 0, l = Math.min(count, drawn.size()); i < l; i++) {
+			final Object owner = drawn.get(i).owner;
+			if ((owner instanceof RenderDoodad) && !(owner instanceof RenderDestructable)) {
+				restartDoodadSequence((RenderDoodad) owner);
+			}
+		}
+	}
+
+	private static void restartDoodadSequence(final RenderDoodad item) {
+		final ModelInstance instance = item.instance;
+		if (instance instanceof MdxComplexInstance) {
+			final MdxComplexInstance mdxComplexInstance = (MdxComplexInstance) instance;
+			if ((mdxComplexInstance.sequence == -1) || (mdxComplexInstance.sequenceEnded
+					&& ((item.getAnimation() != AnimationTokens.PrimaryTag.DEATH)
+							|| (((MdxModel) mdxComplexInstance.model).sequences.get(mdxComplexInstance.sequence)
+									.getFlags() == 0)))) {
+				SequenceUtils.randomSequence(mdxComplexInstance, item.getAnimation(), SequenceUtils.EMPTY, true);
+
 			}
 		}
 	}
@@ -1457,9 +1578,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				}
 			}
 
-			final int glGetError = Gdx.gl.glGetError();
-			if (glGetError != GL20.GL_NO_ERROR) {
-				throw new IllegalStateException("GL ERROR: " + glGetError);
+			if (WarsmashConstants.ENABLE_DEBUG) {
+				final int glGetError = Gdx.gl.glGetError();
+				if (glGetError != GL20.GL_NO_ERROR) {
+					throw new IllegalStateException("GL ERROR: " + glGetError);
+				}
 			}
 		}
 	}

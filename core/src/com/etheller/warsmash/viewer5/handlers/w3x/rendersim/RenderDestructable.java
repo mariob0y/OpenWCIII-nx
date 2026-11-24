@@ -90,6 +90,9 @@ public class RenderDestructable extends RenderDoodad implements RenderWidget {
 		return this.simulationDestructable;
 	}
 
+	/** warsmash-nx: the viewer frame this destructable last ran updateAnimations (War3MapViewer.update). */
+	public int animatedFrame = -1;
+
 	@Override
 	public void updateAnimations(final War3MapViewer war3MapViewer) {
 		// TODO maybe move getAnimation behaviors to here and make this thing not a

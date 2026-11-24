@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Mon, 23 Nov 2026 21:03:21 +0200
+Subject: [PATCH] perf: transpiler - frames are volatile only in methods with
+ exception handlers
+
+---
+ runtime/res/clearwing/src/Clearwing.h                |  7 +++++++
+ .../com/thelogicmaster/clearwing/BytecodeClass.java  | 12 ++++++++++--
+ 2 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.h b/runtime/res/clearwing/src/Clearwing.h
+index 51bc634..a31093b 100644
+--- a/runtime/res/clearwing/src/Clearwing.h
++++ b/runtime/res/clearwing/src/Clearwing.h
+@@ -336,6 +336,13 @@ jdouble unboxDouble(jcontext ctx, jobject boxed);
+ jbool unboxBoolean(jcontext ctx, jobject boxed);
+ 
+ void instMultiANewArray(jcontext ctx, volatile jtype * &sp, jclass type, int dimensions);
++// warsmash-nx: for the frames that are not volatile (methods without exception handlers); C++
++// linkage, as an overload
++extern "C++" inline void instMultiANewArray(jcontext ctx, jtype * &sp, jclass type, int dimensions) {
++    volatile jtype *volatileSp = sp;
++    instMultiANewArray(ctx, volatileSp, type, dimensions);
++    sp = const_cast<jtype *>(volatileSp);
++}
+ jint floatCompare(jfloat value1, jfloat value2, jint nanValue);
+ jint doubleCompare(jdouble value1, jdouble value2, jint nanValue);
+ jint longCompare(jlong value1, jlong value2);
+diff --git a/transpiler/src/com/thelogicmaster/clearwing/BytecodeClass.java b/transpiler/src/com/thelogicmaster/clearwing/BytecodeClass.java
+index 75a1f76..e659541 100644
+--- a/transpiler/src/com/thelogicmaster/clearwing/BytecodeClass.java
++++ b/transpiler/src/com/thelogicmaster/clearwing/BytecodeClass.java
+@@ -438,9 +438,17 @@ public class BytecodeClass {
+ 
+ 			int stackSize = method.getStackSize() + method.getLocalCount();
+ 			if (stackSize > 0) {
+-				builder.append("\tvolatile jtype frame[").append(stackSize).append("];\n");
++				// warsmash-nx: the frame is volatile only where an exception can land (a method with
++				// handlers: setjmp, after which only volatile locals keep their values). Elsewhere the
++				// compiler may keep locals in registers between calls. The frame's address is in the
++				// thread's context (pushStackFrame), so before any call it is stored in full, and the GC
++				// and stack traces read it only while the thread is inside a call (a safepoint, an
++				// allocation, a throw). Every local in memory on every use made the game code several
++				// times slower on the console.
++				final String qualifier = method.getTryCatchBlocks().isEmpty() ? "" : "volatile ";
++				builder.append("\t").append(qualifier).append("jtype frame[").append(stackSize).append("];\n");
+ 				builder.append("\tauto stack = &frame[").append(method.getLocalCount()).append("];\n");
+-				builder.append("\tvolatile jtype *sp = stack;\n");
++				builder.append("\t").append(qualifier).append("jtype *sp = stack;\n");
+ 			}
+ 			builder.append("\tFrameInfo frameInfo { ").append("\"").append(name).append(":")
+ 					.append(method.getOriginalName()).append("\", ").append(stackSize).append(" };\n");

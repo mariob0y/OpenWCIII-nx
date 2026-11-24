@@ -71,6 +71,17 @@ public class RenderUnit implements RenderWidget {
 	private float selectionHeight;
 	private RenderUnit preferredSelectionReplacement;
 	private float[] currentColor = { 1, 1, 1, 1 };
+	private static final Quaternion tempQuat2 = new Quaternion();
+	private boolean poseCached;
+	private float lastGroundHeightTerrain;
+	private float lastGroundHeight;
+	private float lastFlyHeight;
+	private boolean lastStandingOnWater;
+	private MovementType lastMovementType;
+	private MdxComplexInstance lastWalkable;
+	private SplatMover lastShadow;
+	private SplatMover lastSelectionCircle;
+	private SplatMover lastSelectionPreviewHighlight;
 
 	public RenderUnit(final War3MapViewer map, final float x, final float y, final float z, final int playerIndex,
 			final CUnit simulationUnit, final RenderUnitType typeData, final BuildingShadow buildingShadow,
@@ -86,6 +97,11 @@ public class RenderUnit implements RenderWidget {
 			final int playerIndex, final CUnit simulationUnit, final RenderUnitType typeData,
 			final BuildingShadow buildingShadow, final float selectionCircleScaleFactor, final float animationWalkSpeed,
 			final float animationRunSpeed, final float scalingValue) {
+		this.poseCached = false;
+		this.lastWalkable = null;
+		this.lastShadow = null;
+		this.lastSelectionCircle = null;
+		this.lastSelectionPreviewHighlight = null;
 		this.portraitModel = typeData.getPortraitModel();
 		this.typeData = typeData;
 		this.specialArtModel = typeData.getSpecialArtModel();
@@ -235,32 +251,43 @@ public class RenderUnit implements RenderWidget {
 		MdxComplexInstance currentWalkableUnder;
 		final boolean standingOnWater = (swimming) || (movementType == MovementType.FLOAT)
 				|| (movementType == MovementType.FLY) || (movementType == MovementType.HOVER);
-		if (standingOnWater) {
-			groundHeightTerrainAndWater = Math.max(groundHeightTerrain,
-					map.terrain.getWaterHeight(this.location[0], this.location[1]));
-		}
-		else {
-			// land units will have their feet pass under the surface of the water
-			groundHeightTerrainAndWater = groundHeightTerrain;
-		}
-		if (movementType == MovementType.FLOAT) {
-			// boats cant go on bridges
-			groundHeight = groundHeightTerrainAndWater;
+		final boolean stationaryXY = this.poseCached && (dx == 0f) && (dy == 0f)
+				&& (groundHeightTerrain == this.lastGroundHeightTerrain)
+				&& (standingOnWater == this.lastStandingOnWater)
+				&& (movementType == this.lastMovementType)
+				&& (this.lastWalkable == null);
+		if (stationaryXY) {
+			groundHeight = this.lastGroundHeight;
 			currentWalkableUnder = null;
 		}
 		else {
-			currentWalkableUnder = map.getHighestWalkableUnder(this.location[0], this.location[1]);
-			War3MapViewer.gdxRayHeap.set(this.location[0], this.location[1], 4096, 0, 0, -8192);
-			if ((currentWalkableUnder != null)
-					&& currentWalkableUnder.intersectRayWithCollision(War3MapViewer.gdxRayHeap,
-							War3MapViewer.intersectionHeap, true, true)
-					&& (War3MapViewer.intersectionHeap.z > groundHeightTerrainAndWater)) {
-				groundHeight = War3MapViewer.intersectionHeap.z;
-				swimming = false; // Naga Royal Guard should slither across a bridge, not swim in rock
+			if (standingOnWater) {
+				groundHeightTerrainAndWater = Math.max(groundHeightTerrain,
+						map.terrain.getWaterHeight(this.location[0], this.location[1]));
 			}
 			else {
+				// land units will have their feet pass under the surface of the water
+				groundHeightTerrainAndWater = groundHeightTerrain;
+			}
+			if (movementType == MovementType.FLOAT) {
+				// boats cant go on bridges
 				groundHeight = groundHeightTerrainAndWater;
 				currentWalkableUnder = null;
+			}
+			else {
+				currentWalkableUnder = map.getHighestWalkableUnder(this.location[0], this.location[1]);
+				War3MapViewer.gdxRayHeap.set(this.location[0], this.location[1], 4096, 0, 0, -8192);
+				if ((currentWalkableUnder != null)
+						&& currentWalkableUnder.intersectRayWithCollision(War3MapViewer.gdxRayHeap,
+								War3MapViewer.intersectionHeap, true, true)
+						&& (War3MapViewer.intersectionHeap.z > groundHeightTerrainAndWater)) {
+					groundHeight = War3MapViewer.intersectionHeap.z;
+					swimming = false; // Naga Royal Guard should slither across a bridge, not swim in rock
+				}
+				else {
+					groundHeight = groundHeightTerrainAndWater;
+					currentWalkableUnder = null;
+				}
 			}
 		}
 		boolean changedAnimationProperties = false;
@@ -360,7 +387,8 @@ public class RenderUnit implements RenderWidget {
 		this.dead = dead;
 		this.corpse = corpse;
 		this.boneCorpse = boneCorpse;
-		this.location[2] = this.simulationUnit.getFlyHeight() + groundHeight;
+		final float flyHeight = this.simulationUnit.getFlyHeight();
+		this.location[2] = flyHeight + groundHeight;
 		final float selectionCircleHeight = this.selectionHeight + groundHeight;
 		this.instance.moveTo(this.location);
 		float simulationFacing = this.simulationUnit.getFacing();
@@ -404,85 +432,114 @@ public class RenderUnit implements RenderWidget {
 			angleToAdd = facingDelta;
 			this.currentTurnVelocity = 0.0f;
 		}
-		this.facing = (((this.facing + angleToAdd) % 360) + 360) % 360;
-		this.instance.setLocalRotation(tempQuat.setFromAxis(RenderMathUtils.VEC3_UNIT_Z, this.facing));
+		final float newFacing = (((this.facing + angleToAdd) % 360) + 360) % 360;
+		final boolean facingChanged = !this.poseCached || (newFacing != this.facing);
+		this.facing = newFacing;
 
-		final float facingRadians = (float) Math.toRadians(this.facing);
-		final float maxPitch = (float) Math.toRadians(this.typeData.getMaxPitch());
-		final float maxRoll = (float) Math.toRadians(this.typeData.getMaxRoll());
-		final float sampleRadius = this.typeData.getElevationSampleRadius();
-		float pitch, roll;
-		final float pitchSampleForwardX = this.location[0] + (sampleRadius * (float) Math.cos(facingRadians));
-		final float pitchSampleForwardY = this.location[1] + (sampleRadius * (float) Math.sin(facingRadians));
-		final float pitchSampleBackwardX = this.location[0] - (sampleRadius * (float) Math.cos(facingRadians));
-		final float pitchSampleBackwardY = this.location[1] - (sampleRadius * (float) Math.sin(facingRadians));
-		final double leftOfFacingAngle = facingRadians + (Math.PI / 2);
-		final float rollSampleForwardX = this.location[0] + (sampleRadius * (float) Math.cos(leftOfFacingAngle));
-		final float rollSampleForwardY = this.location[1] + (sampleRadius * (float) Math.sin(leftOfFacingAngle));
-		final float rollSampleBackwardX = this.location[0] - (sampleRadius * (float) Math.cos(leftOfFacingAngle));
-		final float rollSampleBackwardY = this.location[1] - (sampleRadius * (float) Math.sin(leftOfFacingAngle));
-		final float pitchSampleGroundHeight1;
-		final float pitchSampleGroundHeight2;
-		final float rollSampleGroundHeight1;
-		final float rollSampleGroundHeight2;
-		if (currentWalkableUnder != null) {
-			pitchSampleGroundHeight1 = getGroundHeightSample(groundHeight, currentWalkableUnder, pitchSampleBackwardX,
-					pitchSampleBackwardY);
-			pitchSampleGroundHeight2 = getGroundHeightSample(groundHeight, currentWalkableUnder, pitchSampleForwardX,
-					pitchSampleForwardY);
-			rollSampleGroundHeight1 = getGroundHeightSample(groundHeight, currentWalkableUnder, rollSampleBackwardX,
-					rollSampleBackwardY);
-			rollSampleGroundHeight2 = getGroundHeightSample(groundHeight, currentWalkableUnder, rollSampleForwardX,
-					rollSampleForwardY);
-		}
-		else {
-			final float pitchGroundHeight1 = map.terrain.getGroundHeight(pitchSampleBackwardX, pitchSampleBackwardY);
-			final float pitchGroundHeight2 = map.terrain.getGroundHeight(pitchSampleForwardX, pitchSampleForwardY);
-			final float rollGroundHeight1 = map.terrain.getGroundHeight(rollSampleBackwardX, rollSampleBackwardY);
-			final float rollGroundHeight2 = map.terrain.getGroundHeight(rollSampleForwardX, rollSampleForwardY);
-			if (standingOnWater) {
-				pitchSampleGroundHeight1 = Math.max(pitchGroundHeight1,
-						map.terrain.getWaterHeight(pitchSampleBackwardX, pitchSampleBackwardY));
-				pitchSampleGroundHeight2 = Math.max(pitchGroundHeight2,
-						map.terrain.getWaterHeight(pitchSampleForwardX, pitchSampleForwardY));
-				rollSampleGroundHeight1 = Math.max(rollGroundHeight1,
-						map.terrain.getWaterHeight(rollSampleBackwardX, rollSampleBackwardY));
-				rollSampleGroundHeight2 = Math.max(rollGroundHeight2,
-						map.terrain.getWaterHeight(rollSampleForwardX, rollSampleForwardY));
+		final boolean posOrGroundChanged = !stationaryXY || !this.poseCached
+				|| (groundHeight != this.lastGroundHeight) || (flyHeight != this.lastFlyHeight)
+				|| (currentWalkableUnder != this.lastWalkable);
+
+		if (posOrGroundChanged || facingChanged) {
+			final float facingRadians = (float) Math.toRadians(this.facing);
+			final float maxPitch = (float) Math.toRadians(this.typeData.getMaxPitch());
+			final float maxRoll = (float) Math.toRadians(this.typeData.getMaxRoll());
+			final float sampleRadius = this.typeData.getElevationSampleRadius();
+			float pitch, roll;
+			final float cosFacing = (float) Math.cos(facingRadians);
+			final float sinFacing = (float) Math.sin(facingRadians);
+			final float pitchSampleForwardX = this.location[0] + (sampleRadius * cosFacing);
+			final float pitchSampleForwardY = this.location[1] + (sampleRadius * sinFacing);
+			final float pitchSampleBackwardX = this.location[0] - (sampleRadius * cosFacing);
+			final float pitchSampleBackwardY = this.location[1] - (sampleRadius * sinFacing);
+			// cos(a + pi/2) = -sin(a), sin(a + pi/2) = cos(a)
+			final float rollSampleForwardX = this.location[0] - (sampleRadius * sinFacing);
+			final float rollSampleForwardY = this.location[1] + (sampleRadius * cosFacing);
+			final float rollSampleBackwardX = this.location[0] + (sampleRadius * sinFacing);
+			final float rollSampleBackwardY = this.location[1] - (sampleRadius * cosFacing);
+			final float pitchSampleGroundHeight1;
+			final float pitchSampleGroundHeight2;
+			final float rollSampleGroundHeight1;
+			final float rollSampleGroundHeight2;
+			if (currentWalkableUnder != null) {
+				pitchSampleGroundHeight1 = getGroundHeightSample(groundHeight, currentWalkableUnder,
+						pitchSampleBackwardX, pitchSampleBackwardY);
+				pitchSampleGroundHeight2 = getGroundHeightSample(groundHeight, currentWalkableUnder,
+						pitchSampleForwardX, pitchSampleForwardY);
+				rollSampleGroundHeight1 = getGroundHeightSample(groundHeight, currentWalkableUnder,
+						rollSampleBackwardX, rollSampleBackwardY);
+				rollSampleGroundHeight2 = getGroundHeightSample(groundHeight, currentWalkableUnder,
+						rollSampleForwardX, rollSampleForwardY);
 			}
 			else {
-				pitchSampleGroundHeight1 = pitchGroundHeight1;
-				pitchSampleGroundHeight2 = pitchGroundHeight2;
-				rollSampleGroundHeight1 = rollGroundHeight1;
-				rollSampleGroundHeight2 = rollGroundHeight2;
+				final float pitchGroundHeight1 = map.terrain.getGroundHeight(pitchSampleBackwardX,
+						pitchSampleBackwardY);
+				final float pitchGroundHeight2 = map.terrain.getGroundHeight(pitchSampleForwardX, pitchSampleForwardY);
+				final float rollGroundHeight1 = map.terrain.getGroundHeight(rollSampleBackwardX, rollSampleBackwardY);
+				final float rollGroundHeight2 = map.terrain.getGroundHeight(rollSampleForwardX, rollSampleForwardY);
+				if (standingOnWater) {
+					pitchSampleGroundHeight1 = Math.max(pitchGroundHeight1,
+							map.terrain.getWaterHeight(pitchSampleBackwardX, pitchSampleBackwardY));
+					pitchSampleGroundHeight2 = Math.max(pitchGroundHeight2,
+							map.terrain.getWaterHeight(pitchSampleForwardX, pitchSampleForwardY));
+					rollSampleGroundHeight1 = Math.max(rollGroundHeight1,
+							map.terrain.getWaterHeight(rollSampleBackwardX, rollSampleBackwardY));
+					rollSampleGroundHeight2 = Math.max(rollGroundHeight2,
+							map.terrain.getWaterHeight(rollSampleForwardX, rollSampleForwardY));
+				}
+				else {
+					pitchSampleGroundHeight1 = pitchGroundHeight1;
+					pitchSampleGroundHeight2 = pitchGroundHeight2;
+					rollSampleGroundHeight1 = rollGroundHeight1;
+					rollSampleGroundHeight2 = rollGroundHeight2;
+				}
 			}
+			pitch = Math.max(-maxPitch, Math.min(maxPitch,
+					(float) Math.atan2(pitchSampleGroundHeight2 - pitchSampleGroundHeight1, sampleRadius * 2)));
+			roll = Math.max(-maxRoll, Math.min(maxRoll,
+					(float) Math.atan2(rollSampleGroundHeight2 - rollSampleGroundHeight1, sampleRadius * 2)));
+			tempQuat.setFromAxis(RenderMathUtils.VEC3_UNIT_Z, this.facing);
+			if (pitch != 0f) {
+				RenderMathUtils.mul(tempQuat, tempQuat, tempQuat2.setFromAxisRad(RenderMathUtils.VEC3_UNIT_Y, -pitch));
+			}
+			if (roll != 0f) {
+				RenderMathUtils.mul(tempQuat, tempQuat, tempQuat2.setFromAxisRad(RenderMathUtils.VEC3_UNIT_X, roll));
+			}
+			this.instance.setLocalRotation(tempQuat);
 		}
-		pitch = Math.max(-maxPitch, Math.min(maxPitch,
-				(float) Math.atan2(pitchSampleGroundHeight2 - pitchSampleGroundHeight1, sampleRadius * 2)));
-		roll = Math.max(-maxRoll, Math.min(maxRoll,
-				(float) Math.atan2(rollSampleGroundHeight2 - rollSampleGroundHeight1, sampleRadius * 2)));
-		this.instance.rotate(tempQuat.setFromAxisRad(RenderMathUtils.VEC3_UNIT_Y, -pitch));
-		this.instance.rotate(tempQuat.setFromAxisRad(RenderMathUtils.VEC3_UNIT_X, roll));
 
-		map.worldScene.instanceMoved(this.instance, this.location[0], this.location[1]);
-		if (this.shadow != null) {
+		if (posOrGroundChanged) {
+			map.worldScene.instanceMoved(this.instance, this.location[0], this.location[1]);
+		}
+		if ((this.shadow != null) && (posOrGroundChanged || (this.shadow != this.lastShadow))) {
 			this.shadow.move(dx, dy, map.terrain.centerOffset);
 			this.shadow.setHeightAbsolute(currentWalkableUnder != null, groundHeight + map.imageWalkableZOffset);
+			this.lastShadow = this.shadow;
 		}
-		if (this.selectionCircle != null) {
+		if ((this.selectionCircle != null) && (posOrGroundChanged || (this.selectionCircle != this.lastSelectionCircle))) {
 			this.selectionCircle.move(dx, dy, map.terrain.centerOffset);
 			this.selectionCircle.setHeightAbsolute(
 					(currentWalkableUnder != null)
 							|| ((movementType == MovementType.FLY) || (movementType == MovementType.HOVER)),
 					selectionCircleHeight + map.imageWalkableZOffset);
+			this.lastSelectionCircle = this.selectionCircle;
 		}
-		if (this.selectionPreviewHighlight != null) {
+		if ((this.selectionPreviewHighlight != null)
+				&& (posOrGroundChanged || (this.selectionPreviewHighlight != this.lastSelectionPreviewHighlight))) {
 			this.selectionPreviewHighlight.move(dx, dy, map.terrain.centerOffset);
 			this.selectionPreviewHighlight.setHeightAbsolute(
 					(currentWalkableUnder != null)
 							|| ((movementType == MovementType.FLY) || (movementType == MovementType.HOVER)),
 					selectionCircleHeight + map.imageWalkableZOffset);
+			this.lastSelectionPreviewHighlight = this.selectionPreviewHighlight;
 		}
+		this.poseCached = true;
+		this.lastGroundHeightTerrain = groundHeightTerrain;
+		this.lastGroundHeight = groundHeight;
+		this.lastFlyHeight = flyHeight;
+		this.lastStandingOnWater = standingOnWater;
+		this.lastMovementType = movementType;
+		this.lastWalkable = currentWalkableUnder;
 		this.unitAnimationListenerImpl.update();
 		if (!dead && this.simulationUnit.isConstructingOrUpgrading()) {
 			this.instance.setFrameByRatio(
@@ -559,6 +616,7 @@ public class RenderUnit implements RenderWidget {
 	}
 
 	public void repositioned(final War3MapViewer map) {
+		this.poseCached = false;
 		final float prevX = this.location[0];
 		final float prevY = this.location[1];
 		final float simulationX = this.simulationUnit.getX();

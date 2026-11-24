@@ -19,6 +19,8 @@ public class W3xScenePortraitLightManager implements SceneLightManager, W3xScene
 	private FloatBuffer lightDataCopyHeap;
 	private final DataTexture unitLightsTexture;
 	private int unitLightCount;
+	private boolean dirty = true;
+	private boolean allStatic = true;
 
 	public W3xScenePortraitLightManager(GL20 gl) {
 		this.lights = new ArrayList<>();
@@ -34,15 +36,23 @@ public class W3xScenePortraitLightManager implements SceneLightManager, W3xScene
 	@Override
 	public void add(final SceneLightInstance lightInstance) {
 		this.lights.add(lightInstance);
+		if (!(lightInstance instanceof StaticSceneLightInstance)) {
+			this.allStatic = false;
+		}
+		this.dirty = true;
 	}
 
 	@Override
 	public void remove(final SceneLightInstance lightInstance) {
 		this.lights.remove(lightInstance);
+		this.dirty = true;
 	}
 
 	@Override
 	public void update() {
+		if (!this.dirty && this.allStatic) {
+			return;
+		}
 		final int numberOfLights = this.lights.size() + 1;
 		final int bytesNeeded = numberOfLights * 4 * 16;
 		if (bytesNeeded > (this.lightDataCopyHeap.capacity() * 4)) {
@@ -61,6 +71,7 @@ public class W3xScenePortraitLightManager implements SceneLightManager, W3xScene
 		}
 		this.lightDataCopyHeap.limit(offset);
 		this.unitLightsTexture.bindAndUpdate(this.lightDataCopyHeap, 4, this.unitLightCount);
+		this.dirty = false;
 	}
 
 	@Override

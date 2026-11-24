@@ -660,9 +660,26 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			minimapTexture = ImageUtils.getAnyExtensionTexture(war3MapViewer.dataSource, "war3mapMap.blp");
 		}
 		final Texture[] teamColors = new Texture[WarsmashConstants.MAX_PLAYERS];
+		final Color[] teamColorValues = new Color[WarsmashConstants.MAX_PLAYERS];
 		for (int i = 0; i < teamColors.length; i++) {
-			teamColors[i] = ImageUtils.getAnyExtensionTexture(war3MapViewer.dataSource,
-					"ReplaceableTextures\\" + ReplaceableIds.getPathString(1) + ReplaceableIds.getIdString(i) + ".blp");
+			final String path = "ReplaceableTextures\\" + ReplaceableIds.getPathString(1)
+					+ ReplaceableIds.getIdString(i) + ".blp";
+			Color sampled = Color.WHITE;
+			try {
+				final ImageUtils.AnyExtensionImage imgInfo = ImageUtils.getAnyExtensionImageFixRGB(
+						war3MapViewer.dataSource, path, "texture");
+				final PixelImage img = imgInfo.getImageData();
+				if (img != null) {
+					final int argb = img.getRGB(img.getWidth() / 2, img.getHeight() / 2);
+					sampled = new Color(((argb >>> 16) & 0xFF) / 255f, ((argb >>> 8) & 0xFF) / 255f,
+							(argb & 0xFF) / 255f, 1f);
+					teamColors[i] = ImageUtils.getTexture(img, imgInfo.isNeedsSRGBFix());
+				}
+			}
+			catch (final IOException e) {
+				teamColors[i] = ImageUtils.getAnyExtensionTexture(war3MapViewer.dataSource, path);
+			}
+			teamColorValues[i] = sampled;
 		}
 		final Texture[] specialIcons = new Texture[5];
 		specialIcons[0] = ImageUtils.getAnyExtensionTexture(war3MapViewer.mapMpq, "UI\\MiniMap\\minimap-gold.blp");
@@ -676,7 +693,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		specialIcons[4] = loadOptionalMinimapIcon(war3MapViewer, "UI\\MiniMap\\minimap-gold-haunted.blp",
 				specialIcons[0]);
 		final Rectangle playableMapArea = war3MapViewer.terrain.getPlayableMapArea();
-		return new MeleeUIMinimap(minimapDisplayArea, playableMapArea, minimapTexture, teamColors, specialIcons);
+		return new MeleeUIMinimap(minimapDisplayArea, playableMapArea, minimapTexture, teamColors, teamColorValues,
+				specialIcons);
 	}
 
 	private static Texture loadOptionalMinimapIcon(final War3MapViewer war3MapViewer, final String path,

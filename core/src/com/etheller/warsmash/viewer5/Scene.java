@@ -309,21 +309,10 @@ public abstract class Scene {
 		if (!this.show) {
 			return;
 		}
-		final Matrix4 depthMatrix = dynamicShadowManager.prepareShadowMatrix();
-		dynamicShadowManager.beginShadowMap(webGL);
-		Gdx.gl30.glDepthMask(true);
-		Gdx.gl30.glClear(GL20.GL_DEPTH_BUFFER_BIT | GL20.GL_COLOR_BUFFER_BIT);
-		Gdx.gl30.glDisable(GL30.GL_SCISSOR_TEST);
-
-		// Render all of the opaque things of non-batched instances.
-//		for (final ModelInstance instance : this.instances) {
-//			instance.renderOpaque(depthMatrix);
-//		}
-
-		dynamicShadowManager.endShadowMap();
-		final Rectangle viewport = this.camera.rect;
-		this.viewer.gl.glViewport((int) viewport.x, (int) viewport.y, (int) viewport.width, (int) viewport.height);
-		Gdx.gl30.glEnable(GL30.GL_SCISSOR_TEST);
+		// warsmash-nx: dynamic shadow map geometry rendering below is commented out, so switching to
+		// the 1024x1024 shadow FBO and clearing it only splits the Vulkan render pass on every frame
+		// for nothing (2 FBO binds + 1 clear/frame in [NxGpu]).
+		dynamicShadowManager.prepareShadowMatrix();
 	}
 
 	/**

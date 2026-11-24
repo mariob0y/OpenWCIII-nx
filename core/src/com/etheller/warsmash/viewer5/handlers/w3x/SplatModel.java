@@ -71,10 +71,13 @@ public class SplatModel implements Comparable<SplatModel> {
 
 	/**
 	 * warsmash-nx: a splat added or removed since the batches were last built. add() and destroy()
-	 * only mark it; the batches are rebuilt once, before the next draw or before any splat of this
-	 * model is touched (a pending splat has no place in the buffers yet, and the others' places
-	 * change). Before, every unit created rebuilt every unit shadow's geometry: a few hundred units
-	 * made map load and spawn waves quadratic (OrcX01 console profile: 7-10% of the game thread).
+	 * only mark it, and while it is marked a splat's move, setLocation, hide, show and
+	 * setHeightAbsolute only record their change (its locs, hidden, height): the batches are rebuilt
+	 * once, before the next draw, with every splat already in its final state. Before, every unit
+	 * created rebuilt every unit shadow's geometry (a few hundred units made map load and spawn waves
+	 * quadratic), then re-uploaded each hidden shadow one by one, and a script creates a unit and
+	 * moves it at once, so even a deferred rebuild ran once per unit (OrcX01 console profile: 21% of
+	 * the game thread).
 	 */
 	private float[] pendingCenterOffset;
 
@@ -209,18 +212,20 @@ public class SplatModel implements Comparable<SplatModel> {
 					indices.add(indexArray);
 					splatMover.indices.add(indexArray);
 				}
+				// its state goes into the batch as built (the arrays are shared with the batch lists)
+				if (splatMover.hidden) {
+					splatMover.zeroGeometry();
+				}
+				if (splatMover.heightIsAbsolute) {
+					for (final float[] absHeight : splatMover.absoluteHeights) {
+						absHeight[0] = splatMover.absoluteHeightValue;
+					}
+				}
 			}
 
 		}
 		if (indices.size() > 0) {
 			addBatch(gl, vertices, uvs, absoluteHeights, indices, batchRenderUnits);
-		}
-		if (this.splatInstances != null) {
-			for (final SplatMover splatMover : this.splatInstances) {
-				if (splatMover.hidden) {
-					splatMover.hide();
-				}
-			}
 		}
 	}
 
@@ -298,6 +303,8 @@ public class SplatModel implements Comparable<SplatModel> {
 		final SplatMover splatMover;
 		if (this.splatInstances != null) {
 			splatMover = new SplatMover(this);
+			// its place until the rebuild: moves before it go here (the rebuild reads the same array)
+			splatMover.locs = this.locations.get(this.locations.size() - 1);
 			this.splatInstances.add(splatMover);
 		}
 		else {
@@ -365,26 +372,31 @@ public class SplatModel implements Comparable<SplatModel> {
 			return this;
 		}
 
+		/** A rebuild is coming: changes are only recorded, the rebuild builds them. */
+		private boolean rebuildPending() {
+			return this.splatModel.pendingCenterOffset != null;
+		}
+
 		public void move(final float deltaX, final float deltaY, final float[] centerOffset) {
-			this.splatModel.flush(Gdx.gl30);
 			this.locs[0] += deltaX;
 			this.locs[2] += deltaX;
 			this.locs[1] += deltaY;
 			this.locs[3] += deltaY;
-			if (!this.hidden) {
+			if (!this.hidden && !rebuildPending()) {
 				updateAfterMove(centerOffset);
 			}
 		}
 
 		public void setLocation(final float x, final float y, final float[] centerOffset) {
-			this.splatModel.flush(Gdx.gl30);
 			final float width = this.locs[2] - this.locs[0];
 			final float height = this.locs[3] - this.locs[1];
 			this.locs[0] = x - (width / 2);
 			this.locs[2] = x + (width / 2);
 			this.locs[1] = y - (height / 2);
 			this.locs[3] = y + (height / 2);
-			updateAfterMove(centerOffset);
+			if (!rebuildPending()) {
+				updateAfterMove(centerOffset);
+			}
 		}
 
 		private void updateAfterMove(final float[] centerOffset) {
@@ -499,8 +511,27 @@ public class SplatModel implements Comparable<SplatModel> {
 		public void hide() {
 			// does not remove the shadow, just makes it not show, so it would still be
 			// using GPU resources
+			if (rebuildPending()) {
+				this.hidden = true;
+				return;
+			}
+			if (this.hidden) {
+				return; // already zero in the buffers
+			}
 			final GL30 gl = Gdx.gl30;
-			this.splatModel.flush(gl);
+			zeroGeometry();
+			gl.glBindBuffer(GL30.GL_ARRAY_BUFFER, this.vertexBuffer);
+			gl.glBufferSubData(GL30.GL_ARRAY_BUFFER, this.startOffset, 4 * 3 * this.vertices.size(),
+					RenderMathUtils.wrap(this.vertices));
+			gl.glBindBuffer(GL30.GL_ELEMENT_ARRAY_BUFFER, this.faceBuffer);
+			gl.glBufferSubData(GL30.GL_ELEMENT_ARRAY_BUFFER, this.indicesStartOffset, 6 * 2 * this.indices.size(),
+					RenderMathUtils.wrapFaces(this.indices));
+			gl.glBufferSubData(GL30.GL_ARRAY_BUFFER, this.uvsOffset + ((this.startOffset / 3) * 2),
+					4 * 2 * this.uvs.size(), RenderMathUtils.wrap(this.uvs));
+			this.hidden = true;
+		}
+
+		private void zeroGeometry() {
 			for (final float[] vertex : this.vertices) {
 				for (int i = 0; i < vertex.length; i++) {
 					vertex[i] = 0.0f;
@@ -516,28 +547,29 @@ public class SplatModel implements Comparable<SplatModel> {
 					uv[i] = 0;
 				}
 			}
-			gl.glBindBuffer(GL30.GL_ARRAY_BUFFER, this.vertexBuffer);
-			gl.glBufferSubData(GL30.GL_ARRAY_BUFFER, this.startOffset, 4 * 3 * this.vertices.size(),
-					RenderMathUtils.wrap(this.vertices));
-			gl.glBindBuffer(GL30.GL_ELEMENT_ARRAY_BUFFER, this.faceBuffer);
-			gl.glBufferSubData(GL30.GL_ELEMENT_ARRAY_BUFFER, this.indicesStartOffset, 6 * 2 * this.indices.size(),
-					RenderMathUtils.wrapFaces(this.indices));
-			gl.glBufferSubData(GL30.GL_ARRAY_BUFFER, this.uvsOffset + ((this.startOffset / 3) * 2),
-					4 * 2 * this.uvs.size(), RenderMathUtils.wrap(this.uvs));
-			this.hidden = true;
 		}
 
 		public void show(final float[] centerOffset) {
+			if (rebuildPending()) {
+				this.hidden = false;
+				return;
+			}
+			if (!this.hidden) {
+				return; // already showing where it is
+			}
 			// It tries to only update if it is located at a new position... but here we are
 			// forcing it visible again by putting the position outside the map
 			this.ix0 = this.ix1 = this.iy0 = this.iy1 = Integer.MIN_VALUE;
-			move(0, 0, centerOffset);
 			this.hidden = false;
+			move(0, 0, centerOffset);
 		}
 
 		public void setHeightAbsolute(final boolean absolute, final float absoluteHeightValue) {
-			this.splatModel.flush(Gdx.gl30);
 			this.absoluteHeightValue = absoluteHeightValue;
+			if (rebuildPending()) {
+				this.heightIsAbsolute = absolute;
+				return;
+			}
 			if (absolute != this.heightIsAbsolute) {
 				this.heightIsAbsolute = absolute;
 				updateAbsoluteHeightParams();

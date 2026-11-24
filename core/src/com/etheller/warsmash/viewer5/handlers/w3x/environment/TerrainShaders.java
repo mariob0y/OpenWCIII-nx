@@ -136,6 +136,7 @@ public class TerrainShaders {
 					"uniform sampler2D lightTexture;\r\n" + //
 					"uniform float lightCount;\r\n" + //
 					"uniform float lightTextureHeight;\r\n" + //
+					"uniform ivec4 u_tileRange;\r\n" + //
 					"\r\n" + //
 					"out vec2 UV;\r\n" + //
 					"flat out uvec4 texture_indices;\r\n" + //
@@ -147,7 +148,7 @@ public class TerrainShaders {
 					"\r\n" + //
 					"void main() { \r\n" + //
 					"	ivec2 size = textureSize(terrain_texture_list, 0);\r\n" + //
-					"	ivec2 pos = ivec2(gl_InstanceID % size.x, gl_InstanceID / size.x);\r\n" + //
+					"	ivec2 pos = ivec2(u_tileRange.x + (gl_InstanceID % u_tileRange.z), u_tileRange.y + (gl_InstanceID / u_tileRange.z));\r\n" + //
 					"\r\n" + //
 					"	ivec2 height_pos = ivec2(vPosition + pos);\r\n" + //
 					"	vec4 height = texelFetch(height_cliff_texture, height_pos, 0);\r\n" + //
@@ -329,6 +330,7 @@ public class TerrainShaders {
 					"uniform sampler2D lightTexture;\r\n" + //
 					"uniform float lightCount;\r\n" + //
 					"uniform float lightTextureHeight;\r\n" + //
+					"uniform ivec4 u_tileRange;\r\n" + //
 					"\r\n" + //
 					"out vec2 UV;\r\n" + //
 					"out vec4 vertexColor;\r\n" + //
@@ -342,7 +344,7 @@ public class TerrainShaders {
 					"\r\n" + //
 					"void main() { \r\n" + //
 					"	ivec2 size = textureSize(water_height_texture, 0) - 1;\r\n" + //
-					"	ivec2 pos = ivec2(gl_InstanceID % size.x, gl_InstanceID / size.x);\r\n" + //
+					"	ivec2 pos = ivec2(u_tileRange.x + (gl_InstanceID % u_tileRange.z), u_tileRange.y + (gl_InstanceID / u_tileRange.z));\r\n" + //
 					"	ivec2 height_pos = ivec2(vPosition + pos);\r\n" + //
 					"	float water_height = texelFetch(water_height_texture, height_pos, 0).r + water_offset;\r\n" + //
 					"\r\n" + //

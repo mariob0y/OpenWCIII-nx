@@ -35,6 +35,34 @@ struct CoreLayout {
 CoreLayout g_layout;
 Mutex g_layoutLock;
 
+// Every thread started through threadCreate, for nxLogThreadLoad: its handle, the core it was put
+// on, its entry point (to tell Mesa's threads apart: resolve entry - __wrap_threadCreate against
+// the ELF's symbols) and its CPU time at the last report.
+struct TrackedThread {
+    Handle handle;
+    int core;
+    uintptr_t entry;
+    u64 lastTicks;
+};
+TrackedThread g_threads[64];
+int g_threadCount = 0;
+u64 g_gameLastTicks = 0;
+Mutex g_threadsLock;
+
+void track(const Thread *t, ThreadFunc entry, int core) {
+    mutexLock(&g_threadsLock);
+    if (g_threadCount < 64)
+        g_threads[g_threadCount++] = TrackedThread{t->handle, core, (uintptr_t) entry, 0};
+    mutexUnlock(&g_threadsLock);
+}
+
+u64 cpuTicks(Handle handle) {
+    u64 ticks = 0;
+    if (R_FAILED(svcGetInfo(&ticks, InfoType_ThreadTickCount, handle, (u64) -1)))
+        return 0;
+    return ticks;
+}
+
 const CoreLayout &layout() {
     mutexLock(&g_layoutLock);
     if (!g_layout.ready) {
@@ -79,11 +107,43 @@ extern "C" Result __wrap_threadCreate(Thread *t, ThreadFunc entry, void *arg, vo
         const int core = layout().driverCore;
         if (core >= 0) {
             const Result rc = __real_threadCreate(t, entry, arg, stack_mem, stack_sz, prio, core);
-            if (R_SUCCEEDED(rc))
+            if (R_SUCCEEDED(rc)) {
+                track(t, entry, core);
                 return rc;
+            }
         }
     }
-    return __real_threadCreate(t, entry, arg, stack_mem, stack_sz, prio, cpuid);
+    const Result rc = __real_threadCreate(t, entry, arg, stack_mem, stack_sz, prio, cpuid);
+    if (R_SUCCEEDED(rc))
+        track(t, entry, cpuid);
+    return rc;
+}
+
+// One log line: the share of the last `wallTicks` (system ticks) each busy thread spent running,
+// the game thread first. A thread near 100% is a limit; a core no busy thread is on is idle. The
+// core printed is the one the thread was started on (Java threads move themselves after that:
+// ParallelJobs workers to the worker cores).
+extern "C" void nxLogThreadLoad(unsigned long long wallTicks) {
+    if (wallTicks == 0)
+        return;
+    const u64 game = cpuTicks(envGetMainThreadHandle());
+    char line[1024];
+    int n = snprintf(line, sizeof(line), "[NxThreads] game %.0f%%", (game - g_gameLastTicks) * 100.0 / wallTicks);
+    g_gameLastTicks = game;
+    mutexLock(&g_threadsLock);
+    for (int i = 0; i < g_threadCount && n < (int) sizeof(line) - 48; i++) {
+        TrackedThread &t = g_threads[i];
+        const u64 ticks = cpuTicks(t.handle);
+        if (ticks == 0)
+            continue; // ended (or never ran)
+        const double share = (ticks - t.lastTicks) * 100.0 / wallTicks;
+        t.lastTicks = ticks;
+        if (share >= 1.0)
+            n += snprintf(line + n, sizeof(line) - n, ", #%d core %d entry %+lld: %.0f%%", i, t.core,
+                    (long long) (t.entry - (uintptr_t) &__wrap_threadCreate), share);
+    }
+    mutexUnlock(&g_threadsLock);
+    printf("%s\n", line);
 }
 
 // The number of cores left for ParallelJobs workers (neither the game thread's nor the driver's).

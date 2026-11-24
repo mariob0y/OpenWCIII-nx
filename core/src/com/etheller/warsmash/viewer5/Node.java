@@ -121,6 +121,10 @@ public abstract class Node extends GenericNode {
 	}
 
 	public Node moveTo(final float[] offset) {
+		if ((this.localLocation.x == offset[0]) && (this.localLocation.y == offset[1])
+				&& (this.localLocation.z == offset[2])) {
+			return this;
+		}
 		this.localLocation.set(offset[0], offset[1], offset[2]);
 
 		this.dirty = true;
@@ -137,6 +141,10 @@ public abstract class Node extends GenericNode {
 	}
 
 	public Node setLocalRotation(final Quaternion rotation) {
+		if ((this.localRotation.x == rotation.x) && (this.localRotation.y == rotation.y)
+				&& (this.localRotation.z == rotation.z) && (this.localRotation.w == rotation.w)) {
+			return this;
+		}
 		this.localRotation.set(rotation);
 
 		this.dirty = true;

@@ -315,32 +315,118 @@ public class PathingGrid {
 
 	public boolean isPathable(final float unitX, final float unitY, final MovementType pathingType,
 			final float collisionSize) {
+		final float offX = this.centerOffset[0];
+		final float offY = this.centerOffset[1];
+		final int w = this.pathingGridSizes[0];
+		final int h = this.pathingGridSizes[1];
+		final short[] grid = this.pathingGrid;
+		final short[] overlay = this.dynamicPathingOverlay;
+		final int len = grid.length;
+
 		if (collisionSize == 0f) {
-			if (!contains(unitX, unitY)) {
+			final int cx = (int) ((unitX - offX) / 32.0f);
+			final int cy = (int) ((unitY - offY) / 32.0f);
+			if ((cx < 0) || (cy < 0) || (cx >= w) || (cy >= h)) {
 				return false;
 			}
-			return pathingType.isPathable(getPathing(unitX, unitY));
+			final int idx = (cy * w) + cx;
+			final short val = idx < len ? (short) (grid[idx] | overlay[idx]) : 0;
+			return isMovementPathableFast(pathingType, val);
 		}
-		for (int i = -1; i <= 1; i++) {
-			for (int j = -1; j <= 1; j++) {
-				final float unitPathingX = unitX + (i * collisionSize);
-				final float unitPathingY = unitY + (j * collisionSize);
-				if (!contains(unitPathingX, unitPathingY)
-						|| !pathingType.isPathable(getPathing(unitPathingX, unitPathingY))) {
+
+		final int cx0 = (int) (((unitX - collisionSize) - offX) / 32.0f);
+		final int cx1 = (int) ((unitX - offX) / 32.0f);
+		final int cx2 = (int) (((unitX + collisionSize) - offX) / 32.0f);
+		final int cy0 = (int) (((unitY - collisionSize) - offY) / 32.0f);
+		final int cy1 = (int) ((unitY - offY) / 32.0f);
+		final int cy2 = (int) (((unitY + collisionSize) - offY) / 32.0f);
+		if ((cx0 < 0) || (cx1 < 0) || (cx2 < 0) || (cx0 >= w) || (cx1 >= w) || (cx2 >= w)
+				|| (cy0 < 0) || (cy1 < 0) || (cy2 < 0) || (cy0 >= h) || (cy1 >= h) || (cy2 >= h)) {
+			return false;
+		}
+		if (pathingType == MovementType.DISABLED) {
+			return true;
+		}
+		final int blockFlag;
+		if ((pathingType == MovementType.FOOT) || (pathingType == MovementType.FOOT_NO_COLLISION)
+				|| (pathingType == MovementType.HORSE) || (pathingType == MovementType.HOVER)) {
+			blockFlag = PathingFlags.UNWALKABLE;
+		}
+		else if (pathingType == MovementType.FLY) {
+			blockFlag = PathingFlags.UNFLYABLE;
+		}
+		else if (pathingType == MovementType.FLOAT) {
+			blockFlag = PathingFlags.UNSWIMABLE;
+		}
+		else {
+			blockFlag = 0; // AMPHIBIOUS fallback
+		}
+
+		for (int yi = 0; yi < 3; yi++) {
+			final int cy;
+			if (yi == 0) {
+				cy = cy0;
+			}
+			else if (yi == 1) {
+				if (cy1 == cy0) {
+					continue;
+				}
+				cy = cy1;
+			}
+			else {
+				if ((cy2 == cy1) || (cy2 == cy0)) {
+					continue;
+				}
+				cy = cy2;
+			}
+			final int rowBase = cy * w;
+			for (int xi = 0; xi < 3; xi++) {
+				final int cx;
+				if (xi == 0) {
+					cx = cx0;
+				}
+				else if (xi == 1) {
+					if (cx1 == cx0) {
+						continue;
+					}
+					cx = cx1;
+				}
+				else {
+					if ((cx2 == cx1) || (cx2 == cx0)) {
+						continue;
+					}
+					cx = cx2;
+				}
+				final int idx = rowBase + cx;
+				final short val = idx < len ? (short) (grid[idx] | overlay[idx]) : 0;
+				if (blockFlag != 0) {
+					if ((val & blockFlag) != 0) {
+						return false;
+					}
+				}
+				else if (!pathingType.isPathable(val)) {
 					return false;
 				}
 			}
 		}
-//		final float maxX = unitX + collisionSize;
-//		final float maxY = unitY + collisionSize;
-//		for (float minX = unitX - collisionSize; minX < maxX; minX += 32f) {
-//			for (float minY = unitY - collisionSize; minY < maxY; minY += 32f) {
-//				if (!pathingType.isPathable(getPathing(minX, minY))) {
-//					return false;
-//				}
-//			}
-//		}
 		return true;
+	}
+
+	private static boolean isMovementPathableFast(final MovementType pathingType, final short val) {
+		if ((pathingType == MovementType.FOOT) || (pathingType == MovementType.FOOT_NO_COLLISION)
+				|| (pathingType == MovementType.HORSE) || (pathingType == MovementType.HOVER)) {
+			return (val & PathingFlags.UNWALKABLE) == 0;
+		}
+		if (pathingType == MovementType.FLY) {
+			return (val & PathingFlags.UNFLYABLE) == 0;
+		}
+		if (pathingType == MovementType.FLOAT) {
+			return (val & PathingFlags.UNSWIMABLE) == 0;
+		}
+		if (pathingType == MovementType.DISABLED) {
+			return true;
+		}
+		return pathingType.isPathable(val);
 	}
 
 	public boolean isUnitCell(final float queryX, final float queryY, final float unitX, final float unitY,

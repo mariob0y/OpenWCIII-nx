@@ -62,13 +62,27 @@ public class SwitchLauncher {
 				NxCrumbs.enable(8);
 			}
 
+			private long renderNs;
+			private int renderFrames;
+
 			@Override
 			public void render() {
 				NxCrumbs.crumb("render");
 				// the pad's camera stick, read by SwitchInput this frame, for the game camera
 				com.etheller.warsmash.util.PadSticks.cameraX = com.thelogicmaster.switchgdx.SwitchInput.cameraStickX;
 				com.etheller.warsmash.util.PadSticks.cameraY = com.thelogicmaster.switchgdx.SwitchInput.cameraStickY;
+				final long start = System.nanoTime();
 				super.render();
+				this.renderNs += System.nanoTime() - start;
+				if (++this.renderFrames == 600) {
+					// with [NxFrame]'s game time: the rest of it is SwitchApplication's loop around this
+					System.out.println(String.format("[NxRender] 600 frames: render() %.1f ms, of it simulation ticks %.1f ms, per frame",
+							this.renderNs / 600e6,
+							com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.nxSimulationNs / 600e6));
+					this.renderNs = 0;
+					this.renderFrames = 0;
+					com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer.nxSimulationNs = 0;
+				}
 				NxCrumbs.crumb("rendered");
 				NxCrumbs.endFrame();
 			}

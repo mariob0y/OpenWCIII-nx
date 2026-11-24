@@ -28,23 +28,37 @@ public class MeleeUIMinimap {
 	private final Texture minimapTexture;
 	private final Rectangle playableMapArea;
 	private final Texture[] teamColors;
+	private final Color[] teamColorValues;
+	private final Texture whitePixelTexture;
 	private final Texture[] specialIcons;
+	private final List<RenderUnit> specialUnitsScratch = new ArrayList<>();
 	private float heroAlpha = 0.90f;
 	private byte polarity = -1;
 	private boolean visible = true;
 	/** warsmash-nx: the fog over the minimap as one texture (one texel per fog cell). */
 	private Pixmap fogPixmap;
 	private Texture fogTexture;
+	/** warsmash-nx: the fog's uploads go through a buffer (PboTextureUpload: no wait on the console). */
+	private final com.etheller.warsmash.viewer5.gl.PboTextureUpload fogUpload = new com.etheller.warsmash.viewer5.gl.PboTextureUpload();
 	private byte[] fogBytes;
+	private byte[] fogRawScratch = new byte[0];
+	private final byte[] fogAlphaLut = new byte[256];
 	private long fogUpdatedNs;
 	private static final long FOG_REFRESH_NS = 200_000_000L;
 	private final List<MinimapPing> pings = new ArrayList<>();
 
 	public MeleeUIMinimap(final Rectangle displayArea, final Rectangle playableMapArea, final Texture minimapTexture,
-			final Texture[] teamColors, final Texture[] specialIcons) {
+			final Texture[] teamColors, final Color[] teamColorValues, final Texture[] specialIcons) {
 		this.playableMapArea = playableMapArea;
 		this.minimapTexture = minimapTexture;
 		this.teamColors = teamColors;
+		this.teamColorValues = teamColorValues;
+		final Pixmap white = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
+		white.setColor(1f, 1f, 1f, 1f);
+		white.fill();
+		this.whitePixelTexture = new Texture(white);
+		this.whitePixelTexture.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+		white.dispose();
 		this.minimap = displayArea;
 		this.specialIcons = specialIcons;
 		final float worldWidth = playableMapArea.getWidth();
@@ -91,10 +105,8 @@ public class MeleeUIMinimap {
 		final float mapXMod = this.minimapFilledArea.width / (maxX - minX);
 		final float mapYMod = this.minimapFilledArea.height / (maxY - minY);
 
-		// warsmash-nx: was a quad and a fog lookup per cell, every frame (tens of thousands; ~6% of the
-		// console's game thread). Now the cells are texels of one black texture, alpha 0.5 where
-		// fogged and 1 where masked, refreshed at most 5 times a second and drawn as one quad over
-		// the same area. Pixmap row 0 is the top of the drawn quad, so grid row y goes to h - 1 - y.
+		// warsmash-nx: cells are texels of one black texture, refreshed at most 5 times a second from
+		// the raw fog buffer through a 256-byte LUT (no per-cell getFogState/CFogState calls).
 		final int fogWidth = maxX - minX;
 		final int fogHeight = maxY - minY;
 		if ((fogWidth > 0) && (fogHeight > 0)) {
@@ -113,20 +125,39 @@ public class MeleeUIMinimap {
 			}
 			if ((now - this.fogUpdatedNs) >= FOG_REFRESH_NS) {
 				this.fogUpdatedNs = now;
+				final byte[] alphaLut = this.fogAlphaLut;
+				// The same mapping as CFogState.getByMask(getFogStateFromSettings(raw)): positive is
+				// fogged, negative is masked (MASKED's mask is -1, so no & 0xFF here).
+				for (int b = 0; b < 256; b++) {
+					final byte state = game.getFogStateFromSettings((byte) b);
+					alphaLut[b] = (state > 0) ? (byte) 128 : (state < 0) ? (byte) 255 : 0;
+				}
+				final java.nio.ByteBuffer rawBuf = fogOfWar.getFogOfWarBuffer().duplicate();
+				final int rawCap = rawBuf.capacity();
+				if (this.fogRawScratch.length < rawCap) {
+					this.fogRawScratch = new byte[rawCap];
+				}
+				rawBuf.clear();
+				rawBuf.get(this.fogRawScratch, 0, rawCap);
+				final byte[] raw = this.fogRawScratch;
+				final int gridW = fogOfWar.getWidth();
 				final byte[] bytes = this.fogBytes;
 				for (int y = 0; y < fogHeight; y++) {
+					final int rowBase = ((y + minY) * gridW) + minX;
 					int j = (((fogHeight - 1 - y) * fogWidth) * 4) + 3;
 					for (int x = 0; x < fogWidth; x++, j += 4) {
-						final CFogState state = fogOfWar.getFogState(game, x + minX, y + minY);
-						bytes[j] = CFogState.FOGGED.equals(state) ? (byte) 128
-								: CFogState.MASKED.equals(state) ? (byte) 255 : 0;
+						final int idx = rowBase + x;
+						bytes[j] = ((idx >= 0) && (idx < rawCap)) ? alphaLut[raw[idx] & 0xFF] : 0;
 					}
 				}
 				final java.nio.ByteBuffer pixels = this.fogPixmap.getPixels();
 				pixels.position(0);
 				pixels.put(bytes);
 				pixels.position(0);
-				this.fogTexture.draw(this.fogPixmap, 0, 0);
+				this.fogTexture.bind();
+				this.fogUpload.upload(com.badlogic.gdx.Gdx.gl30, fogWidth, fogHeight,
+						com.badlogic.gdx.graphics.GL20.GL_RGBA, com.badlogic.gdx.graphics.GL20.GL_UNSIGNED_BYTE, pixels,
+						fogWidth * fogHeight * 4);
 			}
 			batch.setColor(1f, 1f, 1f, 1f);
 			batch.draw(this.fogTexture, this.minimapFilledArea.x, this.minimapFilledArea.y,
@@ -138,66 +169,90 @@ public class MeleeUIMinimap {
 			this.polarity *= -1;
 		}
 
+		final float playX = this.playableMapArea.x;
+		final float playY = this.playableMapArea.y;
+		final float scaleX = this.minimapFilledArea.width / this.playableMapArea.width;
+		final float scaleY = this.minimapFilledArea.height / this.playableMapArea.height;
+		final float fillX = this.minimapFilledArea.x;
+		final float fillY = this.minimapFilledArea.y;
+		final int localPlayerId = player.getId();
+		final List<RenderUnit> specialUnits = this.specialUnitsScratch;
+		specialUnits.clear();
+
+		// warsmash-nx: pass 1 draws every regular unit/building with one 1x1 white texture tinted by
+		// player color (1 SpriteBatch draw call instead of dozens of per-player texture flushes).
 		for (final RenderUnit unit : units) {
 			final CUnit simUnit = unit.getSimulationUnit();
-			int dimensions = 4;
-			if (!simUnit.isHidden() && !simUnit.isDead() && simUnit.isVisible(game, player.getId())) {
-				batch.setColor(1, 1, 1, 1);
-				final Texture minimapIcon;
-				if (simUnit.getGoldMineData() != null) {
-					minimapIcon = this.specialIcons[0];
-					dimensions = 21;
+			if (!simUnit.isHidden() && !simUnit.isDead() && simUnit.isVisible(game, localPlayerId)) {
+				if ((simUnit.getGoldMineData() != null) || (simUnit.getOverlayedGoldMineData() != null)
+						|| simUnit.getUnitType().isNeutralBuildingShowMinimapIcon() || simUnit.isHero()) {
+					specialUnits.add(unit);
+					continue;
 				}
-				else if (simUnit.getOverlayedGoldMineData() != null) {
-					final CAbilityOverlayedMine overlayedGoldMineData = simUnit.getOverlayedGoldMineData();
-					if (overlayedGoldMineData instanceof CAbilityEntangledMine) {
-						minimapIcon = this.specialIcons[3];
-					}
-					else {
-						minimapIcon = this.specialIcons[4];
-					}
-					dimensions = 21;
-				}
-				else if (simUnit.getUnitType().isNeutralBuildingShowMinimapIcon()) {
-					minimapIcon = this.specialIcons[1];
-					dimensions = 21;
-				}
-				else if (simUnit.isHero()) {
-					if (player.hasAlliance(simUnit.getPlayerIndex(), CAllianceType.PASSIVE)) {
-						batch.setColor(1f, 1f, 1f, this.heroAlpha);
-					}
-					else {
-						batch.setColor(1f, 0.2f, 0.2f, this.heroAlpha);
-					}
-					minimapIcon = this.specialIcons[2];
-					dimensions = 28;
-				}
-				else {
-					if (simUnit.isBuilding()) {
-						dimensions = 10;
-					}
-					minimapIcon = this.teamColors[unit.getSimulationUnit().getPlayerIndex()];
-				}
-				final int offset = dimensions / 2;
-				batch.draw(minimapIcon,
-						(this.minimapFilledArea.x + (((unit.location[0] - this.playableMapArea.getX())
-								/ (this.playableMapArea.getWidth())) * this.minimapFilledArea.width)) - offset,
-						(this.minimapFilledArea.y + (((unit.location[1] - this.playableMapArea.getY())
-								/ (this.playableMapArea.getHeight())) * this.minimapFilledArea.height)) - offset,
+				final int dimensions = simUnit.isBuilding() ? 10 : 4;
+				final int offset = dimensions >> 1;
+				final int pIdx = simUnit.getPlayerIndex();
+				final Color c = (this.teamColorValues != null && pIdx >= 0 && pIdx < this.teamColorValues.length)
+						? this.teamColorValues[pIdx]
+						: Color.WHITE;
+				batch.setColor(c.r, c.g, c.b, 1f);
+				batch.draw(this.whitePixelTexture,
+						(fillX + ((unit.location[0] - playX) * scaleX)) - offset,
+						(fillY + ((unit.location[1] - playY) * scaleY)) - offset,
 						dimensions, dimensions);
-				batch.setColor(1, 1, 1, 1);
 			}
 		}
+
+		// Pass 2: special icons (gold mines, neutral buildings, heroes)
+		for (int i = 0, l = specialUnits.size(); i < l; i++) {
+			final RenderUnit unit = specialUnits.get(i);
+			final CUnit simUnit = unit.getSimulationUnit();
+			batch.setColor(1, 1, 1, 1);
+			final Texture minimapIcon;
+			final int dimensions;
+			if (simUnit.getGoldMineData() != null) {
+				minimapIcon = this.specialIcons[0];
+				dimensions = 21;
+			}
+			else if (simUnit.getOverlayedGoldMineData() != null) {
+				final CAbilityOverlayedMine overlayedGoldMineData = simUnit.getOverlayedGoldMineData();
+				if (overlayedGoldMineData instanceof CAbilityEntangledMine) {
+					minimapIcon = this.specialIcons[3];
+				}
+				else {
+					minimapIcon = this.specialIcons[4];
+				}
+				dimensions = 21;
+			}
+			else if (simUnit.getUnitType().isNeutralBuildingShowMinimapIcon()) {
+				minimapIcon = this.specialIcons[1];
+				dimensions = 21;
+			}
+			else {
+				if (player.hasAlliance(simUnit.getPlayerIndex(), CAllianceType.PASSIVE)) {
+					batch.setColor(1f, 1f, 1f, this.heroAlpha);
+				}
+				else {
+					batch.setColor(1f, 0.2f, 0.2f, this.heroAlpha);
+				}
+				minimapIcon = this.specialIcons[2];
+				dimensions = 28;
+			}
+			final int offset = dimensions >> 1;
+			batch.draw(minimapIcon,
+					(fillX + ((unit.location[0] - playX) * scaleX)) - offset,
+					(fillY + ((unit.location[1] - playY) * scaleY)) - offset,
+					dimensions, dimensions);
+		}
+		specialUnits.clear();
 
 		for (final MinimapPing ping : this.pings) {
 			final float pulse = 0.55f + (0.45f * (float) Math.sin(ping.remainingMs * 0.02f));
 			batch.setColor(ping.r, ping.g, ping.b, pulse);
 			final float size = 12f + (6f * pulse);
-			final float px = this.minimapFilledArea.x + (((ping.worldX - this.playableMapArea.getX())
-					/ this.playableMapArea.getWidth()) * this.minimapFilledArea.width) - (size * 0.5f);
-			final float py = this.minimapFilledArea.y + (((ping.worldY - this.playableMapArea.getY())
-					/ this.playableMapArea.getHeight()) * this.minimapFilledArea.height) - (size * 0.5f);
-			batch.draw(this.teamColors[0], px, py, size, size);
+			final float px = fillX + ((ping.worldX - playX) * scaleX) - (size * 0.5f);
+			final float py = fillY + ((ping.worldY - playY) * scaleY) - (size * 0.5f);
+			batch.draw(this.whitePixelTexture, px, py, size, size);
 		}
 		batch.setColor(og);
 	}

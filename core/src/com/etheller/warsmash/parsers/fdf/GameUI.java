@@ -104,6 +104,13 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 	private final BitmapFont font20;
 	private final DynamicFontGeneratorHolder dynamicFontGeneratorHolder;
 	private final List<FocusableFrame> focusableFrames = new ArrayList<>();
+	private final List<SpriteFrame2> spriteFrames2 = new ArrayList<>();
+
+	public void updateSpriteFrames(final float dt) {
+		for (int i = 0, l = this.spriteFrames2.size(); i < l; i++) {
+			this.spriteFrames2.get(i).updateScene(dt);
+		}
+	}
 
 	public GameUI(final DataSource dataSource, final GameSkin skin, final Viewport viewport, final Scene uiScene,
 			final AbstractMdxModelViewer modelViewer, final int racialCommandIndex, final WTS mapStrings) {
@@ -492,6 +499,7 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 				if (frameDefinition.getName().endsWith("Portrait")) {
 					final SpriteFrame2 spriteFrame = new SpriteFrame2(frameDefinition.getName(), parent, viewport2,
 							this.modelViewer);
+					this.spriteFrames2.add(spriteFrame);
 					String backgroundArt = frameDefinition.getString("BackgroundArt");
 					if (frameDefinition.has("DecorateFileNames") || inDecorateFileNames) {
 						if (backgroundArt != null) {

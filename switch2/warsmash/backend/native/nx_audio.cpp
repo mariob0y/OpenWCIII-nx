@@ -431,13 +431,7 @@ Sample *load(const uint8_t *data, size_t size, const char **error) {
         *error = "empty audio file";
         return nullptr;
     }
-    char line[96];
-    snprintf(line, sizeof line, "audio: decoding a sound (%s, %u bytes)", isWav(data, size) ? "wav" : "mp3",
-            (unsigned) size);
-    nx_event(line);
-    Sample *sample = isWav(data, size) ? decodeWav(data, size, error) : decodeMp3(data, size, error);
-    nx_event(sample ? "audio: sound decoded" : "audio: sound not decoded");
-    return sample;
+    return isWav(data, size) ? decodeWav(data, size, error) : decodeMp3(data, size, error);
 }
 
 void release(Sample *sample) {

@@ -236,8 +236,17 @@ void SM_com_thelogicmaster_switchgdx_SwitchApplication_init_boolean(jcontext ctx
     pointerOk = R_SUCCEEDED(padPointerInitialize(&pointer, kPointerWidth, kPointerHeight));
     printf("input: Joy-Con mouse %s\n", pointerOk ? "ready" : "unavailable");
 
-    // The window: a fixed size, set before the surface takes it.
-    nwindowSetDimensions(nwindowGetDefault(), kWidth, kHeight);
+    // The window: a fixed size, set before the surface takes it. A file "res720" in the game's
+    // folder draws at 1280x720 instead (to see how much the GPU's pixel work costs; the game and the
+    // input scale from the surface size).
+    int windowWidth = kWidth, windowHeight = kHeight;
+    if (FILE *res720 = fopen("sdmc:/switch/warsmash/res720", "rb")) {
+        fclose(res720);
+        windowWidth = 1280;
+        windowHeight = 720;
+        printf("graphics: res720 found, drawing at 1280x720\n");
+    }
+    nwindowSetDimensions(nwindowGetDefault(), windowWidth, windowHeight);
 
     display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     if (!display || !eglInitialize(display, nullptr, nullptr)) {
@@ -363,7 +372,49 @@ extern "C" void nx_event(const char *what) {
 // log every call. Off (0): each line is flushed to the card, ~1700 a menu frame, and the four traced
 // frames took ~5 s each - the "frozen empty menu" of the 2026-11-22 runs. Set 5 to trace again.
 constexpr int kGlTraceFrames = 0;
+// Frame statistics, one log line every kStatFrames frames: GL calls and draw calls per frame, the
+// time eglSwapBuffers blocks (waiting for the GPU / the driver thread to finish a frame) and the
+// time between swaps the game itself takes.
+constexpr int kStatFrames = 600;
+static unsigned long long statGlCalls = 0, statDraws = 0, statSwapTicks = 0, statSwapMaxTicks = 0, statCpuTicks = 0;
+static unsigned long long statLastSwapped = 0;
+static int statFrames = 0;
+// Uploads and framebuffer work per frame: each upload of something the frame already drew with, and
+// each framebuffer change or clear, can split the GPU's work (zink ends and restarts its render pass).
+static unsigned long long statTexUploads = 0, statBufUploads = 0, statFboBinds = 0, statClears = 0;
+// GPU time per frame: a GL_TIME_ELAPSED query from just after one swap to just before the next, read
+// a few frames later (never waiting for it).
+constexpr int kGpuQueries = 4;
+static GLuint gpuQueries[kGpuQueries];
+static bool gpuQueryPending[kGpuQueries];
+static int gpuQueryActive = -1;
+static bool gpuQueriesMade = false;
+static unsigned long long statGpuNs = 0, statGpuMaxNs = 0;
+static int statGpuFrames = 0;
+extern "C" void nxLogThreadLoad(unsigned long long wallTicks); // nx_threads.cpp
 extern "C" void nx_gltrace(const char *name) {
+    statGlCalls++;
+    if (name[0] == 'g' && name[1] == 'l') {
+        const char *n = name + 2;
+        if (n[0] == 'D' && n[1] == 'r')
+            statDraws++; // glDraw*
+        else if (!strcmp(n, "TexSubImage2D") || !strcmp(n, "TexImage2D") || !strcmp(n, "TexSubImage3D")
+                || !strcmp(n, "TexImage3D"))
+            statTexUploads++;
+        else if (!strcmp(n, "BufferData") || !strcmp(n, "BufferSubData"))
+            statBufUploads++;
+        else if (!strcmp(n, "BindFramebuffer"))
+            statFboBinds++;
+        else if (!strcmp(n, "Clear"))
+            statClears++;
+        else if (!strcmp(n, "Flush") && gpuQueryActive >= 0) {
+            // warsmash-nx: end GPU timer before CPU simulation ticks so [NxGpu] measures
+            // pure render GPU time instead of including CPU simulation gaps.
+            glEndQuery(GL_TIME_ELAPSED);
+            gpuQueryPending[gpuQueryActive] = true;
+            gpuQueryActive = -1;
+        }
+    }
     if (nxFrame >= 1 && nxFrame < kGlTraceFrames) {
         printf("gl f%d %s\n", nxFrame, name);
         fflush(stdout);
@@ -409,9 +460,76 @@ jbool SM_com_thelogicmaster_switchgdx_SwitchApplication_update_R_boolean(jcontex
     }
 
     nx_crumb("swap");
+    if (gpuQueryActive >= 0) {
+        glEndQuery(GL_TIME_ELAPSED);
+        gpuQueryPending[gpuQueryActive] = true;
+        gpuQueryActive = -1;
+    }
+    const unsigned long long swapStart = armGetSystemTick();
     eglSwapBuffers(display, surface);
+    const unsigned long long swapEnd = armGetSystemTick();
+    if (!gpuQueriesMade) {
+        glGenQueries(kGpuQueries, gpuQueries);
+        gpuQueriesMade = true;
+    }
+    for (int i = 0; i < kGpuQueries; i++) {
+        if (!gpuQueryPending[i])
+            continue;
+        GLuint available = 0;
+        glGetQueryObjectuiv(gpuQueries[i], GL_QUERY_RESULT_AVAILABLE, &available);
+        if (available) {
+            GLuint64 ns = 0;
+            glGetQueryObjectui64v(gpuQueries[i], GL_QUERY_RESULT, &ns);
+            statGpuNs += ns;
+            if (ns > statGpuMaxNs)
+                statGpuMaxNs = ns;
+            statGpuFrames++;
+            gpuQueryPending[i] = false;
+        }
+    }
+    for (int i = 0; i < kGpuQueries; i++) {
+        if (!gpuQueryPending[i]) {
+            glBeginQuery(GL_TIME_ELAPSED, gpuQueries[i]);
+            gpuQueryActive = i;
+            break;
+        }
+    }
     nx_crumb("swapped");
     nxFrame++;
+    if (statLastSwapped != 0) {
+        const unsigned long long swapTicks = swapEnd - swapStart;
+        statSwapTicks += swapTicks;
+        if (swapTicks > statSwapMaxTicks)
+            statSwapMaxTicks = swapTicks;
+        statCpuTicks += swapStart - statLastSwapped;
+        if (++statFrames >= kStatFrames) {
+            const double n = statFrames;
+            printf("[NxFrame] %d frames at %dx%d: game %.1f ms, swap wait %.1f ms (max %.1f), "
+                   "GL calls %.0f, draws %.0f per frame\n",
+                    statFrames, (int) surfaceWidth, (int) surfaceHeight,
+                    armTicksToNs(statCpuTicks) / 1e6 / n, armTicksToNs(statSwapTicks) / 1e6 / n,
+                    armTicksToNs(statSwapMaxTicks) / 1e6, statGlCalls / n, statDraws / n);
+            printf("[NxGpu] GPU %.1f ms per frame (max %.1f, %d frames timed); per frame: %.1f texture uploads, "
+                   "%.1f buffer uploads, %.1f framebuffer binds, %.1f clears\n",
+                    statGpuFrames ? statGpuNs / 1e6 / statGpuFrames : 0.0, statGpuMaxNs / 1e6, statGpuFrames,
+                    statTexUploads / n, statBufUploads / n, statFboBinds / n, statClears / n);
+            printf("[NxGc] collections %lld, live %lld, last stop %.2f ms (max %.2f), last mark+sweep %.2f ms (max %.2f)\n",
+                    (long long) clearwingGcStats.collections, (long long) clearwingGcStats.liveObjects,
+                    clearwingGcStats.lastStopUs / 1e3, clearwingGcStats.maxStopUs / 1e3,
+                    clearwingGcStats.lastMarkSweepUs / 1e3, clearwingGcStats.maxMarkSweepUs / 1e3);
+            statGpuNs = statGpuMaxNs = 0;
+            statGpuFrames = 0;
+            statTexUploads = statBufUploads = statFboBinds = statClears = 0;
+            nxLogThreadLoad(statCpuTicks + statSwapTicks);
+            fflush(stdout);
+            statFrames = 0;
+            statGlCalls = statDraws = statSwapTicks = statSwapMaxTicks = statCpuTicks = 0;
+        }
+    } else {
+        statGlCalls = statDraws = 0;
+        statTexUploads = statBufUploads = statFboBinds = statClears = 0;
+    }
+    statLastSwapped = swapEnd;
     return appletMainLoop();
 }
 

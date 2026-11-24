@@ -24,6 +24,16 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior
 
 public class CPathfindingProcessor {
 	private static final Rectangle tempRect = new Rectangle();
+	private static final byte DIR_MASK = 0x0F;
+	private static final byte DIR_NONE = 0x08;
+	private static final byte FLAG_CLOSED = 0x10;
+	private static final byte FLAG_STATIC_KNOWN = 0x20;
+	private static final byte FLAG_STATIC_PASSABLE = 0x40;
+	private static final int[] DIR_DX = { -1, 0, 1, 1, 1, 0, -1, -1 };
+	private static final int[] DIR_DY = { 1, 1, 1, 0, -1, -1, -1, 0 };
+	private static final double SQRT2 = Math.sqrt(2.0);
+	private static final double[] DIR_LEN = { SQRT2, 1.0, SQRT2, 1.0, SQRT2, 1.0, SQRT2, 1.0 };
+
 	private final PathingGrid pathingGrid;
 	private final CWorldCollision worldCollision;
 	private final LinkedList<PathfindingJob> moveQueue = new LinkedList<>();
@@ -31,18 +41,31 @@ public class CPathfindingProcessor {
 	private Node[][] nodes;
 	private Node[][] cornerNodes;
 	private final Node[] goalSet = new Node[4];
-	// Grid coordinates are shared; mutable search scores must survive other players' turns.
+	// Retained empty map for checkpoint field compatibility.
 	private final Map<Node, Node> searchNodes = new IdentityHashMap<>();
-
-	private Node nodeForJob(final Node coordinate) {
-		return this.searchNodes.computeIfAbsent(coordinate, node -> new Node(node.point));
-	}
 	private int goals = 0;
 	private final AtomicInteger sharedJobId;
 	private int pathfindJobId = 0;
 	private int totalIterations = 0;
 	private int totalJobLoops = 0;
 	private final int pathingGridCellCount;
+
+	// warsmash-nx: lazy primitive A* scratch buffers (transient so MissionStateFingerprint skips them)
+	private transient int[] cellStamp;
+	private transient double[] cellG;
+	private transient int[] cellCameFrom;
+	private transient byte[] cellFlags;
+	private transient int searchStamp = 0;
+	private transient int[] heapCells;
+	private transient double[] heapF;
+	private transient int heapSize = 0;
+	private transient final int[] goalCellIdx = new int[9];
+	private transient final float[] goalWorldX = new float[9];
+	private transient final float[] goalWorldY = new float[9];
+	private transient int activeGoalCount = 0;
+	private transient int bestFallbackCell = -1;
+	private transient float bestFallbackH = Float.POSITIVE_INFINITY;
+	private transient float startFallbackH = Float.POSITIVE_INFINITY;
 
 	public CPathfindingProcessor(final PathingGrid pathingGrid, final CWorldCollision worldCollision) {
 		this(pathingGrid, worldCollision, createNodes(pathingGrid), createCornerNodes(pathingGrid), new AtomicInteger());
@@ -56,6 +79,83 @@ public class CPathfindingProcessor {
 		this.cornerNodes = cornerNodes;
 		this.sharedJobId = sharedJobId;
 		this.pathingGridCellCount = pathingGrid.getWidth() * pathingGrid.getHeight();
+	}
+
+	private void ensureSearchBuffers() {
+		final int maxCells = (this.pathingGrid.getWidth() + 1) * (this.pathingGrid.getHeight() + 1);
+		if ((this.cellStamp == null) || (this.cellStamp.length < maxCells)) {
+			this.cellStamp = new int[maxCells];
+			this.cellG = new double[maxCells];
+			this.cellCameFrom = new int[maxCells];
+			this.cellFlags = new byte[maxCells];
+		}
+		if (this.heapCells == null) {
+			this.heapCells = new int[1024];
+			this.heapF = new double[1024];
+		}
+	}
+
+	private int nextSearchStamp() {
+		int s = ++this.searchStamp;
+		if (s == 0) {
+			Arrays.fill(this.cellStamp, 0);
+			s = 1;
+			this.searchStamp = 1;
+		}
+		return s;
+	}
+
+	private void heapPush(final int cellIdx, final double f) {
+		int i = this.heapSize++;
+		if (i >= this.heapCells.length) {
+			final int newCap = this.heapCells.length * 2;
+			this.heapCells = Arrays.copyOf(this.heapCells, newCap);
+			this.heapF = Arrays.copyOf(this.heapF, newCap);
+		}
+		final int[] cells = this.heapCells;
+		final double[] fs = this.heapF;
+		while (i > 0) {
+			final int parent = (i - 1) >>> 1;
+			if (f >= fs[parent]) {
+				break;
+			}
+			cells[i] = cells[parent];
+			fs[i] = fs[parent];
+			i = parent;
+		}
+		cells[i] = cellIdx;
+		fs[i] = f;
+	}
+
+	private int heapPop() {
+		final int[] cells = this.heapCells;
+		final double[] fs = this.heapF;
+		final int result = cells[0];
+		final int n = --this.heapSize;
+		if (n > 0) {
+			final int lastCell = cells[n];
+			final double lastF = fs[n];
+			int i = 0;
+			final int half = n >>> 1;
+			while (i < half) {
+				int child = (i << 1) + 1;
+				final int right = child + 1;
+				double childF = fs[child];
+				if ((right < n) && (fs[right] < childF)) {
+					child = right;
+					childF = fs[right];
+				}
+				if (lastF <= childF) {
+					break;
+				}
+				cells[i] = cells[child];
+				fs[i] = childF;
+				i = child;
+			}
+			cells[i] = lastCell;
+			fs[i] = lastF;
+		}
+		return result;
 	}
 
 	public static Node[][] createNodes(final PathingGrid pathingGrid) {
@@ -104,31 +204,44 @@ public class CPathfindingProcessor {
 	}
 
 	public void removeFromPathfindingQueue(final CBehaviorMove behaviorMove) {
-		// TODO because of silly java things, this remove is O(N) for now,
-		// we could do some refactors to make it O(1) but do we care?
 		final Iterator<PathfindingJob> iterator = this.moveQueue.iterator();
 		while (iterator.hasNext()) {
 			final PathfindingJob job = iterator.next();
 			if (job.queueItem == behaviorMove) {
 				iterator.remove();
-				NxPathFallback.forget(job); // warsmash-nx
 			}
 		}
-
 	}
 
 	private boolean pathableBetween(final CUnit ignoreIntersectionsWithThisUnit,
 			final CUnit ignoreIntersectionsWithThisSecondUnit, final float startX, final float startY,
 			final PathingGrid.MovementType movementType, final float collisionSize, final float x, final float y) {
-		return this.pathingGrid.isPathable(x, y, movementType, collisionSize)
-				&& this.pathingGrid.isPathable(startX, y, movementType, collisionSize)
-				&& this.pathingGrid.isPathable(x, startY, movementType, collisionSize)
-				&& isPathableDynamically(x, y, ignoreIntersectionsWithThisUnit, ignoreIntersectionsWithThisSecondUnit,
-						movementType)
-				&& isPathableDynamically(x, startY, ignoreIntersectionsWithThisUnit,
-						ignoreIntersectionsWithThisSecondUnit, movementType)
-				&& isPathableDynamically(startX, y, ignoreIntersectionsWithThisUnit,
-						ignoreIntersectionsWithThisSecondUnit, movementType);
+		if (!this.pathingGrid.isPathable(x, y, movementType, collisionSize)) {
+			return false;
+		}
+		if (startX != x) {
+			if (!this.pathingGrid.isPathable(startX, y, movementType, collisionSize)) {
+				return false;
+			}
+		}
+		if (startY != y) {
+			if (!this.pathingGrid.isPathable(x, startY, movementType, collisionSize)) {
+				return false;
+			}
+		}
+		if (!isPathableDynamically(x, y, ignoreIntersectionsWithThisUnit, ignoreIntersectionsWithThisSecondUnit,
+				movementType)) {
+			return false;
+		}
+		if ((startY != y) && !isPathableDynamically(x, startY, ignoreIntersectionsWithThisUnit,
+				ignoreIntersectionsWithThisSecondUnit, movementType)) {
+			return false;
+		}
+		if ((startX != x) && !isPathableDynamically(startX, y, ignoreIntersectionsWithThisUnit,
+				ignoreIntersectionsWithThisSecondUnit, movementType)) {
+			return false;
+		}
+		return true;
 	}
 
 	private boolean isPathableDynamically(final float x, final float y, final CUnit ignoreIntersectionsWithThisUnit,
@@ -149,25 +262,63 @@ public class CPathfindingProcessor {
 		return n.g;
 	}
 
-	private boolean isGoal(final Node n) {
-		for (int i = 0; i < this.goals; i++) {
-			if (n == this.goalSet[i]) {
+	public float h(final Node n) {
+		return heuristicWorld(n.point.x, n.point.y);
+	}
+
+	private float heuristicWorld(final float x, final float y) {
+		float bestDistSq = 0f;
+		final int count = this.activeGoalCount;
+		final float[] gx = this.goalWorldX;
+		final float[] gy = this.goalWorldY;
+		for (int i = 0; i < count; i++) {
+			final float dx = x - gx[i];
+			final float dy = y - gy[i];
+			final float distSq = (dx * dx) + (dy * dy);
+			if (distSq > bestDistSq) {
+				bestDistSq = distSq;
+			}
+		}
+		// warsmash-nx: mildly weighted A* (paths at most 20% longer, far fewer cells searched on long trips)
+		return (float) Math.sqrt(bestDistSq) * 1.2f;
+	}
+
+	private boolean isGoalCell(final int cellIdx) {
+		final int count = this.activeGoalCount;
+		final int[] gIdx = this.goalCellIdx;
+		for (int i = 0; i < count; i++) {
+			if (gIdx[i] == cellIdx) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	public float h(final Node n) {
-		float bestDistance = 0;
-		for (int i = 0; i < this.goals; i++) {
-			final float possibleDistance = (float) n.point.distance(this.goalSet[i].point);
-			if (possibleDistance > bestDistance) {
-				bestDistance = possibleDistance; // always overestimate
-			}
+	private boolean checkStaticPathableCached(final int idx, final int stamp, final float x, final float y,
+			final MovementType movementType, final float collisionSize) {
+		final int[] stamps = this.cellStamp;
+		final byte[] flags = this.cellFlags;
+		if (stamps[idx] != stamp) {
+			stamps[idx] = stamp;
+			this.cellG[idx] = Double.POSITIVE_INFINITY;
+			this.cellCameFrom[idx] = -1;
+			final boolean ok = this.pathingGrid.isPathable(x, y, movementType, collisionSize);
+			flags[idx] = (byte) (DIR_NONE | FLAG_STATIC_KNOWN | (ok ? FLAG_STATIC_PASSABLE : 0));
+			return ok;
 		}
-		// warsmash-nx: mildly weighted A* (paths at most 20% longer, far fewer cells searched on long trips)
-		return bestDistance * 1.2f;
+		final byte f = flags[idx];
+		if ((f & FLAG_STATIC_KNOWN) != 0) {
+			return (f & FLAG_STATIC_PASSABLE) != 0;
+		}
+		final boolean ok = this.pathingGrid.isPathable(x, y, movementType, collisionSize);
+		flags[idx] = (byte) (f | FLAG_STATIC_KNOWN | (ok ? FLAG_STATIC_PASSABLE : 0));
+		return ok;
+	}
+
+	private Point2D.Float pointForCell(final PathfindingJob job, final int cellIdx, final int stride) {
+		final int cy = cellIdx / stride;
+		final int cx = cellIdx - (cy * stride);
+		return job.searchGraph[cy][cx].point;
 	}
 
 	public static final class Node {
@@ -180,16 +331,6 @@ public class CPathfindingProcessor {
 
 		private Node(final Point2D.Float point) {
 			this.point = point;
-		}
-
-		private void touch(final int pathfindJobId) {
-			if (pathfindJobId != this.pathfindJobId) {
-				this.g = Float.POSITIVE_INFINITY;
-				this.f = Float.POSITIVE_INFINITY;
-				this.cameFrom = null;
-				this.cameFromDirection = null;
-				this.pathfindJobId = pathfindJobId;
-			}
 		}
 	}
 
@@ -248,20 +389,46 @@ public class CPathfindingProcessor {
 	 * a burst of path requests is spread over more ticks instead of stalling frames.
 	 */
 	public static int WORK_BUDGET_PER_TICK = 1500;
+	/** NXSTAT temporary PC statistics (env NX_PATHSTAT). */
+	static final boolean NXSTAT = System.getenv("NX_PATHSTAT") != null;
+	static int nxstatTicks, nxstatJobs, nxstatIters, nxstatBudgetTicks, nxstatPartial, nxstatQueueMax;
+	static final java.util.Map<String, Integer> nxstatWho = new java.util.HashMap<>();
 
 	public void update(final CSimulation simulation) {
+		if (NXSTAT) {
+			nxstatTicks++;
+			nxstatQueueMax = Math.max(nxstatQueueMax, this.moveQueue.size());
+			if (nxstatTicks % 400 == 0) {
+				System.out.println("NXSTAT path: per tick jobs " + (nxstatJobs / 400f) + " iterations " + (nxstatIters / 400f)
+						+ " budget-hit ticks " + nxstatBudgetTicks + "/400 partial " + nxstatPartial + " queue max " + nxstatQueueMax
+						+ " who " + nxstatWho);
+				nxstatJobs = nxstatIters = nxstatBudgetTicks = nxstatPartial = nxstatQueueMax = 0;
+				nxstatWho.clear();
+			}
+		}
+		if (this.moveQueue.isEmpty()) {
+			return;
+		}
+		ensureSearchBuffers();
+		final int pathW = this.pathingGrid.getWidth();
+		final int pathH = this.pathingGrid.getHeight();
+		final float offX = this.pathingGrid.getCenterOffsetX();
+		final float offY = this.pathingGrid.getCenterOffsetY();
 		int workIterations = 0;
 		JobsLoop: while (!this.moveQueue.isEmpty()) {
 			this.totalJobLoops++;
 			final PathfindingJob job = this.moveQueue.peek();
 			tempRect.set(0, 0, job.collisionSize * 2, job.collisionSize * 2);
 			if (!job.jobStarted) {
-				this.searchNodes.clear();
 				this.pathfindJobId = this.sharedJobId.incrementAndGet();
 				this.totalIterations = 0;
 				this.totalJobLoops = 0;
 				job.jobStarted = true;
-				NxPathFallback.forget(job);
+				if (NXSTAT) {
+					nxstatJobs++;
+					final String who = CUnit.maybeMeaningfulName(job.ignoreIntersectionsWithThisUnit);
+					nxstatWho.merge(who, 1, Integer::sum);
+				}
 				if (WarsmashConstants.ENABLE_DEBUG) System.out.println("starting job with smoothing=" + job.allowSmoothing);
 				workIterations += 5; // setup of job predicted cost
 				job.goalX = job.goal.x;
@@ -279,7 +446,8 @@ public class CPathfindingProcessor {
 					this.moveQueue.poll();
 					continue JobsLoop;
 				}
-				if (isCollisionSizeBetterSuitedForCorners(job.collisionSize)) {
+				final boolean useCorners = isCollisionSizeBetterSuitedForCorners(job.collisionSize);
+				if (useCorners) {
 					job.searchGraph = this.cornerNodes;
 					job.gridMapping = GridMapping.CORNERS;
 					if (WarsmashConstants.ENABLE_DEBUG) System.out.println("using corners");
@@ -289,43 +457,56 @@ public class CPathfindingProcessor {
 					job.gridMapping = GridMapping.CELLS;
 					if (WarsmashConstants.ENABLE_DEBUG) System.out.println("using cells");
 				}
+				final int stride = job.searchGraph[0].length;
+				final int graphH = job.searchGraph.length;
+				final float baseX = useCorners ? offX : (offX + 16f);
+				final float baseY = useCorners ? offY : (offY + 16f);
+
+				final int stamp = nextSearchStamp();
+				this.heapSize = 0;
+				this.bestFallbackCell = -1;
+				this.bestFallbackH = Float.POSITIVE_INFINITY;
+
 				final int goalCellY = job.gridMapping.getY(this.pathingGrid, job.goalY);
 				final int goalCellX = job.gridMapping.getX(this.pathingGrid, job.goalX);
-				final Node mostLikelyGoal = nodeForJob(job.searchGraph[goalCellY][goalCellX]);
-				mostLikelyGoal.touch(this.pathfindJobId);
-				final double bestGoalDistance = mostLikelyGoal.point.distance(job.goalX, job.goalY);
-				Arrays.fill(this.goalSet, null);
-				this.goals = 0;
+				final float likelyGoalX = (goalCellX * 32f) + baseX;
+				final float likelyGoalY = (goalCellY * 32f) + baseY;
+				final float dgx = likelyGoalX - job.goalX;
+				final float dgy = likelyGoalY - job.goalY;
+				final float bestGoalDistSq = (dgx * dgx) + (dgy * dgy);
+				this.activeGoalCount = 0;
 				for (int i = goalCellX - 1; i <= (goalCellX + 1); i++) {
 					for (int j = goalCellY - 1; j <= (goalCellY + 1); j++) {
-						if ((j >= 0) && (j < job.searchGraph.length)) {
-							if ((i >= 0) && (i < job.searchGraph[j].length)) {
-								final Node possibleGoal = nodeForJob(job.searchGraph[j][i]);
-								possibleGoal.touch(this.pathfindJobId);
-								if (possibleGoal.point.distance(job.goalX, job.goalY) <= bestGoalDistance) {
-									this.goalSet[this.goals++] = possibleGoal;
+						if ((j >= 0) && (j < graphH) && (i >= 0) && (i < stride)) {
+							final float px = (i * 32f) + baseX;
+							final float py = (j * 32f) + baseY;
+							final float dx = px - job.goalX;
+							final float dy = py - job.goalY;
+							if (((dx * dx) + (dy * dy)) <= bestGoalDistSq + 1e-3f) {
+								final int gCount = this.activeGoalCount;
+								if (gCount < this.goalCellIdx.length) {
+									this.goalCellIdx[gCount] = (j * stride) + i;
+									this.goalWorldX[gCount] = px;
+									this.goalWorldY[gCount] = py;
+									this.activeGoalCount = gCount + 1;
 								}
 							}
 						}
 					}
 				}
+				this.goals = this.activeGoalCount;
+
 				final int startGridY = job.gridMapping.getY(this.pathingGrid, job.startY);
 				final int startGridX = job.gridMapping.getX(this.pathingGrid, job.startX);
-				job.openSet = new PriorityQueue<>(new Comparator<Node>() {
-					@Override
-					public int compare(final Node a, final Node b) {
-						// warsmash-nx: the stored f (g + h), not h recomputed on every heap comparison
-						return Double.compare(a.f, b.f);
-					}
-				});
+				final float startCenterX = (startGridX * 32f) + baseX;
+				final float startCenterY = (startGridY * 32f) + baseY;
+				this.startFallbackH = heuristicWorld(startCenterX, startCenterY);
 
-				job.start = nodeForJob(job.searchGraph[startGridY][startGridX]);
-				job.start.touch(this.pathfindJobId);
-				if (job.startX > job.start.point.x) {
+				if (job.startX > startCenterX) {
 					job.startGridMinX = startGridX;
 					job.startGridMaxX = startGridX + 1;
 				}
-				else if (job.startX < job.start.point.x) {
+				else if (job.startX < startCenterX) {
 					job.startGridMinX = startGridX - 1;
 					job.startGridMaxX = startGridX;
 				}
@@ -333,11 +514,11 @@ public class CPathfindingProcessor {
 					job.startGridMinX = startGridX;
 					job.startGridMaxX = startGridX;
 				}
-				if (job.startY > job.start.point.y) {
+				if (job.startY > startCenterY) {
 					job.startGridMinY = startGridY;
 					job.startGridMaxY = startGridY + 1;
 				}
-				else if (job.startY < job.start.point.y) {
+				else if (job.startY < startCenterY) {
 					job.startGridMinY = startGridY - 1;
 					job.startGridMaxY = startGridY;
 				}
@@ -345,112 +526,139 @@ public class CPathfindingProcessor {
 					job.startGridMinY = startGridY;
 					job.startGridMaxY = startGridY;
 				}
+				final int[] stamps = this.cellStamp;
+				final double[] gArr = this.cellG;
+				final int[] cameArr = this.cellCameFrom;
+				final byte[] flagsArr = this.cellFlags;
 				for (int cellX = job.startGridMinX; cellX <= job.startGridMaxX; cellX++) {
 					for (int cellY = job.startGridMinY; cellY <= job.startGridMaxY; cellY++) {
-						if ((cellX >= 0) && (cellX < this.pathingGrid.getWidth()) && (cellY >= 0)
-								&& (cellY < this.pathingGrid.getHeight())) {
-							final Node possibleNode = nodeForJob(job.searchGraph[cellY][cellX]);
-							possibleNode.touch(this.pathfindJobId);
-							final float x = possibleNode.point.x;
-							final float y = possibleNode.point.y;
+						if ((cellX >= 0) && (cellX < pathW) && (cellY >= 0) && (cellY < pathH)) {
+							final int idx = (cellY * stride) + cellX;
+							final float x = (cellX * 32f) + baseX;
+							final float y = (cellY * 32f) + baseY;
+							final double tentativeScore;
 							if (pathableBetween(job.ignoreIntersectionsWithThisUnit,
 									job.ignoreIntersectionsWithThisSecondUnit, job.startX, job.startY, job.movementType,
 									job.collisionSize, x, y)) {
-
-								final double tentativeScore = possibleNode.point.distance(job.startX, job.startY);
-								possibleNode.g = tentativeScore;
-								possibleNode.f = tentativeScore + h(possibleNode);
-								job.openSet.add(possibleNode);
-
+								final float dx = x - job.startX;
+								final float dy = y - job.startY;
+								tentativeScore = Math.sqrt((dx * dx) + (dy * dy));
 							}
 							else {
-								final double tentativeScore = job.weightForHittingWalls;
-								possibleNode.g = tentativeScore;
-								possibleNode.f = tentativeScore + h(possibleNode);
-								job.openSet.add(possibleNode);
-
+								tentativeScore = job.weightForHittingWalls;
 							}
+							stamps[idx] = stamp;
+							gArr[idx] = tentativeScore;
+							cameArr[idx] = -1;
+							flagsArr[idx] = DIR_NONE;
+							heapPush(idx, tentativeScore + heuristicWorld(x, y));
 						}
 					}
 				}
 			}
 
-			while (!job.openSet.isEmpty()) {
-				Node current = job.openSet.poll();
-				current.touch(this.pathfindJobId);
-				// warsmash-nx: expand each cell once (stale duplicate heap entries are skipped)
-				final java.util.BitSet closedCells = NxPathFallback.closed(job);
-				final int currentCell = (job.gridMapping.getY(this.pathingGrid, current.point.y)
-						* job.searchGraph[0].length) + job.gridMapping.getX(this.pathingGrid, current.point.x);
-				if (closedCells.get(currentCell)) {
+			final boolean useCorners = (job.gridMapping == GridMapping.CORNERS);
+			final int stride = job.searchGraph[0].length;
+			final float baseX = useCorners ? offX : (offX + 16f);
+			final float baseY = useCorners ? offY : (offY + 16f);
+			final int stamp = this.searchStamp;
+			final int[] stamps = this.cellStamp;
+			final double[] gArr = this.cellG;
+			final int[] cameArr = this.cellCameFrom;
+			final byte[] flagsArr = this.cellFlags;
+			final float startX = job.startX;
+			final float startY = job.startY;
+			final CUnit ignoreUnit1 = job.ignoreIntersectionsWithThisUnit;
+			final CUnit ignoreUnit2 = job.ignoreIntersectionsWithThisSecondUnit;
+			final MovementType movementType = job.movementType;
+			final float collisionSize = job.collisionSize;
+			final float wallWeight = job.weightForHittingWalls;
+
+			while (this.heapSize > 0) {
+				final int currentIdx = heapPop();
+				if (stamps[currentIdx] != stamp) {
 					continue;
 				}
-				closedCells.set(currentCell);
-				// warsmash-nx: other units are only obstacles near the walker; far away they will have moved
-				final boolean nearStart = current.point.distance(job.startX, job.startY) < 640;
-				if (current.g < 1.0E8) {
-					// warsmash-nx: remember the closest node reached without crossing a wall
-					NxPathFallback.offer(job, current, h(current));
+				final byte curFlags = flagsArr[currentIdx];
+				if ((curFlags & FLAG_CLOSED) != 0) {
+					continue;
 				}
-				if (isGoal(current)) {
-					NxPathFallback.forget(job);
-					final LinkedList<Point2D.Float> totalPath = new LinkedList<>();
-					Direction lastCameFromDirection = null;
+				flagsArr[currentIdx] = (byte) (curFlags | FLAG_CLOSED);
 
-					if ((current.cameFrom != null)
-							&& pathableBetween(job.ignoreIntersectionsWithThisUnit,
-									job.ignoreIntersectionsWithThisSecondUnit, current.point.x, current.point.y,
-									job.movementType, job.collisionSize, job.goalX, job.goalY)
-							&& pathableBetween(job.ignoreIntersectionsWithThisUnit,
-									job.ignoreIntersectionsWithThisSecondUnit, current.cameFrom.point.x,
-									current.cameFrom.point.y, job.movementType, job.collisionSize, current.point.x,
-									current.point.y)
-							&& pathableBetween(job.ignoreIntersectionsWithThisUnit,
-									job.ignoreIntersectionsWithThisSecondUnit, current.cameFrom.point.x,
-									current.cameFrom.point.y, job.movementType, job.collisionSize, job.goalX, job.goalY)
-							&& job.allowSmoothing) {
-						// do some basic smoothing to walk straight to the goal if it is not obstructed,
-						// skipping the last grid location
-						totalPath.addFirst(job.goal);
-						current = current.cameFrom;
+				final int curY = currentIdx / stride;
+				final int curX = currentIdx - (curY * stride);
+				final float curWorldX = (curX * 32f) + baseX;
+				final float curWorldY = (curY * 32f) + baseY;
+				final double curG = gArr[currentIdx];
+				final int curDir = curFlags & DIR_MASK;
+
+				if (curG < 1.0E8) {
+					final float curH = heuristicWorld(curWorldX, curWorldY);
+					if (curH < this.bestFallbackH) {
+						this.bestFallbackH = curH;
+						this.bestFallbackCell = currentIdx;
+					}
+				}
+
+				if (isGoalCell(currentIdx)) {
+					final LinkedList<Point2D.Float> totalPath = new LinkedList<>();
+					int cur = currentIdx;
+					int prev = cameArr[cur];
+					if ((prev != -1) && job.allowSmoothing) {
+						final Point2D.Float curPt = pointForCell(job, cur, stride);
+						final Point2D.Float prevPt = pointForCell(job, prev, stride);
+						if (pathableBetween(ignoreUnit1, ignoreUnit2, curPt.x, curPt.y, movementType, collisionSize,
+								job.goalX, job.goalY)
+								&& pathableBetween(ignoreUnit1, ignoreUnit2, prevPt.x, prevPt.y, movementType,
+										collisionSize, curPt.x, curPt.y)
+								&& pathableBetween(ignoreUnit1, ignoreUnit2, prevPt.x, prevPt.y, movementType,
+										collisionSize, job.goalX, job.goalY)) {
+							totalPath.addFirst(job.goal);
+							cur = prev;
+						}
+						else {
+							totalPath.addFirst(job.goal);
+							totalPath.addFirst(curPt);
+						}
 					}
 					else {
 						totalPath.addFirst(job.goal);
-						totalPath.addFirst(current.point);
+						totalPath.addFirst(pointForCell(job, cur, stride));
 					}
-					lastCameFromDirection = current.cameFromDirection;
-					Node lastNode = null;
+					int lastDir = flagsArr[cur] & DIR_MASK;
+					int lastCell = -1;
 					int stepsBackward = 0;
-					while (current.cameFrom != null) {
-						lastNode = current;
-						current = current.cameFrom;
-						if ((lastCameFromDirection == null) || (current.cameFromDirection != lastCameFromDirection)
-								|| (current.cameFromDirection == null)) {
-							if ((current.cameFromDirection != null) || (lastNode == null)
-									|| !pathableBetween(job.ignoreIntersectionsWithThisUnit,
-											job.ignoreIntersectionsWithThisSecondUnit, job.startX, job.startY,
-											job.movementType, job.collisionSize, current.point.x, current.point.y)
-									|| !pathableBetween(job.ignoreIntersectionsWithThisUnit,
-											job.ignoreIntersectionsWithThisSecondUnit, current.point.x, current.point.y,
-											job.movementType, job.collisionSize, lastNode.point.x, lastNode.point.y)
-									|| !pathableBetween(job.ignoreIntersectionsWithThisUnit,
-											job.ignoreIntersectionsWithThisSecondUnit, job.startX, job.startY,
-											job.movementType, job.collisionSize, lastNode.point.x, lastNode.point.y)
-									|| !job.allowSmoothing) {
-								// Add the point if it's not the first one, or if we can only complete
-								// the journey by specifically walking to the first one
-								totalPath.addFirst(current.point);
-								lastCameFromDirection = current.cameFromDirection;
+					while (cameArr[cur] != -1) {
+						lastCell = cur;
+						cur = cameArr[cur];
+						final int dir = flagsArr[cur] & DIR_MASK;
+						if ((lastDir == DIR_NONE) || (dir != lastDir) || (dir == DIR_NONE)) {
+							final Point2D.Float curPt = pointForCell(job, cur, stride);
+							boolean addPoint = true;
+							if ((dir == DIR_NONE) && (lastCell != -1) && job.allowSmoothing) {
+								final Point2D.Float lastPt = pointForCell(job, lastCell, stride);
+								if (pathableBetween(ignoreUnit1, ignoreUnit2, startX, startY, movementType,
+										collisionSize, curPt.x, curPt.y)
+										&& pathableBetween(ignoreUnit1, ignoreUnit2, curPt.x, curPt.y, movementType,
+												collisionSize, lastPt.x, lastPt.y)
+										&& pathableBetween(ignoreUnit1, ignoreUnit2, startX, startY, movementType,
+												collisionSize, lastPt.x, lastPt.y)) {
+									addPoint = false;
+								}
+							}
+							if (addPoint) {
+								totalPath.addFirst(curPt);
+								lastDir = dir;
 							}
 						}
 						if (stepsBackward > this.pathingGridCellCount) {
 							new IllegalStateException(
 									"PATHING SYSTEM ERROR: The path finding algorithm hit an infinite cycle at or near pt: "
-											+ current.cameFrom.point
+											+ pointForCell(job, cameArr[cur], stride)
 											+ ".\nThis means the A* search algorithm heuristic 'admissable' constraint was probably violated.\n\nUnit1:"
-											+ CUnit.maybeMeaningfulName(job.ignoreIntersectionsWithThisUnit)
+											+ CUnit.maybeMeaningfulName(ignoreUnit1)
 											+ "\nUnit2:"
-											+ CUnit.maybeMeaningfulName(job.ignoreIntersectionsWithThisSecondUnit))
+											+ CUnit.maybeMeaningfulName(ignoreUnit2))
 									.printStackTrace();
 							totalPath.clear();
 							break;
@@ -464,60 +672,87 @@ public class CPathfindingProcessor {
 					continue JobsLoop;
 				}
 
-				for (final Direction direction : Direction.VALUES) {
-					final float x = current.point.x + (direction.xOffset * 32);
-					final float y = current.point.y + (direction.yOffset * 32);
-					if (this.pathingGrid.contains(x, y)) {
-						double turnCost;
-						if ((current.cameFromDirection != null) && (direction != current.cameFromDirection)) {
-							turnCost = 0.25;
+				// warsmash-nx: other units are only obstacles near the walker; far away they will have moved
+				final float dsx = curWorldX - startX;
+				final float dsy = curWorldY - startY;
+				final boolean nearStart = ((dsx * dsx) + (dsy * dsy)) < (640f * 640f);
+
+				for (int d = 0; d < 8; d++) {
+					final int dx = DIR_DX[d];
+					final int dy = DIR_DY[d];
+					final int nx = curX + dx;
+					final int ny = curY + dy;
+					if ((nx < 0) || (nx >= pathW) || (ny < 0) || (ny >= pathH)) {
+						continue;
+					}
+					final int nIdx = (ny * stride) + nx;
+					if ((stamps[nIdx] == stamp) && ((flagsArr[nIdx] & FLAG_CLOSED) != 0)) {
+						continue;
+					}
+					final float nxWorld = (nx * 32f) + baseX;
+					final float nyWorld = (ny * 32f) + baseY;
+					final double dirLen = DIR_LEN[d];
+					final double turnCost = ((curDir != DIR_NONE) && (d != curDir)) ? 0.25 : 0.0;
+					double tentativeScore = curG + ((dirLen + turnCost) * 32.0);
+
+					final boolean passable;
+					if (nearStart) {
+						boolean ok = checkStaticPathableCached(nIdx, stamp, nxWorld, nyWorld, movementType,
+								collisionSize);
+						if (ok && (dx != 0) && (dy != 0)) {
+							ok = checkStaticPathableCached((ny * stride) + curX, stamp, curWorldX, nyWorld,
+									movementType, collisionSize)
+									&& checkStaticPathableCached((curY * stride) + nx, stamp, nxWorld, curWorldY,
+											movementType, collisionSize);
 						}
-						else {
-							turnCost = 0;
+						if (ok) {
+							ok = isPathableDynamically(nxWorld, nyWorld, ignoreUnit1, ignoreUnit2, movementType);
+							if (ok && (dx != 0) && (dy != 0)) {
+								ok = isPathableDynamically(nxWorld, curWorldY, ignoreUnit1, ignoreUnit2, movementType)
+										&& isPathableDynamically(curWorldX, nyWorld, ignoreUnit1, ignoreUnit2,
+												movementType);
+							}
 						}
-						double tentativeScore = current.g + ((direction.length + turnCost) * 32);
-						final boolean passable = nearStart
-								? pathableBetween(job.ignoreIntersectionsWithThisUnit,
-										job.ignoreIntersectionsWithThisSecondUnit, current.point.x, current.point.y,
-										job.movementType, job.collisionSize, x, y)
-								: (NxPathFallback.staticPathable(job,
-										(job.gridMapping.getY(this.pathingGrid, y) * job.searchGraph[0].length)
-												+ job.gridMapping.getX(this.pathingGrid, x),
-										this.pathingGrid, x, y, job.movementType, job.collisionSize)
-										&& NxPathFallback.staticPathable(job,
-												(job.gridMapping.getY(this.pathingGrid, y) * job.searchGraph[0].length)
-														+ job.gridMapping.getX(this.pathingGrid, current.point.x),
-												this.pathingGrid, current.point.x, y, job.movementType,
-												job.collisionSize)
-										&& NxPathFallback.staticPathable(job,
-												(job.gridMapping.getY(this.pathingGrid, current.point.y)
-														* job.searchGraph[0].length)
-														+ job.gridMapping.getX(this.pathingGrid, x),
-												this.pathingGrid, x, current.point.y, job.movementType,
-												job.collisionSize));
-						if (!passable) {
-							tentativeScore += (direction.length) * job.weightForHittingWalls;
+						passable = ok;
+					}
+					else {
+						boolean ok = checkStaticPathableCached(nIdx, stamp, nxWorld, nyWorld, movementType,
+								collisionSize);
+						if (ok && (dx != 0) && (dy != 0)) {
+							ok = checkStaticPathableCached((ny * stride) + curX, stamp, curWorldX, nyWorld,
+									movementType, collisionSize)
+									&& checkStaticPathableCached((curY * stride) + nx, stamp, nxWorld, curWorldY,
+											movementType, collisionSize);
 						}
-						final Node neighbor = nodeForJob(job.searchGraph[job.gridMapping.getY(this.pathingGrid, y)][job.gridMapping
-								.getX(this.pathingGrid, x)]);
-						neighbor.touch(this.pathfindJobId);
-						if (tentativeScore < neighbor.g) {
-							neighbor.cameFrom = current;
-							neighbor.cameFromDirection = direction;
-							neighbor.g = tentativeScore;
-							neighbor.f = tentativeScore + h(neighbor);
-							// warsmash-nx: re-add (a heap with a changed key is not re-sorted; the closed set
-							// skips the stale entry) instead of an O(n) contains scan
-							job.openSet.add(neighbor);
-						}
+						passable = ok;
+					}
+					if (!passable) {
+						tentativeScore += dirLen * wallWeight;
+					}
+
+					if (stamps[nIdx] != stamp) {
+						stamps[nIdx] = stamp;
+						gArr[nIdx] = tentativeScore;
+						cameArr[nIdx] = currentIdx;
+						flagsArr[nIdx] = (byte) d;
+						heapPush(nIdx, tentativeScore + heuristicWorld(nxWorld, nyWorld));
+					}
+					else if (tentativeScore < gArr[nIdx]) {
+						gArr[nIdx] = tentativeScore;
+						cameArr[nIdx] = currentIdx;
+						flagsArr[nIdx] = (byte) ((flagsArr[nIdx] & ~DIR_MASK) | d);
+						heapPush(nIdx, tentativeScore + heuristicWorld(nxWorld, nyWorld));
 					}
 				}
+
 				workIterations++;
+				if (NXSTAT) nxstatIters++;
 				this.totalIterations++;
 				if (this.totalIterations > 20000) {
 					break;
 				}
 				if (workIterations >= WORK_BUDGET_PER_TICK) {
+					if (NXSTAT) nxstatBudgetTicks++;
 					// breaking jobs loop will implicitly exit without calling pathFound() below
 					break JobsLoop;
 				}
@@ -525,16 +760,20 @@ public class CPathfindingProcessor {
 			// warsmash-nx: no path to the goal (unreachable, or the iteration cap on a long trip): walk to the
 			// closest point the search reached, as Warcraft III does, instead of not moving at all
 			final LinkedList<Point2D.Float> partialPath = new LinkedList<>();
-			Node closest = (Node) NxPathFallback.take(job, job.start == null ? 0 : h(job.start));
-			Direction partialDirection = null;
+			int closest = ((this.bestFallbackCell != -1) && (this.bestFallbackH <= (this.startFallbackH - 96f)))
+					? this.bestFallbackCell
+					: -1;
+			int partialDir = DIR_NONE;
 			int partialSteps = 0;
-			while ((closest != null) && (closest.cameFrom != null) && (partialSteps++ < this.pathingGridCellCount)) {
-				if (partialPath.isEmpty() || (closest.cameFromDirection != partialDirection)) {
-					partialPath.addFirst(closest.point);
-					partialDirection = closest.cameFromDirection;
+			while ((closest != -1) && (cameArr[closest] != -1) && (partialSteps++ < this.pathingGridCellCount)) {
+				final int dir = flagsArr[closest] & DIR_MASK;
+				if (partialPath.isEmpty() || (dir != partialDir)) {
+					partialPath.addFirst(pointForCell(job, closest, stride));
+					partialDir = dir;
 				}
-				closest = closest.cameFrom;
+				closest = cameArr[closest];
 			}
+			if (NXSTAT) nxstatPartial++;
 			job.queueItem.pathFound(partialPath, simulation);
 			this.moveQueue.poll();
 			if (WarsmashConstants.ENABLE_DEBUG) System.out.println("Task " + this.pathfindJobId + " took " + this.totalIterations + " iterations and "

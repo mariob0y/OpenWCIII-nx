@@ -79,12 +79,13 @@ public class Grid {
 		final Bounds bounds = instance.model.bounds;
 		final float x = (upcomingX + bounds.x) - this.x;
 		final float y = (upcomingY + bounds.y) - this.y;
-		final float r = bounds.r;
 		final Vector3 s = instance.worldScale;
-		int left = (int) (Math.floor((x - (r * s.x)) / this.cellWidth));
-		int right = (int) (Math.floor((x + (r * s.x)) / this.cellWidth));
-		int bottom = (int) (Math.floor((y - (r * s.y)) / this.cellDepth));
-		int top = (int) (Math.floor((y + (r * s.y)) / this.cellDepth));
+		// warsmash-nx: the radius isVisible uses (largest scale), not the x and y scales on their own
+		final float reach = bounds.r * Math.max(Math.abs(s.x), Math.max(Math.abs(s.y), Math.abs(s.z)));
+		int left = (int) (Math.floor((x - reach) / this.cellWidth));
+		int right = (int) (Math.floor((x + reach) / this.cellWidth));
+		int bottom = (int) (Math.floor((y - reach) / this.cellDepth));
+		int top = (int) (Math.floor((y + reach) / this.cellDepth));
 
 		if ((right < 0) || (left > (this.columns - 1)) || (top < 0) || (bottom > (this.rows - 1))) {
 			// The instance is outside of the grid, so remove it.
@@ -111,6 +112,18 @@ public class Grid {
 				instance.top = top;
 
 				this.add(instance);
+			}
+
+			// warsmash-nx: the cells' boxes hold the sphere at both heights isVisible may use
+			// (the world location, or the local one while the instance is dirty)
+			final float worldZ = instance.worldLocation.z;
+			final float localZ = instance.localLocation.z;
+			final float low = (Math.min(worldZ, localZ) + bounds.z) - reach;
+			final float high = Math.max(worldZ, localZ) + bounds.z + reach;
+			for (int row = bottom; row <= top; row++) {
+				for (int column = left; column <= right; column++) {
+					this.cells[(row * this.columns) + column].includeHeights(low, high);
+				}
 			}
 		}
 	}

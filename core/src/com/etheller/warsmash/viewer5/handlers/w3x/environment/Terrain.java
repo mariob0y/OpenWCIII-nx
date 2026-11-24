@@ -37,6 +37,7 @@ import com.etheller.warsmash.units.Element;
 import com.etheller.warsmash.util.ImageUtils.AnyExtensionImage;
 import com.etheller.warsmash.util.ImageUtils;
 import com.etheller.warsmash.util.RenderMathUtils;
+import com.etheller.warsmash.util.Vector4;
 import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.util.WorldEditStrings;
 import com.etheller.warsmash.viewer5.Camera;
@@ -103,6 +104,8 @@ public class Terrain {
 	private final int waterTextureCount;
 	private int cliffTexturesSize;
 	private final List<CliffMesh> cliffMeshes = new ArrayList<>();
+	/** warsmash-nx: the cliff meshes' instance buffers no longer match the cliffs (renderCliffs). */
+	private boolean cliffInstancesDirty = true;
 	private final Map<String, Integer> pathToCliff = new HashMap<>();
 	private final Map<String, Integer> groundTextureToId = new HashMap<>();
 	private final List<Integer> cliffToGroundTexture = new ArrayList<>();
@@ -154,6 +157,18 @@ public class Terrain {
 	private byte[] shadowData;
 	private CPlayerFogOfWar fogOfWarData;
 	private ByteBuffer visualFogData;
+	// warsmash-nx: visible tile range culling for ground and water instanced draws
+	private float minTerrainZ = -512f;
+	private float maxTerrainZ = 512f;
+	private boolean hasWater = false;
+	private int waterMinX = 0;
+	private int waterMinY = 0;
+	private int waterMaxX = -1;
+	private int waterMaxY = -1;
+	private int visTileMinX = 0;
+	private int visTileMinY = 0;
+	private int visTileMaxX = -1;
+	private int visTileMaxY = -1;
 
 	public Terrain(final War3MapW3e w3eFile, final War3MapWpm terrainPathing, final War3MapW3i w3iFile,
 			final WebGL webGL, final DataSource dataSource, final WorldEditStrings worldEditStrings,
@@ -301,13 +316,65 @@ public class Terrain {
 		this.waterExistsData = new byte[width * height];
 
 		updateGroundTextures(new Rectangle(0, 0, width - 1, height - 1));
+		float minZ = Float.POSITIVE_INFINITY;
+		float maxZ = Float.NEGATIVE_INFINITY;
+		int wMinX = width - 1;
+		int wMinY = height - 1;
+		int wMaxX = -1;
+		int wMaxY = -1;
 		for (int i = 0; i < width; i++) {
 			for (int j = 0; j < height; j++) {
-				this.groundCornerHeights[(j * width) + i] = this.corners[i][j].computeFinalGroundHeight();
-				this.waterExistsData[(j * width) + i] = (byte) this.corners[i][j].getWater();
+				final float cornerH = this.corners[i][j].computeFinalGroundHeight();
+				final byte water = (byte) this.corners[i][j].getWater();
+				final float waterH = this.corners[i][j].getWaterHeight();
+				this.groundCornerHeights[(j * width) + i] = cornerH;
+				this.waterExistsData[(j * width) + i] = water;
 				this.groundHeights[(j * width) + i] = this.corners[i][j].getGroundHeight();
-				this.waterHeights[(j * width) + i] = this.corners[i][j].getWaterHeight();
+				this.waterHeights[(j * width) + i] = waterH;
+				final float zWorld = cornerH * 128f;
+				if (zWorld < minZ) {
+					minZ = zWorld;
+				}
+				if (zWorld > maxZ) {
+					maxZ = zWorld;
+				}
+				if (water != 0) {
+					final float wWorld = (waterH + this.waterHeightOffset) * 128f;
+					if (wWorld < minZ) {
+						minZ = wWorld;
+					}
+					if (wWorld > maxZ) {
+						maxZ = wWorld;
+					}
+					final int tx0 = i > 0 ? i - 1 : 0;
+					final int tx1 = i < (width - 1) ? i : (width - 2);
+					final int ty0 = j > 0 ? j - 1 : 0;
+					final int ty1 = j < (height - 1) ? j : (height - 2);
+					if (tx0 < wMinX) {
+						wMinX = tx0;
+					}
+					if (tx1 > wMaxX) {
+						wMaxX = tx1;
+					}
+					if (ty0 < wMinY) {
+						wMinY = ty0;
+					}
+					if (ty1 > wMaxY) {
+						wMaxY = ty1;
+					}
+				}
 			}
+		}
+		if (minZ <= maxZ) {
+			this.minTerrainZ = minZ - 256f;
+			this.maxTerrainZ = maxZ + 256f;
+		}
+		if ((wMaxX >= wMinX) && (wMaxY >= wMinY)) {
+			this.hasWater = true;
+			this.waterMinX = wMinX;
+			this.waterMinY = wMinY;
+			this.waterMaxX = wMaxX;
+			this.waterMaxY = wMaxY;
 		}
 
 		final GL30 gl = Gdx.gl30;
@@ -502,6 +569,13 @@ public class Terrain {
 				final RenderCorner corner = this.corners[i][j];
 				final float newGroundCornerHeight = corner.computeFinalGroundHeight() + rampHeight;
 				this.groundCornerHeights[(j * this.columns) + i] = newGroundCornerHeight;
+				final float zWorld = newGroundCornerHeight * 128f;
+				if ((zWorld - 256f) < this.minTerrainZ) {
+					this.minTerrainZ = zWorld - 256f;
+				}
+				if ((zWorld + 256f) > this.maxTerrainZ) {
+					this.maxTerrainZ = zWorld + 256f;
+				}
 				corner.depth = corner.getWater() != 0
 						? (this.waterHeightOffset + corner.getWaterHeight()) - newGroundCornerHeight
 						: 0;
@@ -578,6 +652,7 @@ public class Terrain {
 	/// Function is a bit of a mess
 	/// Updates the cliff and ramp meshes for an area
 	private void updateCliffMeshes(final Rectangle area) throws IOException {
+		this.cliffInstancesDirty = true;
 		// Remove all existing cliff meshes in area
 		for (int i = this.cliffs.size(); i-- > 0;) {
 			final IVec3 pos = this.cliffs.get(i);
@@ -962,10 +1037,83 @@ public class Terrain {
 		}
 	}
 
+	private void computeVisibleTileRange() {
+		final int tilesX = this.columns - 1;
+		final int tilesY = this.rows - 1;
+		if ((tilesX <= 0) || (tilesY <= 0)) {
+			this.visTileMinX = 0;
+			this.visTileMinY = 0;
+			this.visTileMaxX = -1;
+			this.visTileMaxY = -1;
+			return;
+		}
+		final Vector4[] planes = this.camera.planes;
+		final float offX = this.centerOffset[0];
+		final float offY = this.centerOffset[1];
+		final float minZ = this.minTerrainZ;
+		final float maxZ = this.maxTerrainZ;
+		int minTx = tilesX;
+		int minTy = tilesY;
+		int maxTx = -1;
+		int maxTy = -1;
+		for (int cy = 0; cy < tilesY; cy += 8) {
+			final int cyEnd = (cy + 8) < tilesY ? (cy + 8) : tilesY;
+			final float minY = (cy * 128f) + offY;
+			final float maxY = (cyEnd * 128f) + offY;
+			for (int cx = 0; cx < tilesX; cx += 8) {
+				final int cxEnd = (cx + 8) < tilesX ? (cx + 8) : tilesX;
+				final float minX = (cx * 128f) + offX;
+				final float maxX = (cxEnd * 128f) + offX;
+				boolean visible = true;
+				for (int p = 0; p < 6; p++) {
+					final Vector4 plane = planes[p];
+					final float px = plane.x >= 0f ? maxX : minX;
+					final float py = plane.y >= 0f ? maxY : minY;
+					final float pz = plane.z >= 0f ? maxZ : minZ;
+					if (((plane.x * px) + (plane.y * py) + (plane.z * pz) + plane.w) < 0f) {
+						visible = false;
+						break;
+					}
+				}
+				if (visible) {
+					if (cx < minTx) {
+						minTx = cx;
+					}
+					if ((cxEnd - 1) > maxTx) {
+						maxTx = cxEnd - 1;
+					}
+					if (cy < minTy) {
+						minTy = cy;
+					}
+					if ((cyEnd - 1) > maxTy) {
+						maxTy = cyEnd - 1;
+					}
+				}
+			}
+		}
+		if ((maxTx < minTx) || (maxTy < minTy)) {
+			this.visTileMinX = 0;
+			this.visTileMinY = 0;
+			this.visTileMaxX = -1;
+			this.visTileMaxY = -1;
+			return;
+		}
+		this.visTileMinX = minTx > 0 ? (minTx - 1) : 0;
+		this.visTileMinY = minTy > 0 ? (minTy - 1) : 0;
+		this.visTileMaxX = (maxTx + 1) < tilesX ? (maxTx + 1) : (tilesX - 1);
+		this.visTileMaxY = (maxTy + 1) < tilesY ? (maxTy + 1) : (tilesY - 1);
+	}
+
 	public void renderGround(final DynamicShadowManager dynamicShadowManager) {
 		if (this.initShadowsFinished && this.shadowsEnabled != OptionsSettingsStore.get().isShadows()) {
 			reloadShadowDataToGPU();
 		}
+		computeVisibleTileRange();
+		if ((this.visTileMaxX < this.visTileMinX) || (this.visTileMaxY < this.visTileMinY)) {
+			return;
+		}
+		final int rangeW = (this.visTileMaxX - this.visTileMinX) + 1;
+		final int rangeH = (this.visTileMaxY - this.visTileMinY) + 1;
 		// Render tiles
 
 		this.webGL.useShaderProgram(this.groundShader);
@@ -973,8 +1121,8 @@ public class Terrain {
 		final GL30 gl = Gdx.gl30;
 		gl.glEnable(GL20.GL_CULL_FACE);
 		gl.glDisable(GL30.GL_BLEND);
-		gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA);
-		gl.glEnable(GL20.GL_DEPTH_TEST);
+		gl.glBlendFunc(GL30.GL_SRC_ALPHA, GL30.GL_ONE_MINUS_SRC_ALPHA);
+		gl.glEnable(GL30.GL_DEPTH_TEST);
 		gl.glDepthMask(true);
 
 		gl.glUniformMatrix4fv(this.groundShader.getUniformLocation("MVP"), 1, false,
@@ -987,6 +1135,8 @@ public class Terrain {
 		gl.glUniform1i(this.groundShader.getUniformLocation("shadowMap"), 20);
 		gl.glUniform1f(this.groundShader.getUniformLocation("centerOffsetX"), this.centerOffset[0]);
 		gl.glUniform1f(this.groundShader.getUniformLocation("centerOffsetY"), this.centerOffset[1]);
+		gl.glUniform4i(this.groundShader.getUniformLocation("u_tileRange"), this.visTileMinX, this.visTileMinY, rangeW,
+				0);
 
 		final W3xSceneLightManager lightManager = (W3xSceneLightManager) this.viewer.worldScene.getLightManager();
 		final DataTexture unitLightsTexture = lightManager.getTerrainLightsTexture();
@@ -1056,7 +1206,7 @@ public class Terrain {
 			Extensions.wireframeExtension.glPolygonMode(GL20.GL_FRONT_AND_BACK, Extensions.GL_LINE);
 		}
 		gl.glDrawElementsInstanced(GL30.GL_TRIANGLES, Shapes.INSTANCE.quadIndices.length * 3, GL30.GL_UNSIGNED_INT, 0,
-				(this.columns - 1) * (this.rows - 1));
+				rangeW * rangeH);
 		if (WIREFRAME_TERRAIN) {
 			Extensions.wireframeExtension.glPolygonMode(GL20.GL_FRONT_AND_BACK, Extensions.GL_FILL);
 		}
@@ -1127,6 +1277,18 @@ public class Terrain {
 	}
 
 	public void renderWater() {
+		if (!this.hasWater) {
+			return;
+		}
+		final int wMinX = this.visTileMinX > this.waterMinX ? this.visTileMinX : this.waterMinX;
+		final int wMinY = this.visTileMinY > this.waterMinY ? this.visTileMinY : this.waterMinY;
+		final int wMaxX = this.visTileMaxX < this.waterMaxX ? this.visTileMaxX : this.waterMaxX;
+		final int wMaxY = this.visTileMaxY < this.waterMaxY ? this.visTileMaxY : this.waterMaxY;
+		if ((wMaxX < wMinX) || (wMaxY < wMinY)) {
+			return;
+		}
+		final int wRangeW = (wMaxX - wMinX) + 1;
+		final int wRangeH = (wMaxY - wMinY) + 1;
 		// Render water
 		this.webGL.useShaderProgram(this.waterShader);
 
@@ -1146,6 +1308,7 @@ public class Terrain {
 		this.waterShader.setUniformf("centerOffsetX", this.centerOffset[0]);
 		this.waterShader.setUniformf("centerOffsetY", this.centerOffset[1]);
 		this.waterShader.setUniform4fv("mapBounds", this.shaderMapBounds, 0, 4);
+		gl.glUniform4i(this.waterShader.getUniformLocation("u_tileRange"), wMinX, wMinY, wRangeW, 0);
 
 		final W3xSceneLightManager lightManager = (W3xSceneLightManager) this.viewer.worldScene.getLightManager();
 		final DataTexture terrainLightsTexture = lightManager.getTerrainLightsTexture();
@@ -1181,14 +1344,24 @@ public class Terrain {
 
 		gl.glBindBuffer(GL30.GL_ELEMENT_ARRAY_BUFFER, Shapes.INSTANCE.indexBuffer);
 		gl.glDrawElementsInstanced(GL30.GL_TRIANGLES, Shapes.INSTANCE.quadIndices.length * 3, GL30.GL_UNSIGNED_INT, 0,
-				(this.columns - 1) * (this.rows - 1));
+				wRangeW * wRangeH);
 
 		gl.glEnable(GL30.GL_BLEND);
 	}
 
 	public void renderCliffs() {
 
-		// Render cliffs
+		// Render cliffs: the instances change only with the cliffs (updateCliffMeshes)
+		if (this.cliffInstancesDirty) {
+			queueCliffInstances();
+		}
+
+		this.webGL.useShaderProgram(this.cliffShader);
+		renderCliffMeshes();
+	}
+
+	private void queueCliffInstances() {
+		this.cliffInstancesDirty = false;
 		for (final IVec3 i : this.cliffs) {
 			final RenderCorner bottomLeft = this.corners[i.x][i.y];
 			final RenderCorner bottomRight = this.corners[i.x + 1][i.y];
@@ -1204,9 +1377,12 @@ public class Terrain {
 			fourComponentHeap[3] = bottomLeft.getCliffTexture();
 			this.cliffMeshes.get(i.z).renderQueue(fourComponentHeap);
 		}
+		for (final CliffMesh mesh : this.cliffMeshes) {
+			mesh.uploadQueue();
+		}
+	}
 
-		this.webGL.useShaderProgram(this.cliffShader);
-
+	private void renderCliffMeshes() {
 		final GL30 gl = Gdx.gl30;
 		gl.glDisable(GL30.GL_BLEND);
 
@@ -1776,6 +1952,8 @@ public class Terrain {
 	public void setFogOfWarData(CFogMaskSettings fogMaskSettings, final CPlayerFogOfWar fogOfWarData) {
 		this.fogOfWarData = fogOfWarData;
 		this.visualFogData = ByteBuffer.allocateDirect(fogOfWarData.getFogOfWarBuffer().capacity());
+		this.fogUploaded = false;
+		this.fogVisualInitialized = false;
 		reloadFogOfWarDataToGPU(fogMaskSettings);
 	}
 
@@ -1783,6 +1961,7 @@ public class Terrain {
 	private byte[] fogScratchState = new byte[0];
 	private byte[] fogScratchVisual = new byte[0];
 	private boolean fogUploaded;
+	private boolean fogVisualInitialized;
 	/** The fog state the settings make of each raw cell value (getFogStateFromSettings), per pass. */
 	private final byte[] fogLut = new byte[256];
 
@@ -1818,6 +1997,7 @@ public class Terrain {
 		if (this.fogScratchState.length < count) {
 			this.fogScratchState = new byte[count];
 			this.fogScratchVisual = new byte[count];
+			this.fogVisualInitialized = false;
 		}
 		final byte[] state = this.fogScratchState;
 		final byte[] visual = this.fogScratchVisual;
@@ -1828,15 +2008,31 @@ public class Terrain {
 		final ByteBuffer fogOfWarBuffer = this.fogOfWarData.getFogOfWarBuffer().duplicate();
 		fogOfWarBuffer.clear();
 		fogOfWarBuffer.get(state, 0, count);
-		final ByteBuffer visualFog = this.visualFogData.duplicate();
-		visualFog.clear();
-		visualFog.get(visual, 0, count);
+		if (!this.fogVisualInitialized) {
+			final ByteBuffer visualFog = this.visualFogData.duplicate();
+			visualFog.clear();
+			visualFog.get(visual, 0, count);
+			this.fogVisualInitialized = true;
+		}
 		boolean changed = false;
 		for (int i = 0; i < count; i++) {
 			final byte old = visual[i];
-			final byte faded = War3MapViewer.fadeLineOfSightColor(old, lut[state[i] & 0xFF]);
-			if (faded != old) {
-				visual[i] = faded;
+			final byte target = lut[state[i] & 0xFF];
+			if (old != target) {
+				final int prevValue = old & 0xFF;
+				final int newValue = target & 0xFF;
+				final int delta = newValue - prevValue;
+				final int nextValue;
+				if (delta > 9) {
+					nextValue = prevValue + 9;
+				}
+				else if (delta < -9) {
+					nextValue = prevValue - 9;
+				}
+				else {
+					nextValue = newValue;
+				}
+				visual[i] = (byte) nextValue;
 				changed = true;
 			}
 		}
@@ -1844,6 +2040,7 @@ public class Terrain {
 			return false;
 		}
 		this.fogUploaded = true;
+		final ByteBuffer visualFog = this.visualFogData.duplicate();
 		visualFog.clear();
 		visualFog.put(visual, 0, count);
 		gl.glBindTexture(GL30.GL_TEXTURE_2D, Terrain.this.fogOfWarMap);

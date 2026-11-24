@@ -5,7 +5,7 @@
         "com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds"
     ],
     "useStackTraces": true,
-    "useLineNumbers": true,
+    "useLineNumbers": false,
     "useValueChecks": true,
     "generateProjectFiles": false
 }

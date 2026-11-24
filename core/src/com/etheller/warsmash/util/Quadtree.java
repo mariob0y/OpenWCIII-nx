@@ -43,35 +43,54 @@ public class Quadtree<T> {
 	}
 
 	public boolean intersect(final Rectangle bounds, final QuadtreeIntersector<T> intersector) {
+		return intersectRect(bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height, intersector);
+	}
+
+	private boolean intersectRect(final float minX, final float minY, final float maxX, final float maxY,
+			final QuadtreeIntersector<T> intersector) {
 		if (this.leaf) {
-			for (int i = 0; i < this.nodes.size; i++) {
-				final Node<T> node = this.nodes.get(i);
-				if ((node != null) && node.bounds.overlaps(bounds)) {
-					if (intersector.onIntersect(node.object)) {
-						return true;
+			final Object[] items = this.nodes.items;
+			final int size = this.nodes.size;
+			for (int i = 0; i < size; i++) {
+				@SuppressWarnings("unchecked")
+				final Node<T> node = (Node<T>) items[i];
+				if (node != null) {
+					final Rectangle nb = node.bounds;
+					if ((nb.x < maxX) && ((nb.x + nb.width) > minX) && (nb.y < maxY) && ((nb.y + nb.height) > minY)) {
+						if (intersector.onIntersect(node.object)) {
+							return true;
+						}
 					}
 				}
 			}
 			return false;
 		}
 		else {
-			if (this.northeast.bounds.overlaps(bounds)) {
-				if (this.northeast.intersect(bounds, intersector)) {
+			final Quadtree<T> ne = this.northeast;
+			final Rectangle neb = ne.bounds;
+			if ((neb.x < maxX) && ((neb.x + neb.width) > minX) && (neb.y < maxY) && ((neb.y + neb.height) > minY)) {
+				if (ne.intersectRect(minX, minY, maxX, maxY, intersector)) {
 					return true;
 				}
 			}
-			if (this.northwest.bounds.overlaps(bounds)) {
-				if (this.northwest.intersect(bounds, intersector)) {
+			final Quadtree<T> nw = this.northwest;
+			final Rectangle nwb = nw.bounds;
+			if ((nwb.x < maxX) && ((nwb.x + nwb.width) > minX) && (nwb.y < maxY) && ((nwb.y + nwb.height) > minY)) {
+				if (nw.intersectRect(minX, minY, maxX, maxY, intersector)) {
 					return true;
 				}
 			}
-			if (this.southwest.bounds.overlaps(bounds)) {
-				if (this.southwest.intersect(bounds, intersector)) {
+			final Quadtree<T> sw = this.southwest;
+			final Rectangle swb = sw.bounds;
+			if ((swb.x < maxX) && ((swb.x + swb.width) > minX) && (swb.y < maxY) && ((swb.y + swb.height) > minY)) {
+				if (sw.intersectRect(minX, minY, maxX, maxY, intersector)) {
 					return true;
 				}
 			}
-			if (this.southeast.bounds.overlaps(bounds)) {
-				if (this.southeast.intersect(bounds, intersector)) {
+			final Quadtree<T> se = this.southeast;
+			final Rectangle seb = se.bounds;
+			if ((seb.x < maxX) && ((seb.x + seb.width) > minX) && (seb.y < maxY) && ((seb.y + seb.height) > minY)) {
+				if (se.intersectRect(minX, minY, maxX, maxY, intersector)) {
 					return true;
 				}
 			}
@@ -81,34 +100,48 @@ public class Quadtree<T> {
 
 	public boolean intersect(final float x, final float y, final QuadtreeIntersector<T> intersector) {
 		if (this.leaf) {
-			for (int i = 0; i < this.nodes.size; i++) {
-				final Node<T> node = this.nodes.get(i);
-				if ((node != null) && node.bounds.contains(x, y)) {
-					if (intersector.onIntersect(node.object)) {
-						return true;
+			final Object[] items = this.nodes.items;
+			final int size = this.nodes.size;
+			for (int i = 0; i < size; i++) {
+				@SuppressWarnings("unchecked")
+				final Node<T> node = (Node<T>) items[i];
+				if (node != null) {
+					final Rectangle nb = node.bounds;
+					if ((nb.x <= x) && ((nb.x + nb.width) >= x) && (nb.y <= y) && ((nb.y + nb.height) >= y)) {
+						if (intersector.onIntersect(node.object)) {
+							return true;
+						}
 					}
 				}
 			}
 			return false;
 		}
 		else {
-			if (this.northeast.bounds.contains(x, y)) {
-				if (this.northeast.intersect(x, y, intersector)) {
+			final Quadtree<T> ne = this.northeast;
+			final Rectangle neb = ne.bounds;
+			if ((neb.x <= x) && ((neb.x + neb.width) >= x) && (neb.y <= y) && ((neb.y + neb.height) >= y)) {
+				if (ne.intersect(x, y, intersector)) {
 					return true;
 				}
 			}
-			if (this.northwest.bounds.contains(x, y)) {
-				if (this.northwest.intersect(x, y, intersector)) {
+			final Quadtree<T> nw = this.northwest;
+			final Rectangle nwb = nw.bounds;
+			if ((nwb.x <= x) && ((nwb.x + nwb.width) >= x) && (nwb.y <= y) && ((nwb.y + nwb.height) >= y)) {
+				if (nw.intersect(x, y, intersector)) {
 					return true;
 				}
 			}
-			if (this.southwest.bounds.contains(x, y)) {
-				if (this.southwest.intersect(x, y, intersector)) {
+			final Quadtree<T> sw = this.southwest;
+			final Rectangle swb = sw.bounds;
+			if ((swb.x <= x) && ((swb.x + swb.width) >= x) && (swb.y <= y) && ((swb.y + swb.height) >= y)) {
+				if (sw.intersect(x, y, intersector)) {
 					return true;
 				}
 			}
-			if (this.southeast.bounds.contains(x, y)) {
-				if (this.southeast.intersect(x, y, intersector)) {
+			final Quadtree<T> se = this.southeast;
+			final Rectangle seb = se.bounds;
+			if ((seb.x <= x) && ((seb.x + seb.width) >= x) && (seb.y <= y) && ((seb.y + seb.height) >= y)) {
+				if (se.intersect(x, y, intersector)) {
 					return true;
 				}
 			}
@@ -250,8 +283,8 @@ public class Quadtree<T> {
 	}
 
 	private static final class Node<T> {
-		private final T object;
-		private final Rectangle bounds;
+		final T object;
+		final Rectangle bounds;
 
 		public Node(final T object, final Rectangle bounds) {
 			this.object = object;

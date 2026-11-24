@@ -23,6 +23,8 @@ public class CliffMesh {
 
 	private FloatBuffer renderJobs = ByteBuffer.allocateDirect(16 * 16).order(ByteOrder.nativeOrder()).asFloatBuffer();
 	private final GL30 gl;
+	/** Instances in instanceBuffer (uploadQueue). */
+	private int instanceCount;
 
 	public CliffMesh(final String path, final DataSource dataSource, final GL30 gl) throws IOException {
 		this.gl = gl;
@@ -68,15 +70,27 @@ public class CliffMesh {
 		this.renderJobs.put(position);
 	}
 
+	/**
+	 * warsmash-nx: puts the queued instances into the instance buffer, which render() then draws
+	 * every frame. The terrain queues and uploads only when its cliffs change: before, every frame
+	 * queued every cliff of the map and uploaded the buffer again (OrcX01 console profile: 12% of
+	 * the game thread).
+	 */
+	public void uploadQueue() {
+		this.renderJobs.flip();
+		this.instanceCount = this.renderJobs.remaining() / 4;
+		if (this.instanceCount > 0) {
+			this.gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, this.instanceBuffer);
+			this.gl.glBufferData(GL20.GL_ARRAY_BUFFER, this.renderJobs.remaining() * 4, this.renderJobs,
+					GL20.GL_STATIC_DRAW);
+		}
+		this.renderJobs.clear();
+	}
+
 	public void render(final ShaderProgram cliffShader) {
-		if (this.renderJobs.position() == 0) {
+		if (this.instanceCount == 0) {
 			return;
 		}
-		this.renderJobs.flip();
-
-		this.gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, this.instanceBuffer);
-		this.gl.glBufferData(GL20.GL_ARRAY_BUFFER, this.renderJobs.remaining() * 4, this.renderJobs,
-				GL20.GL_DYNAMIC_DRAW);
 
 		this.gl.glBindBuffer(GL20.GL_ARRAY_BUFFER, this.vertexBuffer);
 		this.gl.glVertexAttribPointer(cliffShader.getAttributeLocation("vPosition"), 3, GL20.GL_FLOAT, false, 0, 0);
@@ -94,10 +108,8 @@ public class CliffMesh {
 
 		this.gl.glBindBuffer(GL20.GL_ELEMENT_ARRAY_BUFFER, this.indexBuffer);
 		this.gl.glDrawElementsInstanced(GL20.GL_TRIANGLES, this.indices, GL30.GL_UNSIGNED_SHORT, 0,
-				this.renderJobs.remaining() / 4);
+				this.instanceCount);
 
 		this.gl.glVertexAttribDivisor(offsetAttributeLocation, 0); // ToDo use vao
-
-		this.renderJobs.clear();
 	}
 }

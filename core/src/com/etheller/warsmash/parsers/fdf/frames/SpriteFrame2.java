@@ -38,6 +38,7 @@ public class SpriteFrame2 extends AbstractUIFrame {
 	private float zDepth;
 	private final PortraitCameraManager portraitCameraManager;
 	private final ModelViewer viewer;
+	private int updatedFrame = -1;
 
 	public SpriteFrame2(final String name, final UIFrame parent, final Viewport uiViewport, ModelViewer viewer) {
 		super(name, parent);
@@ -71,14 +72,31 @@ public class SpriteFrame2 extends AbstractUIFrame {
 		updateInstanceLocation(this.uiViewport);
 	}
 
-	@Override
-	protected void internalRender(final SpriteBatch batch, final BitmapFont baseFont, final GlyphLayout glyphLayout) {
-		super.internalRender(batch, baseFont, glyphLayout);
+	/**
+	 * warsmash-nx: updates this portrait's camera and scene before the main 3D render pass starts,
+	 * so bone-texture uploads do not split the Vulkan render pass in the middle of UI rendering.
+	 */
+	public void updateScene(final float dt) {
+		if (!isVisible() || (this.instance == null)) {
+			return;
+		}
 		this.portraitCameraManager.updateCamera();
 		if (this.portraitCameraManager.modelCamera == null) {
 			viewportUpdated();
 		}
-		this.scene.update(Gdx.graphics.getDeltaTime());
+		this.scene.update(dt);
+		this.updatedFrame = this.viewer.frame;
+	}
+
+	@Override
+	protected void internalRender(final SpriteBatch batch, final BitmapFont baseFont, final GlyphLayout glyphLayout) {
+		super.internalRender(batch, baseFont, glyphLayout);
+		if (this.instance == null) {
+			return;
+		}
+		if (this.updatedFrame != this.viewer.frame) {
+			updateScene(Gdx.graphics.getDeltaTime());
+		}
 
 		if ((this.scene.camera.rect.width != 0) && (this.scene.camera.rect.height != 0)) {
 			batch.end();

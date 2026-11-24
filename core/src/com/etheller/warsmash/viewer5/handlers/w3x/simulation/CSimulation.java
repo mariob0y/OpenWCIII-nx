@@ -661,18 +661,8 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 			internalUnregisterTimer(timer);
 		}
 		this.removedTimers.clear();
-		final Set<CTimer> timers = this.timerSetPool.acquire();
-		timers.clear();
-		try {
-			for (final CTimer timer : this.activeTimers) {
-				if (!timers.add(timer)) {
-					throw new IllegalStateException("Duplicate timer add: " + timer);
-				}
-			}
-		}
-		finally {
-			timers.clear();
-			this.timerSetPool.release(timers);
+		if (WarsmashConstants.ENABLE_DEBUG) {
+			verifyNoDuplicateTimers();
 		}
 		while (!this.activeTimers.isEmpty() && (this.activeTimers.peek().getEngineFireTick() <= this.gameTurnTick)) {
 			this.activeTimers.pop().fire(this);
@@ -680,20 +670,13 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 		checkTimeOfDayEvents(timeOfDayBefore, timeOfDayAfter);
 		this.onTickTriggers.addAll(this.addedOnTickTriggers);
 		this.addedOnTickTriggers.clear();
-		for (final Trigger trigger : this.onTickTriggers) {
-			final TriggerExecutionScope triggerScope = trigger.getTriggerExecutionScope();
-			try {
-				if (trigger.evaluate(this.globalScope, triggerScope)) {
-					trigger.execute(this.globalScope, triggerScope);
-				}
-			}
-			catch (final Exception exc) {
-				System.err.println("CSimulation: on-tick trigger error (" + exc.getClass().getSimpleName()
-						+ ": " + exc.getMessage() + ") — continuing");
-			}
+		for (int i = 0, l = this.onTickTriggers.size(); i < l; i++) {
+			evaluateOnTickTrigger(this.onTickTriggers.get(i));
 		}
-		this.onTickTriggers.removeAll(this.removedOnTickTriggers);
-		this.removedOnTickTriggers.clear();
+		if (!this.removedOnTickTriggers.isEmpty()) {
+			this.onTickTriggers.removeAll(this.removedOnTickTriggers);
+			this.removedOnTickTriggers.clear();
+		}
 
 		if (this.globalScope != null) {
 			this.globalScope.runThreads();
@@ -710,6 +693,35 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 		this.postUpdateCallbacks.clear();
 		for (final Runnable runnable : this.runningPostUpdateCallbacks) {
 			runnable.run();
+		}
+	}
+
+	private void verifyNoDuplicateTimers() {
+		final Set<CTimer> timers = this.timerSetPool.acquire();
+		timers.clear();
+		try {
+			for (final CTimer timer : this.activeTimers) {
+				if (!timers.add(timer)) {
+					throw new IllegalStateException("Duplicate timer add: " + timer);
+				}
+			}
+		}
+		finally {
+			timers.clear();
+			this.timerSetPool.release(timers);
+		}
+	}
+
+	private void evaluateOnTickTrigger(final Trigger trigger) {
+		final TriggerExecutionScope triggerScope = trigger.getTriggerExecutionScope();
+		try {
+			if (trigger.evaluate(this.globalScope, triggerScope)) {
+				trigger.execute(this.globalScope, triggerScope);
+			}
+		}
+		catch (final Exception exc) {
+			System.err.println("CSimulation: on-tick trigger error (" + exc.getClass().getSimpleName()
+					+ ": " + exc.getMessage() + ") — continuing");
 		}
 	}
 
