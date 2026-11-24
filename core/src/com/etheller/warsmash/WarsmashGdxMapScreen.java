@@ -469,6 +469,59 @@ public class WarsmashGdxMapScreen implements InputProcessor, Screen {
 			pixmap.dispose();
 			System.err.println("NXDEBUG saved " + shot);
 		}
+		if (NX_LUMA) {
+			logFrameLuma();
+		}
+	}
+
+	/** warsmash-nx: PC test tool (env NX_LUMA): each frame's mean brightness, to catch one-frame flicker. */
+	private static final boolean NX_LUMA = !String.valueOf(System.getenv("NX_LUMA")).matches("|null");
+	private java.nio.ByteBuffer lumaPixels;
+	private int lumaFrame;
+
+	private void logFrameLuma() {
+		final int w = Gdx.graphics.getBackBufferWidth();
+		final int h = Gdx.graphics.getBackBufferHeight();
+		// The middle of the screen, above the cinematic panel and under the top bar.
+		final int x0 = w / 8, y0 = h / 3, rw = (w * 3) / 4, rh = h / 2;
+		if ((this.lumaPixels == null) || (this.lumaPixels.capacity() < (rw * rh * 4))) {
+			this.lumaPixels = java.nio.ByteBuffer.allocateDirect(rw * rh * 4);
+		}
+		this.lumaPixels.clear();
+		Gdx.gl.glPixelStorei(GL20.GL_PACK_ALIGNMENT, 1);
+		Gdx.gl.glReadPixels(x0, y0, rw, rh, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, this.lumaPixels);
+		long sum = 0;
+		for (int i = 0, n = rw * rh * 4; i < n; i += 16) {
+			sum += (this.lumaPixels.get(i) & 0xFF) + (this.lumaPixels.get(i + 1) & 0xFF) + (this.lumaPixels.get(i + 2) & 0xFF);
+		}
+		final float seconds = (this.viewer.simulation == null) ? 0
+				: this.viewer.simulation.getGameTurnTick() * WarsmashConstants.SIMULATION_STEP_TIME;
+		final float luma = sum / (3f * ((rw * rh) / 4));
+		System.err.println("NXLUMA " + (this.lumaFrame++) + " t=" + seconds + " luma=" + luma);
+		// NX_LUMA=<seconds>: from then on, save a few frames whose brightness jumps, and the frame after
+		final float shotsFrom = parseLumaShotsFrom();
+		if ((seconds >= shotsFrom) && (this.lumaShots < 8)
+				&& ((Math.abs(luma - this.lastLuma) > 4) || this.lumaShotNext)) {
+			this.lumaShotNext = !this.lumaShotNext;
+			final com.badlogic.gdx.graphics.Pixmap pixmap = com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixmap(0, 0, w, h);
+			com.badlogic.gdx.graphics.PixmapIO.writePNG(Gdx.files.local("nxshots/luma_" + this.lumaFrame + ".png"), pixmap);
+			pixmap.dispose();
+			this.lumaShots++;
+		}
+		this.lastLuma = luma;
+	}
+
+	private float lastLuma;
+	private int lumaShots;
+	private boolean lumaShotNext;
+
+	private static float parseLumaShotsFrom() {
+		try {
+			return Float.parseFloat(System.getenv("NX_LUMA"));
+		}
+		catch (final NumberFormatException e) {
+			return Float.MAX_VALUE;
+		}
 	}
 
 	private void renderLibGDXContent() {

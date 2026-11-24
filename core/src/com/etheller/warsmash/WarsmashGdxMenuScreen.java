@@ -107,6 +107,7 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 			this.codebase = WarsmashGdxMapScreen.parseDataSources(this.warsmashIni);
 			LoadingStatus.report("Starting the model viewer");
 			this.viewer = new MdxViewer(this.codebase, this.game);
+			this.viewer.maxFrameDelta = 0.1f;
 
 			this.viewer.addHandler(new MdxHandler());
 			this.viewer.enableAudio();
@@ -576,6 +577,10 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 	private final com.etheller.warsmash.viewer5.handlers.w3x.ui.menu.MenuRenderProbe menuRenderProbe =
 			new com.etheller.warsmash.viewer5.handlers.w3x.ui.menu.MenuRenderProbe();
 	private Scene scene;
+	private int nxStatFrames;
+	private long nxStatUpdateNanos;
+	private long nxStatRenderNanos;
+	private long nxStatParticles;
 
 	@Override
 	public void render(final float delta) {
@@ -601,6 +606,24 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 		}
 		com.etheller.warsmash.util.NxCrumbs.crumb("menu: viewer update and render");
 		this.viewer.updateAndRender();
+		// warsmash-nx: every 300 frames, what the 3D backdrop costs (the console log has no other per-screen
+		// split): its model, CPU ms in the viewer's update (animation, particles) and render, particles, lights
+		this.nxStatUpdateNanos += this.viewer.lastUpdateNanos;
+		this.nxStatRenderNanos += this.viewer.lastRenderNanos;
+		this.nxStatParticles += this.scene.updatedParticles;
+		if (++this.nxStatFrames == 300) {
+			final String model = (this.mainModel == null) ? "none" : this.mainModel.fetchUrl;
+			System.out.println("[NxMenu] " + model.substring(Math.max(model.lastIndexOf('\\'), model.lastIndexOf('/')) + 1)
+					+ ": update " + ((this.nxStatUpdateNanos / 300) / 1000) / 1000f + " ms, render "
+					+ ((this.nxStatRenderNanos / 300) / 1000) / 1000f + " ms, " + (this.nxStatParticles / 300)
+					+ " particles, " + ((com.etheller.warsmash.viewer5.handlers.w3x.W3xSceneLightManager) this.scene
+							.getLightManager()).getUnitLightCount()
+					+ " lights");
+			this.nxStatFrames = 0;
+			this.nxStatUpdateNanos = 0;
+			this.nxStatRenderNanos = 0;
+			this.nxStatParticles = 0;
+		}
 		com.etheller.warsmash.util.NxCrumbs.crumb("menu: viewer rendered");
 		this.menuRenderProbe.afterRender(this.viewer, this.scene);
 		com.etheller.warsmash.viewer5.handlers.w3x.ui.CampaignFlowProbe.afterMenuRender();
@@ -621,7 +644,17 @@ public class WarsmashGdxMenuScreen implements InputProcessor, Screen, SingleMode
 		if (shot != null) {
 			final com.badlogic.gdx.graphics.Pixmap pixmap = com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixmap(0, 0,
 					Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
-			com.badlogic.gdx.graphics.PixmapIO.writePNG(Gdx.files.local(shot), pixmap);
+			if (!String.valueOf(System.getenv("NX_RAWSHOTS")).matches("|null")) {
+				// PC test bursts: raw RGBA (bottom row first), no PNG encoding to slow the frames down
+				final java.nio.ByteBuffer px = pixmap.getPixels();
+				final byte[] bytes = new byte[px.remaining()];
+				px.duplicate().get(bytes);
+				Gdx.files.local(shot.replace(".png", "_" + pixmap.getWidth() + "x" + pixmap.getHeight() + ".rgba"))
+						.writeBytes(bytes, false);
+			}
+			else {
+				com.badlogic.gdx.graphics.PixmapIO.writePNG(Gdx.files.local(shot), pixmap);
+			}
 			pixmap.dispose();
 			System.err.println("NXDEBUG saved " + shot);
 		}

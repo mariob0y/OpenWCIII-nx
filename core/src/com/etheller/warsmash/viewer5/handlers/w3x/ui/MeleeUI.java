@@ -4100,6 +4100,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.cameraManager.resize(setupWorldFrameViewport(width, height));
 		positionPortrait();
 		positionScoreBackdrop();
+		positionCineFilterFrame();
 		if (this.rootFrame.isAutoPosition()) {
 			this.rootFrame.positionBounds(this.rootFrame, this.uiViewport);
 		}
@@ -6891,9 +6892,19 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.cineFilterFrame.setFilterMode(com.hiveworkshop.rms.parsers.mdlx.MdlxLayer.FilterMode.BLEND);
 		this.cineFilterFrame.setTexture(this.cineFilterTexture, this.rootFrame);
 		this.cineFilterFrame.setVisible(false);
-		this.cineFilterFrame.addSetPoint(new SetPoint(FramePoint.TOPLEFT, this.rootFrame, FramePoint.TOPLEFT, 0, 0));
-		this.cineFilterFrame.addSetPoint(new SetPoint(FramePoint.BOTTOMRIGHT, this.rootFrame, FramePoint.BOTTOMRIGHT, 0, 0));
+		// warsmash-nx: the whole screen, not the root frame's 4:3 area (the sides of a 16:9 screen
+		// stayed lit during fades): centred and sized to the viewport, as the score backdrop.
+		this.cineFilterFrame.addAnchor(new AnchorDefinition(FramePoint.CENTER, 0, 0));
 		((AbstractUIFrame) this.rootFrame).add(this.cineFilterFrame);
+		positionCineFilterFrame();
+	}
+
+	private void positionCineFilterFrame() {
+		if (this.cineFilterFrame == null) {
+			return;
+		}
+		this.cineFilterFrame.setWidth(this.uiViewport.getWorldWidth());
+		this.cineFilterFrame.setHeight(this.uiViewport.getWorldHeight());
 		this.cineFilterFrame.positionBounds(this.rootFrame, this.uiViewport);
 	}
 

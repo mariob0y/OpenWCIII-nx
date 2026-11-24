@@ -2055,6 +2055,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			detachSky();
 			instance.setScene(this.worldScene);
 			this.skyInstance = instance;
+			this.worldScene.unculledInstance = instance;
 			System.out.println("SetSkyModel: showing '" + normalized + "'");
 		}
 		catch (final Exception e) {
@@ -2069,6 +2070,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	private void detachSky() {
 		if (this.skyInstance != null) {
 			this.skyInstance.detach();
+			if (this.worldScene.unculledInstance == this.skyInstance) {
+				this.worldScene.unculledInstance = null;
+			}
 			this.skyInstance = null;
 		}
 	}

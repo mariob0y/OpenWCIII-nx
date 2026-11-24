@@ -1980,7 +1980,10 @@ public class MenuUI {
 		// position all
 		this.rootFrame.positionBounds(this.rootFrame, this.uiViewport);
 
-		this.menuState = MenuState.GOING_TO_MAIN_MENU;
+		// warsmash-nx: the glue sprites already play "MainMenu Birth" (above); GOING_TO_MAIN_MENU would
+		// play it a second time when it ends, so the menu slid in twice at start. MAIN_MENU shows the
+		// buttons and the stand loop when that first birth ends.
+		this.menuState = MenuState.MAIN_MENU;
 		setMainMenuButtonsEnabled(true);
 
 		loadSounds();

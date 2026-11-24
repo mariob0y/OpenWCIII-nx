@@ -58,35 +58,37 @@ public class BackdropFrame extends AbstractUIFrame {
 			final float backgroundHeight = this.renderBounds.height - this.backgroundInsets.getY()
 					- this.backgroundInsets.getW();
 			if (this.tileBackground) {
-				final float backgroundVerticalRepeatCount = (backgroundHeight / this.backgroundSize);
-				final float backgroundHorizontalRepeatCount = backgroundWidth / this.backgroundSize;
-				final float backgroundHeightRemainder = backgroundHeight % this.backgroundSize;
-				final float backgroundHeightRemainderRatio = backgroundHeightRemainder / this.backgroundSize;
-				final float backgroundWidthRemainder = backgroundWidth % this.backgroundSize;
-				final float backgroundWidthRemainderRatio = backgroundWidthRemainder / this.backgroundSize;
-				final int backgroundVerticalFloorRepeatCount = (int) Math.floor(backgroundVerticalRepeatCount);
-				final int backgroundHorizontalFloorRepeatCount = (int) Math.floor(backgroundHorizontalRepeatCount);
-				for (int j = 0; j < backgroundVerticalFloorRepeatCount; j++) {
-					for (int i = 0; i < backgroundHorizontalFloorRepeatCount; i++) {
-						batch.draw(this.background, backgroundX + (i * this.backgroundSize),
-								backgroundY + (j * this.backgroundSize), this.backgroundSize, this.backgroundSize);
+				// warsmash-nx: the tiles start at the frame's top left corner and the insets only crop them, as in
+				// the game. Starting them at the inset corner showed the corner of a frame-sized tile instead of
+				// its middle: the campaign buttons' arrow sat on the box's corner.
+				final float size = this.backgroundSize;
+				final float left = this.renderBounds.x;
+				final float top = this.renderBounds.y + this.renderBounds.height;
+				final float innerRight = backgroundX + backgroundWidth;
+				final float innerTop = backgroundY + backgroundHeight;
+				final int firstColumn = (int) Math.floor((backgroundX - left) / size);
+				final int lastColumn = (int) Math.ceil((innerRight - left) / size);
+				final int firstRow = (int) Math.floor((top - innerTop) / size);
+				final int lastRow = (int) Math.ceil((top - backgroundY) / size);
+				for (int row = firstRow; row < lastRow; row++) {
+					final float tileTop = top - (row * size);
+					final float y0 = Math.max(tileTop - size, backgroundY);
+					final float y1 = Math.min(tileTop, innerTop);
+					if (y1 <= y0) {
+						continue;
 					}
-					batch.draw(this.background,
-							backgroundX + ((backgroundHorizontalFloorRepeatCount) * this.backgroundSize),
-							backgroundY + (j * this.backgroundSize), backgroundWidthRemainder, this.backgroundSize, 0,
-							1.0f, backgroundWidthRemainderRatio, 0);
+					for (int column = firstColumn; column < lastColumn; column++) {
+						final float tileLeft = left + (column * size);
+						final float x0 = Math.max(tileLeft, backgroundX);
+						final float x1 = Math.min(tileLeft + size, innerRight);
+						if (x1 <= x0) {
+							continue;
+						}
+						// v is 0 at the image's top row
+						batch.draw(this.background, x0, y0, x1 - x0, y1 - y0, (x0 - tileLeft) / size,
+								(tileTop - y0) / size, (x1 - tileLeft) / size, (tileTop - y1) / size);
+					}
 				}
-				for (int i = 0; i < backgroundHorizontalFloorRepeatCount; i++) {
-					batch.draw(this.background, backgroundX + (i * this.backgroundSize),
-							backgroundY + (backgroundVerticalFloorRepeatCount * this.backgroundSize),
-							this.backgroundSize, backgroundHeightRemainder, 0, 1.0f, 1.0f,
-							1.0f - backgroundHeightRemainderRatio);
-				}
-				batch.draw(this.background,
-						backgroundX + ((backgroundHorizontalFloorRepeatCount) * this.backgroundSize),
-						backgroundY + (backgroundVerticalFloorRepeatCount * this.backgroundSize),
-						backgroundWidthRemainder, backgroundHeightRemainder, 0, 1.0f, backgroundWidthRemainderRatio,
-						1.0f - backgroundHeightRemainderRatio);
 			}
 			else {
 				if (this.mirrored) {

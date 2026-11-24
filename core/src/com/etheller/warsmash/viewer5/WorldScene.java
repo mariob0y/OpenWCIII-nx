@@ -43,6 +43,13 @@ public class WorldScene extends Scene {
 	 * of the skipped cells too and logs any that would have been drawn.
 	 */
 	public static boolean GRID_CULLING = true;
+
+	/**
+	 * warsmash-nx: walked every frame, whatever the culling says: the sky dome. It follows the camera,
+	 * so its grid cell (the ground under the camera) is often just off screen; a culled sky was not
+	 * updated and its light left the scene for that frame, and units blinked darker in cinematics.
+	 */
+	public ModelInstance unculledInstance;
 	private static final boolean CULL_VERIFY = System.getenv("NX_CULL_VERIFY") != null;
 	private final ArrayList<ModelInstance> cellScratch = new ArrayList<>();
 	private final ArrayList<ModelInstance> cullSuspects = new ArrayList<>();
@@ -125,6 +132,10 @@ public class WorldScene extends Scene {
 				if (CULL_VERIFY) {
 					this.cullVerifyCells++;
 				}
+			}
+			final ModelInstance unculled = this.unculledInstance;
+			if ((unculled != null) && (unculled.scene == this)) {
+				instanceProcessor.accept(unculled);
 			}
 		}
 		finally {
@@ -232,7 +243,15 @@ public class WorldScene extends Scene {
 					return;
 				}
 			}
+			// the cheap tests first: an instance over several cells is met once per cell
 			if (instance.rendered && (instance.cullFrame < frame) && instance.isVisible(camera)) {
+				accept(instance);
+			}
+		}
+
+		/** Updates and collects an instance without the view test (call() makes that test first). */
+		public void accept(final ModelInstance instance) {
+			if (instance.rendered && (instance.cullFrame < frame)) {
 				instance.cullFrame = frame;
 
 				if (instance.updateFrame < frame) {

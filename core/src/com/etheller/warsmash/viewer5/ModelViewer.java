@@ -282,11 +282,19 @@ public abstract class ModelViewer {
 	public void updateAndRender() {
 		com.etheller.warsmash.util.NxCrumbs.crumb("viewer: sound settings");
 		com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename.refreshSettings();
+		final long t0 = System.nanoTime();
 		this.update();
+		final long t1 = System.nanoTime();
 		com.etheller.warsmash.util.NxCrumbs.crumb("viewer: start frame");
 		this.startFrame();
 		this.render();
+		this.lastUpdateNanos = t1 - t0;
+		this.lastRenderNanos = System.nanoTime() - t1;
 	}
+
+	/** warsmash-nx: the CPU time of the last updateAndRender(), for the menu's [NxMenu] log line. */
+	public long lastUpdateNanos;
+	public long lastRenderNanos;
 
 //	public Resource loadGeneric(String path, String dataType, )
 
@@ -299,8 +307,14 @@ public abstract class ModelViewer {
 		return this.resources.remove(resource);
 	}
 
+	/**
+	 * warsmash-nx: the longest step one frame may animate by. The menu sets it: its first frame's delta
+	 * is the whole load before it, which played the glue panels' slide-in out before it was seen.
+	 */
+	public float maxFrameDelta = Float.MAX_VALUE;
+
 	public void update() {
-		final float dt = Gdx.graphics.getDeltaTime();// this.frameTime * 0.001f;
+		final float dt = Math.min(Gdx.graphics.getDeltaTime(), this.maxFrameDelta);
 
 		this.frame += 1;
 

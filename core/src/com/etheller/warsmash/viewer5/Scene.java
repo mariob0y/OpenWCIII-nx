@@ -224,14 +224,20 @@ public abstract class Scene {
 
 		innerUpdate(dt, frame);
 
+		// warsmash-nx: the tail is last frame's list; an instance walked this frame (cullFrame) also sits
+		// earlier in it, so it keeps its lights. Removing them made the sky's light blink in cinematics.
 		for (int i = this.batchedInstances.size() - 1; i >= this.currentBatchedInstance; i--) {
-			this.batchedInstances.get(i).removeLights(this);
-			this.batchedInstances.remove(i);
+			final ModelInstance instance = this.batchedInstances.remove(i);
+			if (instance.cullFrame != frame) {
+				instance.removeLights(this);
+			}
 		}
 
 		for (int i = this.instances.size() - 1; i >= this.currentInstance; i--) {
-			this.instances.get(i).removeLights(this);
-			this.instances.remove(i);
+			final ModelInstance instance = this.instances.remove(i);
+			if (instance.cullFrame != frame) {
+				instance.removeLights(this);
+			}
 		}
 		Collections.sort(this.instances, this.instanceDepthComparator);
 

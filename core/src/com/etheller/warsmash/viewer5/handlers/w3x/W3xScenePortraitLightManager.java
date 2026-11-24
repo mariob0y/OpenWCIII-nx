@@ -53,6 +53,10 @@ public class W3xScenePortraitLightManager implements SceneLightManager, W3xScene
 		if (!this.dirty && this.allStatic) {
 			return;
 		}
+		// warsmash-nx: a new frame for LightInstance's per-frame cache. Only the world light manager advanced
+		// it, so in the menu (no world scene) every model light kept the values of its first frame: the
+		// campaign screens' animated lights never moved or changed.
+		com.etheller.warsmash.viewer5.handlers.mdx.LightInstance.advanceGeneration();
 		final int numberOfLights = this.lights.size() + 1;
 		final int bytesNeeded = numberOfLights * 4 * 16;
 		if (bytesNeeded > (this.lightDataCopyHeap.capacity() * 4)) {

@@ -116,6 +116,7 @@ public final class NxCampaignNatives {
 	}
 
 	private static float menuSeconds;
+	private static boolean menuStarted;
 
 	/**
 	 * The same steps on the main menu, under the name "Menu" and timed from the menu's first frame:
@@ -126,7 +127,11 @@ public final class NxCampaignNatives {
 		if (spec == null) {
 			return;
 		}
-		menuSeconds += deltaTime;
+		// The first frame's delta is the whole load before it (~20 s on the PC): the clock starts there.
+		if (menuStarted) {
+			menuSeconds += deltaTime;
+		}
+		menuStarted = true;
 		for (final String step : spec.split(";")) {
 			final int at = step.indexOf('@');
 			final int colon = step.indexOf(':');
@@ -138,7 +143,7 @@ public final class NxCampaignNatives {
 			for (final String action : step.substring(colon + 1).split(",")) {
 				System.err.println("NXDEBUG Menu t=" + menuSeconds + ": " + action);
 				if ("shot".equals(action)) {
-					pendingShot = "nxshots/Menu_" + (int) menuSeconds + ".png";
+					pendingShot = "nxshots/Menu_" + String.format(java.util.Locale.ROOT, "%05.1f", menuSeconds) + ".png";
 				}
 				else if ("quit".equals(action)) {
 					com.badlogic.gdx.Gdx.app.exit();
@@ -245,7 +250,7 @@ public final class NxCampaignNatives {
 			for (final String action : step.substring(colon + 1).split(",")) {
 				System.err.println("NXDEBUG " + map + " t=" + seconds + ": " + action);
 				if ("shot".equals(action)) {
-					pendingShot = "nxshots/" + map + "_" + (int) seconds + ".png";
+					pendingShot = "nxshots/" + map + "_" + ((seconds == (int) seconds) ? String.valueOf((int) seconds) : String.format(java.util.Locale.ROOT, "%05.2f", seconds)) + ".png";
 				}
 				else if ("quit".equals(action)) {
 					com.badlogic.gdx.Gdx.app.exit();
