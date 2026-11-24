@@ -629,6 +629,16 @@ public enum RenderMathUtils {
 		return wrapper;
 	}
 
+	public static FloatBuffer wrapAsFloats(final int[] positions) {
+		final FloatBuffer wrapper = ByteBuffer.allocateDirect(positions.length * 4).order(ByteOrder.nativeOrder())
+				.asFloatBuffer();
+		for (final int value : positions) {
+			wrapper.put(value);
+		}
+		wrapper.clear();
+		return wrapper;
+	}
+
 	public static Buffer wrap(final short[] cornerTextures) {
 		final ByteBuffer wrapper = ByteBuffer.allocateDirect(cornerTextures.length).order(ByteOrder.nativeOrder());
 		for (final short face : cornerTextures) {

@@ -24,7 +24,11 @@ public class SetupGeosets {
 
 			final int extendedBatchStride = bigNodeSpace ? 36 : 9;
 			final int normalBatchStride = bigNodeSpace ? 20 : 5;
-			final int openGLSkinType = bigNodeSpace ? GL20.GL_UNSIGNED_INT : GL20.GL_UNSIGNED_BYTE;
+			// warsmash-nx: GL_FLOAT (not GL_UNSIGNED_INT) for >=256-bone models. Unnormalized GL_UNSIGNED_INT
+			// vertex attributes map to PIPE_FORMAT_R32*_USCALED, which has no VkFormat in Vulkan and forces
+			// Mesa/Zink's u_vbuf to read back the static VBO/IBO on every draw. Float32 represents all
+			// integer bone indices up to 2^24 exactly and uses mandatory native Vulkan vertex formats.
+			final int openGLSkinType = bigNodeSpace ? GL20.GL_FLOAT : GL20.GL_UNSIGNED_BYTE;
 			final int normalBatchBoneCountOffsetBytes = bigNodeSpace ? 16 : 4;
 			final int extendedBatchBoneCountOffsetBytes = bigNodeSpace ? 32 : 8;
 
@@ -204,9 +208,10 @@ public class SetupGeosets {
 				}
 
 				// Skin.
-				gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, skinOffset, skin.length,
-						bigNodeSpace ? RenderMathUtils.wrap(skin) : RenderMathUtils.wrapAsBytes(skin));
-				skinOffset += skin.length * (bigNodeSpace ? 4 : 1);
+				final boolean floatSkin = bigNodeSpace && (batchType != SkinningType.Skin);
+				gl.glBufferSubData(GL20.GL_ARRAY_BUFFER, skinOffset, skin.length * (floatSkin ? 4 : 1),
+						floatSkin ? RenderMathUtils.wrapAsFloats(skin) : RenderMathUtils.wrapAsBytes(skin));
+				skinOffset += skin.length * (floatSkin ? 4 : 1);
 
 				// Faces.
 				gl.glBufferSubData(GL20.GL_ELEMENT_ARRAY_BUFFER, faceOffset, faces.length,
