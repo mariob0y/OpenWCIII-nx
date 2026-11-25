@@ -6410,6 +6410,7 @@ public class Jass2 {
 						final String title = nullable(arguments, 1, StringJassValueVisitor.getInstance());
 						if (quest != null) {
 							quest.setTitle(this.gameUI.getTrigStr(title));
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});
@@ -6420,6 +6421,7 @@ public class Jass2 {
 						final String desc = nullable(arguments, 1, StringJassValueVisitor.getInstance());
 						if (quest != null) {
 							quest.setDescription(this.gameUI.getTrigStr(desc));
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});
@@ -6430,6 +6432,7 @@ public class Jass2 {
 						final String path = nullable(arguments, 1, StringJassValueVisitor.getInstance());
 						if (quest != null) {
 							quest.setIconPath(path != null ? path : "");
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});
@@ -6440,6 +6443,7 @@ public class Jass2 {
 						final boolean enabled = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 						if (quest != null) {
 							quest.setEnabled(enabled);
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});
@@ -6450,6 +6454,7 @@ public class Jass2 {
 						final boolean required = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 						if (quest != null) {
 							quest.setRequired(required);
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});
@@ -6460,6 +6465,7 @@ public class Jass2 {
 						final boolean completed = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 						if (quest != null) {
 							quest.setCompleted(completed);
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});
@@ -6470,6 +6476,7 @@ public class Jass2 {
 						final boolean failed = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 						if (quest != null) {
 							quest.setFailed(failed);
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});
@@ -6480,6 +6487,7 @@ public class Jass2 {
 						final boolean discovered = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 						if (quest != null) {
 							quest.setDiscovered(discovered);
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});
@@ -6521,8 +6529,10 @@ public class Jass2 {
 							return questitemType.getNullValue();
 						}
 						final String desc = nullable(arguments, 1, StringJassValueVisitor.getInstance());
-						return new HandleJassValue(questitemType,
-								quest.createItem(this.gameUI.getTrigStr(desc)));
+						final com.etheller.warsmash.viewer5.handlers.w3x.simulation.quest.CQuestItem item = quest
+								.createItem(this.gameUI.getTrigStr(desc));
+						meleeUI.forceQuestDialogUpdate();
+						return new HandleJassValue(questitemType, item);
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("DestroyQuestItem",
 					(arguments, globalScope, triggerScope) -> {
@@ -6535,6 +6545,7 @@ public class Jass2 {
 						final String desc = nullable(arguments, 1, StringJassValueVisitor.getInstance());
 						if (item != null) {
 							item.setDescription(this.gameUI.getTrigStr(desc));
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});
@@ -6545,6 +6556,7 @@ public class Jass2 {
 						final boolean completed = arguments.get(1).visit(BooleanJassValueVisitor.getInstance());
 						if (item != null) {
 							item.setCompleted(completed);
+							meleeUI.forceQuestDialogUpdate();
 						}
 						return null;
 					});

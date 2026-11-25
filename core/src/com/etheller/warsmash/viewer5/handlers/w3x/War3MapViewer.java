@@ -742,6 +742,10 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		return this.currentMapPath;
 	}
 
+	public War3MapW3i getLastLoadedMapInformation() {
+		return this.lastLoadedMapInformation;
+	}
+
 	/** Prefer the chapter title presented on the loading screen to internal map identifiers. */
 	public String getMapDisplayName() {
 		if (this.lastLoadedMapInformation != null) {

@@ -221,11 +221,15 @@ public final class NxCampaignNatives {
 			return com.badlogic.gdx.Input.Keys.DPAD_RIGHT;
 		case "ESCAPE":
 			return com.badlogic.gdx.Input.Keys.ESCAPE;
+		case "F9":
+			return com.badlogic.gdx.Input.Keys.F9;
 		default:
 			System.err.println("NXDEBUG unknown key " + name);
 			return -1;
 		}
 	}
+
+	private static float debugPausedSeconds;
 
 	public static void debugTick(final CSimulation sim) {
 		final String spec = System.getenv("NX_DEBUG");
@@ -237,7 +241,12 @@ public final class NxCampaignNatives {
 		if (map.toLowerCase(Locale.US).endsWith(".w3x") || map.toLowerCase(Locale.US).endsWith(".w3m")) {
 			map = map.substring(0, map.length() - 4);
 		}
-		final float seconds = sim.getGameTurnTick() * com.etheller.warsmash.util.WarsmashConstants.SIMULATION_STEP_TIME;
+		// time spent paused (game menu, quest log) counts too, so steps can act while a menu is open
+		if (sim.isGamePaused()) {
+			debugPausedSeconds += com.badlogic.gdx.Gdx.graphics.getDeltaTime();
+		}
+		final float seconds = (sim.getGameTurnTick() * com.etheller.warsmash.util.WarsmashConstants.SIMULATION_STEP_TIME)
+				+ debugPausedSeconds;
 		for (final String step : spec.split(";")) {
 			final int at = step.indexOf('@');
 			final int colon = step.indexOf(':');

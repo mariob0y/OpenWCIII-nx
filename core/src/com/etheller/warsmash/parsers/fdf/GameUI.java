@@ -980,6 +980,8 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 				final String controlBackdropKey = frameDefinition.getString("ControlBackdrop");
 				final String controlPushedBackdropKey = frameDefinition.getString("ControlPushedBackdrop");
 				final String controlDisabledBackdropKey = frameDefinition.getString("ControlDisabledBackdrop");
+				final String controlDisabledPushedBackdropKey = frameDefinition
+						.getString("ControlDisabledPushedBackdrop");
 				final String controlMouseOverHighlightKey = frameDefinition.getString("ControlMouseOverHighlight");
 				for (final FrameDefinition childDefinition : frameDefinition.getInnerFrames()) {
 					if (childDefinition.getName().equals(controlBackdropKey)) {
@@ -999,6 +1001,12 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 								inDecorateFileNames || childDefinition.has("DecorateFileNames"));
 						inflatedChild.setSetAllPoints(true);
 						glueButtonFrame.setControlDisabledBackdrop(inflatedChild);
+					}
+					else if (childDefinition.getName().equals(controlDisabledPushedBackdropKey)) {
+						final UIFrame inflatedChild = inflate(childDefinition, glueButtonFrame, frameDefinition,
+								inDecorateFileNames || childDefinition.has("DecorateFileNames"));
+						inflatedChild.setSetAllPoints(true);
+						glueButtonFrame.setControlDisabledPushedBackdrop(inflatedChild);
 					}
 					else if (childDefinition.getName().equals(controlMouseOverHighlightKey)) {
 						final UIFrame inflatedChild = inflate(childDefinition, glueButtonFrame, frameDefinition,
@@ -1456,7 +1464,7 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 				else if ("BLEND".equals(highlightAlphaMode)) {
 					textureFrame.setFilterMode(FilterMode.BLEND);
 				}
-				return textureFrame;
+				inflatedFrame = textureFrame;
 			}
 			else if ("BACKDROP".equals(frameDefinition.getFrameType())) {
 				final boolean tileBackground = frameDefinition.has("BackdropTileBackground");
@@ -1492,7 +1500,7 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 				if (decorateFileNames && (edgeFileString != null)) {
 					edgeFileString = trySkinField(edgeFileString);
 				}
-				if (decorateFileNames && (edgeFileString != null)) {
+				if (decorateFileNames && (backgroundString != null)) {
 					backgroundString = trySkinField(backgroundString);
 				}
 				final Texture background = backgroundString == null ? null : loadTexture(backgroundString);

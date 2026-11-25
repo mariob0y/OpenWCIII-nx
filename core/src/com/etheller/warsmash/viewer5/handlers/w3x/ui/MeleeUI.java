@@ -526,8 +526,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	private float movieClock;
 	private float movieNextFrameTime;
 	private final List<com.etheller.warsmash.viewer5.handlers.w3x.simulation.quest.CQuest> registeredQuests = new ArrayList<>();
-	private CScriptDialog questDialog;
-	private boolean questDialogVisible;
+	private com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.QuestDialogUI questDialogUI;
+	private boolean questDialogPausedGame;
+	/** FlashQuestDialogButton: the Quests button blinks until the quest log is opened. */
+	private boolean questButtonFlashing;
+	private float questButtonFlashClock;
 	private CScriptDialog scoreDialog;
 	private Runnable scoreDialogCancel;
 	private String scoreDialogTitle;
@@ -853,6 +856,9 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.menuButton.setOnClick(new Runnable() {
 			@Override
 			public void run() {
+				if (isQuestDialogOpen()) {
+					hideQuestDialog();
+				}
 				escMenuBackdrop.setVisible(true);
 				escMenuMainPanel.setVisible(true);
 				MeleeUI.this.smashEscMenu.setVisible(true);
@@ -1566,6 +1572,9 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		// this.tooltipFrame = this.rootFrame.createFrameByType("BACKDROP",
 		// "SmashToolTipBackdrop", this.rootFrame, "", 0);
 
+		this.questDialogUI = new com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.QuestDialogUI(this.rootFrame,
+				this.uiViewport, this.war3MapViewer, this::hideQuestDialog);
+
 		this.cursorFrame = (SpriteFrame) this.rootFrame.createFrameByType("SPRITE", "SmashCursorFrame", this.rootFrame,
 				"", 0);
 		this.rootFrame.setSpriteFrameModel(this.cursorFrame, this.rootFrame.getSkinField("Cursor"));
@@ -1574,7 +1583,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		if (WarsmashConstants.CATCH_CURSOR) {
 			Gdx.input.setCursorCatched(true);
 		}
-		this.includeFrames = new String[] { "EscMenuBackdrop", "ScriptDialog", "SmashHoverTip", "SmashHpBar" };
+		this.includeFrames = new String[] { "EscMenuBackdrop", "QuestDialog", "QuestBackdrop", "ScriptDialog",
+				"SmashHoverTip", "SmashHpBar" };
 		this.ignoreFrames = new String[] { "SmashHoverTip", "SmashHpBar", "SmashGameMessageFrame" };
 
 		this.meleeUIMinimap = createMinimap(this.war3MapViewer);
@@ -1846,7 +1856,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		final boolean right = (mouseX >= (maxX - 3)) && WarsmashConstants.CATCH_CURSOR && this.userControlEnabled;
 		final boolean up = (mouseY <= (minY + 3)) && WarsmashConstants.CATCH_CURSOR && this.userControlEnabled;
 		final boolean down = (mouseY >= (maxY - 3)) && WarsmashConstants.CATCH_CURSOR && this.userControlEnabled;
-		if (getVisibleScriptDialog() == null) {
+		if (this.questButtonFlashing && (this.questsButton != null)) {
+			this.questButtonFlashClock += deltaTime;
+			this.questsButton.setForcedHighlight(((int) (this.questButtonFlashClock / 0.5f) % 2) == 0);
+		}
+		if ((getVisibleScriptDialog() == null) && !isQuestDialogOpen()) {
 			// warsmash-nx: a game pad's camera stick, while the player has control and no menu is open
 			final boolean stickPans = this.userControlEnabled && !isEscMenuOpen();
 			this.cameraManager.setAnalogPan(stickPans ? PadSticks.cameraX : 0, stickPans ? PadSticks.cameraY : 0);
@@ -4418,6 +4432,21 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			}
 			return true;
 		}
+		if (isQuestDialogOpen()) {
+			if ((keycode == Input.Keys.ESCAPE) || (keycode == Input.Keys.F9) || (keycode == Input.Keys.ENTER)
+					|| (keycode == Input.Keys.NUMPAD_ENTER)) {
+				hideQuestDialog();
+				this.war3MapViewer.getUiSounds().getSound("InterfaceClick").play(this.uiScene.audioContext, 0, 0, 0);
+			}
+			return true;
+		}
+		if ((keycode == Input.Keys.F9) && this.userControlEnabled && !this.moviePlaying
+				&& (this.cinematicCameraInstance == null) && this.consoleUI.isVisible()
+				&& (this.questsButton != null) && this.questsButton.isVisibleOnScreen()) {
+			showQuestDialog();
+			this.war3MapViewer.getUiSounds().getSound("InterfaceClick").play(this.uiScene.audioContext, 0, 0, 0);
+			return true;
+		}
 		if (WarsmashConstants.ENABLE_DEBUG) {
 			if (keycode == Input.Keys.Z) {
 				War3MapViewer.DEBUG_DEPTH++;
@@ -4504,6 +4533,10 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			// a dialog (the load picker too) is on top of everything, the menu included
 			return keyDown(Input.Keys.ESCAPE);
 		}
+		if (isQuestDialogOpen()) {
+			hideQuestDialog();
+			return true;
+		}
 		if (isEscMenuOpen()) {
 			final GlueTextButtonFrame back;
 			if (keycode == Input.Keys.BUTTON_START) {
@@ -4540,12 +4573,19 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		return this.smashEscMenu.isVisible() && this.escMenuMainPanel.isVisible();
 	}
 
+	private boolean isQuestDialogOpen() {
+		return (this.questDialogUI != null) && this.questDialogUI.isVisible();
+	}
+
 	/** warsmash-nx: the D-pad moves the cursor between the buttons of the game menu or a script dialog. */
 	private boolean padNavigate(final int direction) {
 		final UIFrame root;
 		final CScriptDialog dialog = getVisibleScriptDialog();
 		if (dialog != null) {
 			root = dialog.getScriptDialogFrame();
+		}
+		else if (isQuestDialogOpen()) {
+			root = this.questDialogUI.getRootFrame();
 		}
 		else if (isEscMenuOpen()) {
 			root = this.smashEscMenu;
@@ -4570,6 +4610,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	@Override
 	public boolean scrolled(final float amountX, final float amountY) {
 		if (getVisibleScriptDialog() != null) return true;
+		if (isQuestDialogOpen()) {
+			screenCoordsVector.set(Gdx.input.getX(), Gdx.input.getY());
+			this.uiViewport.unproject(screenCoordsVector);
+			return this.questDialogUI.scrolled(screenCoordsVector.x, screenCoordsVector.y, amountY);
+		}
 		if (!this.userControlEnabled) {
 			return false;
 		}
@@ -4587,6 +4632,24 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			final UIFrame clicked = modalDialog.getScriptDialogFrame().touchDown(screenCoordsVector.x, screenCoordsVector.y, button);
 			this.mouseDownUIFrame = clicked instanceof ClickableFrame ? (ClickableFrame) clicked : null;
 			if (this.mouseDownUIFrame != null) this.mouseDownUIFrame.mouseDown(this.rootFrame, this.uiViewport);
+			return true;
+		}
+		if (isQuestDialogOpen()) {
+			this.allowDrag = false;
+			screenCoordsVector.set(screenX, screenY);
+			this.uiViewport.unproject(screenCoordsVector);
+			UIFrame clicked = this.questDialogUI.getRootFrame().touchDown(screenCoordsVector.x, screenCoordsVector.y,
+					button);
+			if ((clicked == null) && (this.questsButton != null)) {
+				clicked = this.questsButton.touchDown(screenCoordsVector.x, screenCoordsVector.y, button);
+			}
+			if ((clicked == null) && (this.menuButton != null)) {
+				clicked = this.menuButton.touchDown(screenCoordsVector.x, screenCoordsVector.y, button);
+			}
+			this.mouseDownUIFrame = clicked instanceof ClickableFrame ? (ClickableFrame) clicked : null;
+			if (this.mouseDownUIFrame != null) {
+				this.mouseDownUIFrame.mouseDown(this.rootFrame, this.uiViewport);
+			}
 			return true;
 		}
 		if (!this.userControlEnabled) {
@@ -5188,6 +5251,32 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 			}
 			return true;
 		}
+		if (isQuestDialogOpen()) {
+			this.currentlyDraggingPointer = -1;
+			screenCoordsVector.set(screenX, screenY);
+			this.uiViewport.unproject(screenCoordsVector);
+			UIFrame clicked = this.questDialogUI.getRootFrame().touchUp(screenCoordsVector.x, screenCoordsVector.y,
+					button);
+			if ((clicked == null) && (this.questsButton != null)) {
+				clicked = this.questsButton.touchUp(screenCoordsVector.x, screenCoordsVector.y, button);
+			}
+			if ((clicked == null) && (this.menuButton != null)) {
+				clicked = this.menuButton.touchUp(screenCoordsVector.x, screenCoordsVector.y, button);
+			}
+			final ClickableFrame pressed = this.mouseDownUIFrame;
+			this.mouseDownUIFrame = null;
+			if (pressed != null) {
+				pressed.mouseUp(this.rootFrame, this.uiViewport);
+				if ((clicked == pressed) && (button == Input.Buttons.LEFT)) {
+					pressed.onClick(button);
+					final String soundKey = pressed.getSoundKey();
+					if (soundKey != null) {
+						this.war3MapViewer.getUiSounds().getSound(soundKey).play(this.uiScene.audioContext, 0, 0, 0);
+					}
+				}
+			}
+			return true;
+		}
 		if (button == Input.Buttons.FORWARD) {
 			return false;
 		}
@@ -5322,6 +5411,15 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 	@Override
 	public boolean touchDragged(final int screenX, final int screenY, final float worldScreenY, final int pointer) {
+		if (isQuestDialogOpen()) {
+			screenCoordsVector.set(screenX, screenY);
+			this.uiViewport.unproject(screenCoordsVector);
+			if (this.mouseDownUIFrame != null) {
+				this.mouseDownUIFrame.mouseDragged(this.rootFrame, this.uiViewport, screenCoordsVector.x,
+						screenCoordsVector.y);
+			}
+			return true;
+		}
 		if (!this.userControlEnabled) {
 			return false;
 		}
@@ -5368,8 +5466,21 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	public boolean mouseMoved(final int screenX, final int screenY, final float worldScreenY) {
 		screenCoordsVector.set(screenX, screenY);
 		this.uiViewport.unproject(screenCoordsVector);
-		final UIFrame mousedUIFrame = this.rootFrame.getFrameChildUnderMouse(screenCoordsVector.x,
-				screenCoordsVector.y);
+		final UIFrame mousedUIFrame;
+		if (isQuestDialogOpen()) {
+			UIFrame qFrame = this.questDialogUI.getRootFrame().getFrameChildUnderMouse(screenCoordsVector.x,
+					screenCoordsVector.y);
+			if ((qFrame == null) && (this.questsButton != null)) {
+				qFrame = this.questsButton.getFrameChildUnderMouse(screenCoordsVector.x, screenCoordsVector.y);
+			}
+			if ((qFrame == null) && (this.menuButton != null)) {
+				qFrame = this.menuButton.getFrameChildUnderMouse(screenCoordsVector.x, screenCoordsVector.y);
+			}
+			mousedUIFrame = qFrame;
+		}
+		else {
+			mousedUIFrame = this.rootFrame.getFrameChildUnderMouse(screenCoordsVector.x, screenCoordsVector.y);
+		}
 		if (mousedUIFrame != this.mouseOverUIFrame) {
 			if (this.mouseOverUIFrame != null) {
 				this.mouseOverUIFrame.mouseExit(this.rootFrame, this.uiViewport);
@@ -5387,6 +5498,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 				this.mouseOverUIFrame = null;
 				this.tooltipFrame.setVisible(false);
 			}
+		}
+		if (isQuestDialogOpen()) {
+			this.war3MapViewer.clearUnitMouseOverHighlight();
+			this.mouseOverUnit = null;
+			return false;
 		}
 		final UIFrame hover = getHoveredFrame(this.rootFrame, screenCoordsVector.x, screenCoordsVector.y,
 				this.includeFrames, this.ignoreFrames);
@@ -6846,30 +6962,33 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	public void registerQuest(final com.etheller.warsmash.viewer5.handlers.w3x.simulation.quest.CQuest quest) {
 		if ((quest != null) && !this.registeredQuests.contains(quest)) {
 			this.registeredQuests.add(quest);
+			if (isQuestDialogOpen()) {
+				forceQuestDialogUpdate();
+			}
 		}
 	}
 
 	@Override
 	public void unregisterQuest(final com.etheller.warsmash.viewer5.handlers.w3x.simulation.quest.CQuest quest) {
 		this.registeredQuests.remove(quest);
-		if (this.questDialogVisible) {
+		if (isQuestDialogOpen()) {
 			forceQuestDialogUpdate();
 		}
 	}
 
 	@Override
 	public void forceQuestDialogUpdate() {
-		if (!this.questDialogVisible) {
+		if (!isQuestDialogOpen()) {
 			return;
 		}
-		rebuildQuestDialog();
+		this.questDialogUI.refresh(this.registeredQuests, this.defeatConditions);
 	}
 
 	@Override
 	public void flashQuestDialogButton() {
-		if (this.questsButton != null) {
-			// Visual flash is limited without frame anim APIs; surface a short tip instead.
-			showGameMessage("Quest log updated", 3f);
+		if (!isQuestDialogOpen()) {
+			this.questButtonFlashing = true;
+			this.questButtonFlashClock = 0f;
 		}
 	}
 
@@ -7368,7 +7487,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	}
 
 	private void toggleQuestDialog() {
-		if (this.questDialogVisible) {
+		if (isQuestDialogOpen()) {
 			hideQuestDialog();
 		}
 		else {
@@ -7377,73 +7496,35 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	}
 
 	private void showQuestDialog() {
-		rebuildQuestDialog();
-		if (this.questDialog != null) {
-			this.questDialog.setVisible(true);
-			this.questDialogVisible = true;
+		if (this.questDialogUI == null) {
+			return;
+		}
+		if (isEscMenuOpen() && (this.escMenuReturnButton != null)) {
+			this.escMenuEndGamePanel.setVisible(false);
+			this.escMenuConfirmQuitPanel.setVisible(false);
+			this.escMenuReturnButton.onClick(Input.Buttons.LEFT);
+		}
+		this.questButtonFlashing = false;
+		if (this.questsButton != null) {
+			this.questsButton.setForcedHighlight(false);
+		}
+		this.questDialogUI.refresh(this.registeredQuests, this.defeatConditions);
+		this.questDialogUI.setVisible(true);
+		final CSimulation simulation = this.war3MapViewer.simulation;
+		if (!this.questDialogPausedGame && !simulation.isGamePaused()) {
+			simulation.setGamePaused(true);
+			this.questDialogPausedGame = true;
 		}
 	}
 
 	private void hideQuestDialog() {
-		if (this.questDialog != null) {
-			this.questDialog.setVisible(false);
+		if (this.questDialogUI != null) {
+			this.questDialogUI.setVisible(false);
 		}
-		this.questDialogVisible = false;
-	}
-
-	private void rebuildQuestDialog() {
-		final GlobalScope scope = this.war3MapViewer.simulation.getGlobalScope();
-		if (this.questDialog != null) {
-			destroyDialog(this.questDialog);
+		if (this.questDialogPausedGame) {
+			this.questDialogPausedGame = false;
+			this.war3MapViewer.simulation.setGamePaused(false);
 		}
-		this.questDialog = createScriptDialog(scope != null ? scope : null);
-		final StringBuilder body = new StringBuilder("Quests");
-		if (this.registeredQuests.isEmpty()) {
-			body.append("\n\n(No active quests)");
-		}
-		else {
-			for (final com.etheller.warsmash.viewer5.handlers.w3x.simulation.quest.CQuest quest : this.registeredQuests) {
-				if (!quest.isEnabled() || !quest.isDiscovered()) {
-					continue;
-				}
-				body.append("\n\n");
-				if (quest.isCompleted()) {
-					body.append("[Done] ");
-				}
-				else if (quest.isFailed()) {
-					body.append("[Failed] ");
-				}
-				else if (quest.isRequired()) {
-					body.append("[Required] ");
-				}
-				body.append(quest.getTitle());
-				if ((quest.getDescription() != null) && !quest.getDescription().isEmpty()) {
-					body.append("\n").append(quest.getDescription());
-				}
-				for (final com.etheller.warsmash.viewer5.handlers.w3x.simulation.quest.CQuestItem item : quest
-						.getItems()) {
-					body.append("\n  - ");
-					if (item.isCompleted()) {
-						body.append("(x) ");
-					}
-					else {
-						body.append("( ) ");
-					}
-					body.append(item.getDescription());
-				}
-			}
-		}
-		this.questDialog.setTitle(this.rootFrame, body.toString());
-		if (!this.defeatConditions.isEmpty()) {
-			body.append("\n\nDefeat Conditions");
-			for (final com.etheller.warsmash.viewer5.handlers.w3x.simulation.quest.CDefeatCondition cond : this.defeatConditions) {
-				body.append("\n  ! ").append(cond.getDescription());
-			}
-			this.questDialog.setTitle(this.rootFrame, body.toString());
-		}
-		final CScriptDialogButton close = createScriptDialogButton(this.questDialog, "Close", 'C');
-		close.getButtonFrame().setOnClick(this::hideQuestDialog);
-		this.questDialog.getScriptDialogFrame().positionBounds(this.rootFrame, this.uiViewport);
 	}
 
 	@Override

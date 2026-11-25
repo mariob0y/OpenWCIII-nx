@@ -11,7 +11,10 @@ public class GlueButtonFrame extends AbstractRenderableFrame implements Clickabl
 	private UIFrame controlBackdrop;
 	private UIFrame controlPushedBackdrop;
 	private UIFrame controlDisabledBackdrop;
+	private UIFrame controlDisabledPushedBackdrop;
 	private UIFrame controlMouseOverHighlight;
+	private UIFrame forcedBackdrop;
+	private UIFrame overlayFrame;
 
 	private boolean enabled = true;
 	private boolean highlightOnMouseOver;
@@ -33,22 +36,67 @@ public class GlueButtonFrame extends AbstractRenderableFrame implements Clickabl
 		}
 	}
 
+	public UIFrame getControlBackdrop() {
+		return this.controlBackdrop;
+	}
+
 	public void setControlPushedBackdrop(final UIFrame controlPushedBackdrop) {
 		this.controlPushedBackdrop = controlPushedBackdrop;
+	}
+
+	public UIFrame getControlPushedBackdrop() {
+		return this.controlPushedBackdrop;
 	}
 
 	public void setControlDisabledBackdrop(final UIFrame controlDisabledBackdrop) {
 		this.controlDisabledBackdrop = controlDisabledBackdrop;
 	}
 
+	public UIFrame getControlDisabledBackdrop() {
+		return this.controlDisabledBackdrop;
+	}
+
+	public void setControlDisabledPushedBackdrop(final UIFrame controlDisabledPushedBackdrop) {
+		this.controlDisabledPushedBackdrop = controlDisabledPushedBackdrop;
+	}
+
+	public UIFrame getControlDisabledPushedBackdrop() {
+		return this.controlDisabledPushedBackdrop;
+	}
+
 	public void setControlMouseOverHighlight(final UIFrame controlMouseOverHighlight) {
 		this.controlMouseOverHighlight = controlMouseOverHighlight;
+	}
+
+	public UIFrame getControlMouseOverHighlight() {
+		return this.controlMouseOverHighlight;
+	}
+
+	public void setForcedBackdrop(final UIFrame forcedBackdrop) {
+		this.forcedBackdrop = forcedBackdrop;
+		if (forcedBackdrop != null) {
+			this.activeChild = forcedBackdrop;
+		}
+		else {
+			this.activeChild = this.enabled ? this.controlBackdrop : this.controlDisabledBackdrop;
+		}
+	}
+
+	public void setOverlayFrame(final UIFrame overlayFrame) {
+		this.overlayFrame = overlayFrame;
+	}
+
+	public UIFrame getOverlayFrame() {
+		return this.overlayFrame;
 	}
 
 	public void setEnabled(final boolean enabled) {
 		this.enabled = enabled;
 		if (!enabled) this.mouseOver = false;
-		if (this.enabled) {
+		if (this.forcedBackdrop != null) {
+			this.activeChild = this.forcedBackdrop;
+		}
+		else if (this.enabled) {
 			this.activeChild = this.controlBackdrop;
 		}
 		else {
@@ -83,10 +131,19 @@ public class GlueButtonFrame extends AbstractRenderableFrame implements Clickabl
 		if (this.controlDisabledBackdrop != null) {
 			this.controlDisabledBackdrop.positionBounds(gameUI, viewport);
 		}
+		if (this.controlDisabledPushedBackdrop != null) {
+			this.controlDisabledPushedBackdrop.positionBounds(gameUI, viewport);
+		}
 		if (this.controlMouseOverHighlight != null) {
 			this.controlMouseOverHighlight.positionBounds(gameUI, viewport);
 		}
-		if (this.enabled) {
+		if (this.overlayFrame != null) {
+			this.overlayFrame.positionBounds(gameUI, viewport);
+		}
+		if (this.forcedBackdrop != null) {
+			this.activeChild = this.forcedBackdrop;
+		}
+		else if (this.enabled) {
 			this.activeChild = this.controlBackdrop;
 		}
 		else {
@@ -99,7 +156,11 @@ public class GlueButtonFrame extends AbstractRenderableFrame implements Clickabl
 		if (this.activeChild != null) {
 			this.activeChild.render(batch, baseFont, glyphLayout);
 		}
-		if (this.mouseOver) {
+		final boolean overlayVisible = (this.overlayFrame != null) && this.overlayFrame.isVisible();
+		if (overlayVisible) {
+			this.overlayFrame.render(batch, baseFont, glyphLayout);
+		}
+		if (this.mouseOver && !overlayVisible) {
 			if (this.controlMouseOverHighlight != null) {
 				this.controlMouseOverHighlight.render(batch, baseFont, glyphLayout);
 			}
@@ -109,7 +170,7 @@ public class GlueButtonFrame extends AbstractRenderableFrame implements Clickabl
 	@Override
 	public void mouseDown(final GameUI gameUI, final Viewport uiViewport) {
 		if (this.enabled) {
-			if (this.controlPushedBackdrop != null) {
+			if ((this.forcedBackdrop == null) && (this.controlPushedBackdrop != null)) {
 				this.activeChild = this.controlPushedBackdrop;
 			}
 			this.buttonListener.mouseDown(gameUI, uiViewport);
@@ -119,7 +180,7 @@ public class GlueButtonFrame extends AbstractRenderableFrame implements Clickabl
 	@Override
 	public void mouseUp(final GameUI gameUI, final Viewport uiViewport) {
 		if (this.enabled) {
-			if (this.controlBackdrop != null) {
+			if ((this.forcedBackdrop == null) && (this.controlBackdrop != null)) {
 				this.activeChild = this.controlBackdrop;
 			}
 			this.buttonListener.mouseUp(gameUI, uiViewport);

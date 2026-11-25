@@ -18,6 +18,7 @@ public class SimpleButtonFrame extends AbstractRenderableFrame implements Clicka
 	private boolean highlightOnMouseOver;
 	private boolean mouseOver = false;
 	private boolean pushed = false;
+	private boolean forcedHighlight = false;
 
 	private UIFrame activeChild;
 	private UIFrame activeTextChild;
@@ -75,6 +76,10 @@ public class SimpleButtonFrame extends AbstractRenderableFrame implements Clicka
 		this.highlightOnMouseOver = highlightOnMouseOver;
 	}
 
+	public void setForcedHighlight(final boolean forcedHighlight) {
+		this.forcedHighlight = forcedHighlight;
+	}
+
 	public void setOnClick(final Runnable onClick) {
 		this.onClick = onClick;
 	}
@@ -123,10 +128,14 @@ public class SimpleButtonFrame extends AbstractRenderableFrame implements Clicka
 		if (this.activeChild != null) {
 			this.activeChild.render(batch, baseFont, glyphLayout);
 		}
-		if (this.activeTextChild != null) {
-			this.activeTextChild.render(batch, baseFont, glyphLayout);
+		// a forced highlight (a flashing button) also shows the highlight text, as a mouse-over does
+		final UIFrame textChild = (this.enabled && this.forcedHighlight && !this.pushed
+				&& (this.activeTextChild == this.buttonText) && (this.highlightText != null)) ? this.highlightText
+						: this.activeTextChild;
+		if (textChild != null) {
+			textChild.render(batch, baseFont, glyphLayout);
 		}
-		if (this.mouseOver) {
+		if ((this.mouseOver || (this.enabled && this.forcedHighlight)) && (this.controlMouseOverHighlight != null)) {
 			this.controlMouseOverHighlight.render(batch, baseFont, glyphLayout);
 		}
 	}
