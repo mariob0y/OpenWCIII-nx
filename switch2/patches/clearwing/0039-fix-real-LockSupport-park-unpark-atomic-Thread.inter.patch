@@ -1,0 +1,381 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Wed, 25 Nov 2026 11:39:06 +0200
+Subject: [PATCH] fix: real LockSupport park/unpark, atomic Thread.interrupted
+ and AQS CAS checks
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp       |  12 +-
+ runtime/res/clearwing/src/PlatformThreads.cpp | 140 ++++++++++++++++++
+ runtime/res/clearwing/src/Thread.cpp          |  14 +-
+ runtime/src/java/lang/Thread.java             |   9 +-
+ .../locks/AbstractQueuedSynchronizer.java     |   8 +
+ .../util/concurrent/locks/LockSupport.java    |  24 +--
+ 6 files changed, 180 insertions(+), 27 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 4df01f5..e83fb2f 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -149,6 +149,9 @@ jcontext initVM() {
+     return mainContext;
+ }
+ 
++extern "C" void lockSupportWakeContext(jcontext targetCtx);
++extern "C" void lockSupportDestroyContext(jcontext targetCtx);
++
+ void shutdownVM(jcontext ctx) {
+     if (exiting) return;
+     exiting = true;
+@@ -166,6 +169,7 @@ void shutdownVM(jcontext ctx) {
+             threadContext->lock.lock();
+             if (jobject blocked = threadContext->blockedBy.load())
+                 monitorWakeAllWaiters(getMonitor(blocked)); // warsmash-nx
++            lockSupportWakeContext(threadContext); // warsmash-nx (round 12)
+             threadContext->lock.unlock();
+         }
+         if (done)
+@@ -599,6 +603,7 @@ void destroyContext(jcontext context) {
+     }
+     std::erase(threadContexts, context);
+     releaseCriticalLock();
++    lockSupportDestroyContext(context); // warsmash-nx (round 12)
+     delete context;
+ }
+ 
+@@ -1236,7 +1241,8 @@ void monitorWait(jcontext ctx, jobject object, int64_t timeoutNs) {
+     monitor->depth = 1;
+     monitorExit(ctx, object);
+     ctx->suspended = true;
+-    while (monitor->notifySeq.load(std::memory_order_seq_cst) == seen && !ctx->thread->F_interrupted) {
++    while (monitor->notifySeq.load(std::memory_order_seq_cst) == seen
++            && !__atomic_load_n(&ctx->thread->F_interrupted, __ATOMIC_SEQ_CST)) {
+         int64_t slice = 50000000; // a backstop only: a notify wakes the sleep
+         if (timeoutNs > 0) {
+             const int64_t left = std::chrono::duration_cast<std::chrono::nanoseconds>(
+@@ -1269,8 +1275,8 @@ void monitorOwnerCheck(jcontext ctx, jobject object) {
+ 
+ /// Checks if the current thread is interrupted. Throws exceptions.
+ void interruptedCheck(jcontext ctx) {
+-    if (ctx->thread->F_interrupted) {
+-        ctx->thread->F_interrupted = false;
++    if (__atomic_load_n(&ctx->thread->F_interrupted, __ATOMIC_ACQUIRE)
++            && __atomic_exchange_n(&ctx->thread->F_interrupted, false, __ATOMIC_SEQ_CST)) {
+         constructAndThrow<&class_java_lang_InterruptedException, init_java_lang_InterruptedException>(ctx);
+     }
+ }
+diff --git a/runtime/res/clearwing/src/PlatformThreads.cpp b/runtime/res/clearwing/src/PlatformThreads.cpp
+index 41632e3..8e7afe6 100644
+--- a/runtime/res/clearwing/src/PlatformThreads.cpp
++++ b/runtime/res/clearwing/src/PlatformThreads.cpp
+@@ -104,3 +104,143 @@ void monitorWakeAllWaiters(jmonitor monitor) {
+     monitor->notifySeq.fetch_add(1, std::memory_order_seq_cst);
+     monitorFutexWake(monitor->notifySeq, -1);
+ }
++
++// warsmash-nx (round 12): LockSupport.park* / unpark on top of monitorFutexWait/Wake (no-op park
++// caused AQS/BlockingQueue/ThreadPoolExecutor waiters to spin at 100% CPU and starve same-core
++// Horizon threads). Each ThreadContext gets a single 32-bit state word:
++//   bit 0     = permit available (1) or not (0)
++//   bits 1..31 = monotonic wake counter, bumped by both unpark (+2, setting bit 0) and interrupt /
++//                shutdown (+2, preserving bit 0) so svcWaitForAddress wakes immediately with zero
++//                lost wakeups.
++#include "java/lang/Thread.h"
++#include <chrono>
++#include <memory>
++#include <mutex>
++#include <unordered_map>
++
++namespace {
++std::mutex g_parkRegistryLock;
++std::unordered_map<jcontext, std::shared_ptr<std::atomic_uint32_t>> g_parkStates;
++
++std::shared_ptr<std::atomic_uint32_t> getParkState(jcontext ctx) {
++    std::lock_guard<std::mutex> guard(g_parkRegistryLock);
++    auto &slot = g_parkStates[ctx];
++    if (!slot)
++        slot = std::make_shared<std::atomic_uint32_t>(0);
++    return slot;
++}
++
++void lockSupportParkImpl(jcontext ctx, bool timed, int64_t timeoutNs) {
++    if (!ctx || !ctx->thread)
++        return;
++    auto state = getParkState(ctx);
++    // Fast path: permit already available.
++    if (state->load(std::memory_order_seq_cst) & 1u) {
++        state->fetch_and(~1u, std::memory_order_seq_cst);
++        return;
++    }
++    if (__atomic_load_n(&ctx->thread->F_interrupted, __ATOMIC_SEQ_CST))
++        return;
++    if (timed && timeoutNs <= 0)
++        return;
++
++    const auto deadline = timed
++            ? (std::chrono::steady_clock::now() + std::chrono::nanoseconds(timeoutNs))
++            : std::chrono::steady_clock::time_point{};
++
++    ctx->suspended = true;
++    std::atomic_thread_fence(std::memory_order_seq_cst);
++    while (true) {
++        const uint32_t seen = state->load(std::memory_order_seq_cst);
++        if (seen & 1u) {
++            state->fetch_and(~1u, std::memory_order_seq_cst);
++            break;
++        }
++        if (__atomic_load_n(&ctx->thread->F_interrupted, __ATOMIC_SEQ_CST) || suspendVM)
++            break;
++        int64_t slice = 50000000; // 50 ms backstop; unpark/interrupt/shutdown wake at once
++        if (timed) {
++            const int64_t left = std::chrono::duration_cast<std::chrono::nanoseconds>(
++                    deadline - std::chrono::steady_clock::now()).count();
++            if (left <= 0)
++                break;
++            if (left < slice)
++                slice = left;
++        }
++        monitorFutexWait(*state, seen, slice);
++    }
++    ctx->suspended = false;
++    std::atomic_thread_fence(std::memory_order_seq_cst);
++    SAFEPOINT();
++}
++} // namespace
++
++extern "C" {
++
++void lockSupportWakeContext(jcontext targetCtx) {
++    if (!targetCtx)
++        return;
++    std::shared_ptr<std::atomic_uint32_t> state;
++    {
++        std::lock_guard<std::mutex> guard(g_parkRegistryLock);
++        auto it = g_parkStates.find(targetCtx);
++        if (it == g_parkStates.end())
++            return;
++        state = it->second;
++    }
++    state->fetch_add(2u, std::memory_order_seq_cst);
++    monitorFutexWake(*state, 1);
++}
++
++void lockSupportDestroyContext(jcontext targetCtx) {
++    if (!targetCtx)
++        return;
++    std::shared_ptr<std::atomic_uint32_t> old;
++    {
++        std::lock_guard<std::mutex> guard(g_parkRegistryLock);
++        auto it = g_parkStates.find(targetCtx);
++        if (it != g_parkStates.end()) {
++            old = std::move(it->second);
++            g_parkStates.erase(it);
++        }
++    }
++    if (old) {
++        old->fetch_add(2u, std::memory_order_seq_cst);
++        monitorFutexWake(*old, -1);
++    }
++}
++
++void SM_java_util_concurrent_locks_LockSupport_unpark_java_lang_Thread(jcontext ctx, jobject threadObj) {
++    (void) ctx;
++    if (!threadObj)
++        return;
++    auto targetCtx = (jcontext) ((java_lang_Thread *) threadObj)->F_nativeContext;
++    if (!targetCtx)
++        return;
++    auto state = getParkState(targetCtx);
++    uint32_t cur = state->load(std::memory_order_seq_cst);
++    while (!state->compare_exchange_weak(cur, (cur + 2u) | 1u, std::memory_order_seq_cst)) {}
++    monitorFutexWake(*state, 1);
++}
++
++void SM_java_util_concurrent_locks_LockSupport_park(jcontext ctx) {
++    lockSupportParkImpl(ctx, false, 0);
++}
++
++void SM_java_util_concurrent_locks_LockSupport_parkNanos_long(jcontext ctx, jlong nanos) {
++    if (nanos > 0)
++        lockSupportParkImpl(ctx, true, (int64_t) nanos);
++}
++
++void SM_java_util_concurrent_locks_LockSupport_parkUntil_long(jcontext ctx, jlong deadlineMs) {
++    const int64_t nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
++            std::chrono::system_clock::now().time_since_epoch()).count();
++    const int64_t leftMs = (int64_t) deadlineMs - nowMs;
++    if (leftMs <= 0)
++        return;
++    const int64_t maxMs = INT64_MAX / 1000000LL;
++    const int64_t timeoutNs = (leftMs >= maxMs) ? INT64_MAX : (leftMs * 1000000LL);
++    lockSupportParkImpl(ctx, true, timeoutNs);
++}
++
++} // extern "C"
+diff --git a/runtime/res/clearwing/src/Thread.cpp b/runtime/res/clearwing/src/Thread.cpp
+index 3ca428d..a8ccc54 100644
+--- a/runtime/res/clearwing/src/Thread.cpp
++++ b/runtime/res/clearwing/src/Thread.cpp
+@@ -88,12 +88,24 @@ void M_java_lang_Thread_start(jcontext ctx, jobject self) {
+     *newContext->nativeThread = std::thread(threadEntrypoint, newContext, thread);
+ }
+ 
++extern void lockSupportWakeContext(jcontext targetCtx);
++
++jbool SM_java_lang_Thread_interrupted_R_boolean(jcontext ctx) {
++    auto thread = ctx->thread;
++    if (!__atomic_load_n(&thread->F_interrupted, __ATOMIC_ACQUIRE))
++        return false;
++    return __atomic_exchange_n(&thread->F_interrupted, false, __ATOMIC_SEQ_CST);
++}
++
+ void M_java_lang_Thread_interrupt(jcontext ctx, jobject self) {
+     auto threadCtx = (jcontext) ((jthread) NULL_CHECK(self))->F_nativeContext;
++    if (!threadCtx)
++        return;
+     threadCtx->lock.lock();
+-    threadCtx->thread->F_interrupted = true;
++    __atomic_store_n(&threadCtx->thread->F_interrupted, true, __ATOMIC_SEQ_CST);
+     if (jobject blocked = threadCtx->blockedBy.load())
+         monitorWakeAllWaiters(getMonitor(blocked)); // warsmash-nx
++    lockSupportWakeContext(threadCtx); // warsmash-nx (round 12): wake LockSupport.park
+     threadCtx->lock.unlock();
+ }
+ 
+diff --git a/runtime/src/java/lang/Thread.java b/runtime/src/java/lang/Thread.java
+index 3d90425..c18a416 100644
+--- a/runtime/src/java/lang/Thread.java
++++ b/runtime/src/java/lang/Thread.java
+@@ -158,12 +158,9 @@ public class Thread implements java.lang.Runnable{
+         return alive;
+     }
+ 
+-    public static boolean interrupted() {
+-        Thread current = currentThread();
+-        boolean interrupted = current.interrupted;
+-        current.interrupted = false;
+-        return interrupted;
+-    }
++    // warsmash-nx: native atomic read-and-clear so a thread polling interrupted() cannot clobber a
++    // concurrent interrupt() from another core (Clearwing Thread.cpp).
++    public static native boolean interrupted();
+ 
+     public final boolean isInterrupted() {
+         return interrupted;
+diff --git a/runtime/src/java/util/concurrent/locks/AbstractQueuedSynchronizer.java b/runtime/src/java/util/concurrent/locks/AbstractQueuedSynchronizer.java
+index 1201670..6cabf53 100644
+--- a/runtime/src/java/util/concurrent/locks/AbstractQueuedSynchronizer.java
++++ b/runtime/src/java/util/concurrent/locks/AbstractQueuedSynchronizer.java
+@@ -2291,6 +2291,8 @@ public abstract class AbstractQueuedSynchronizer
+      * CAS head field. Used only by enq.
+      */
+     private final synchronized boolean compareAndSetHead(Node update) {
++        if (head != null)
++            return false;
+         head = update;
+         return true;//unsafe.compareAndSwapObject(this, headOffset, null, update);
+     }
+@@ -2299,6 +2301,8 @@ public abstract class AbstractQueuedSynchronizer
+      * CAS tail field. Used only by enq.
+      */
+     private final synchronized boolean compareAndSetTail(Node expect, Node update) {
++        if (tail != expect)
++            return false;
+         tail = update;
+         return true;//unsafe.compareAndSwapObject(this, tailOffset, expect, update);
+     }
+@@ -2307,6 +2311,8 @@ public abstract class AbstractQueuedSynchronizer
+      * CAS waitStatus field of a node.
+      */
+     private static final synchronized boolean compareAndSetWaitStatus(Node node, int expect, int update) {
++        if (node.waitStatus != expect)
++            return false;
+         node.waitStatus = update;
+         return true;//unsafe.compareAndSwapInt(node, waitStatusOffset, expect, update);
+     }
+@@ -2315,6 +2321,8 @@ public abstract class AbstractQueuedSynchronizer
+      * CAS next field of a node.
+      */
+     private static final synchronized boolean compareAndSetNext(Node node, Node expect, Node update) {
++        if (node.next != expect)
++            return false;
+         node.next = update;
+         return true;//unsafe.compareAndSwapObject(node, nextOffset, expect, update);
+     }
+diff --git a/runtime/src/java/util/concurrent/locks/LockSupport.java b/runtime/src/java/util/concurrent/locks/LockSupport.java
+index 09fa41d..2aaed7b 100644
+--- a/runtime/src/java/util/concurrent/locks/LockSupport.java
++++ b/runtime/src/java/util/concurrent/locks/LockSupport.java
+@@ -135,10 +135,7 @@ public class LockSupport {
+      * @param thread the thread to unpark, or {@code null}, in which case
+      *        this operation has no effect
+      */
+-    public static void unpark(Thread thread) {
+-//        if (thread != null)
+-//            UNSAFE.unpark(thread);
+-    }
++    public static native void unpark(Thread thread);
+ 
+     /**
+      * Disables the current thread for thread scheduling purposes unless the
+@@ -171,7 +168,7 @@ public class LockSupport {
+     public static void park(Object blocker) {
+         Thread t = Thread.currentThread();
+         setBlocker(t, blocker);
+-//        UNSAFE.park(false, 0L);
++        park();
+         setBlocker(t, null);
+     }
+ 
+@@ -211,7 +208,7 @@ public class LockSupport {
+         if (nanos > 0) {
+             Thread t = Thread.currentThread();
+             setBlocker(t, blocker);
+-//            UNSAFE.park(false, nanos);
++            parkNanos(nanos);
+             setBlocker(t, null);
+         }
+     }
+@@ -252,7 +249,7 @@ public class LockSupport {
+     public static void parkUntil(Object blocker, long deadline) {
+         Thread t = Thread.currentThread();
+         setBlocker(t, blocker);
+-//        UNSAFE.park(true, deadline);
++        parkUntil(deadline);
+         setBlocker(t, null);
+     }
+ 
+@@ -300,9 +297,7 @@ public class LockSupport {
+      * the thread to park in the first place. Callers may also determine,
+      * for example, the interrupt status of the thread upon return.
+      */
+-    public static void park() {
+-//        UNSAFE.park(false, 0L);
+-    }
++    public static native void park();
+ 
+     /**
+      * Disables the current thread for thread scheduling purposes, for up to
+@@ -333,10 +328,7 @@ public class LockSupport {
+      *
+      * @param nanos the maximum number of nanoseconds to wait
+      */
+-    public static void parkNanos(long nanos) {
+-//        if (nanos > 0)
+-//            UNSAFE.park(false, nanos);
+-    }
++    public static native void parkNanos(long nanos);
+ 
+     /**
+      * Disables the current thread for thread scheduling purposes, until
+@@ -368,9 +360,7 @@ public class LockSupport {
+      * @param deadline the absolute time, in milliseconds from the Epoch,
+      *        to wait until
+      */
+-    public static void parkUntil(long deadline) {
+-//        UNSAFE.park(true, deadline);
+-    }
++    public static native void parkUntil(long deadline);
+ 
+     static final long getThreadId(Thread thread) {
+         return 0;

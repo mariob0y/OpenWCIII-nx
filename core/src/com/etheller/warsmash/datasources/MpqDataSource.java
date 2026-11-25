@@ -41,6 +41,9 @@ public class MpqDataSource implements DataSource {
 
 	@Override
 	public InputStream getResourceAsStream(final String filepath) throws IOException {
+		if (!this.archive.hasPath(filepath)) {
+			return null;
+		}
 		ArchivedFile file = null;
 		try {
 			file = this.archive.lookupHash2(new HashLookup(filepath));
@@ -60,6 +63,9 @@ public class MpqDataSource implements DataSource {
 
 	@Override
 	public ByteBuffer read(final String path) throws IOException {
+		if (!this.archive.hasPath(path)) {
+			return null;
+		}
 		ArchivedFile file = null;
 		try {
 			file = this.archive.lookupHash2(new HashLookup(path));
@@ -82,6 +88,9 @@ public class MpqDataSource implements DataSource {
 
 	@Override
 	public File getFile(final String filepath) throws IOException {
+		if (!this.archive.hasPath(filepath)) {
+			return null;
+		}
 		// TODO Auto-generated method stub
 		// System.out.println("getting it from the outside: " +
 		// filepath);

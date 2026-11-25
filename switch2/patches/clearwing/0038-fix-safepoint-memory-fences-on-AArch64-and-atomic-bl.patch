@@ -1,0 +1,91 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Wed, 25 Nov 2026 00:16:09 +0200
+Subject: [PATCH] fix: safepoint memory fences on AArch64 and atomic blockedBy
+ load
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp | 26 ++++++++++++++++---------
+ runtime/res/clearwing/src/Thread.cpp    |  4 ++--
+ 2 files changed, 19 insertions(+), 11 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 5e582e2..4df01f5 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -164,8 +164,8 @@ void shutdownVM(jcontext ctx) {
+             if (threadContext->dead) continue;
+             done = false;
+             threadContext->lock.lock();
+-            if (threadContext->blockedBy)
+-                monitorWakeAllWaiters(getMonitor((jobject) threadContext->blockedBy)); // warsmash-nx
++            if (jobject blocked = threadContext->blockedBy.load())
++                monitorWakeAllWaiters(getMonitor(blocked)); // warsmash-nx
+             threadContext->lock.unlock();
+         }
+         if (done)
+@@ -729,6 +729,7 @@ void runGC(jcontext ctx) {
+         std::lock_guard lock(suspendMutex);
+         suspendVM = true;
+     }
++    std::atomic_thread_fence(std::memory_order_seq_cst); // warsmash-nx: Dekker barrier with ctx->suspended on AArch64
+     clearwingGcStats.phase = 1; // warsmash-nx
+     while (true) {
+         if (exiting) throw ExitException();
+@@ -1030,13 +1031,18 @@ void releaseCriticalLock() {
+ 
+ /// Suspends a thread while the VM is suspended. Does not throw exceptions.
+ void safepointSuspend(jcontext ctx) {
+-    ctx->suspended = true;
+-    while (suspendVM) {
+-        if (exiting)
+-            throw ExitException();
+-        std::this_thread::sleep_for(std::chrono::microseconds(50)); // warsmash-nx: let the GC run
+-    }
+-    ctx->suspended = false;
++    // warsmash-nx: seq_cst fences prevent AArch64 from reordering ctx->suspended=false past suspendVM load.
++    do {
++        ctx->suspended = true;
++        std::atomic_thread_fence(std::memory_order_seq_cst);
++        while (suspendVM) {
++            if (exiting)
++                throw ExitException();
++            std::this_thread::sleep_for(std::chrono::microseconds(50)); // warsmash-nx: let the GC run
++        }
++        ctx->suspended = false;
++        std::atomic_thread_fence(std::memory_order_seq_cst);
++    } while (suspendVM);
+ }
+ 
+ /// Pushes an exception frame onto the given stack frame. `type` can be null. Does not throw exceptions.
+@@ -1193,6 +1199,7 @@ void monitorEnter(jcontext ctx, jobject object) {
+     monitor->depth = 1;
+     ctx->blockedBy = nullptr;
+     ctx->suspended = false;
++    std::atomic_thread_fence(std::memory_order_seq_cst); // warsmash-nx: Dekker barrier with runGC on AArch64
+ 
+     SAFEPOINT();
+ }
+@@ -1242,6 +1249,7 @@ void monitorWait(jcontext ctx, jobject object, int64_t timeoutNs) {
+         monitorFutexWait(monitor->notifySeq, seen, slice);
+     }
+     ctx->suspended = false;
++    std::atomic_thread_fence(std::memory_order_seq_cst); // warsmash-nx: Dekker barrier with runGC on AArch64
+     SAFEPOINT();
+ 
+     monitorEnter(ctx, object);
+diff --git a/runtime/res/clearwing/src/Thread.cpp b/runtime/res/clearwing/src/Thread.cpp
+index 8dd8b2a..3ca428d 100644
+--- a/runtime/res/clearwing/src/Thread.cpp
++++ b/runtime/res/clearwing/src/Thread.cpp
+@@ -92,8 +92,8 @@ void M_java_lang_Thread_interrupt(jcontext ctx, jobject self) {
+     auto threadCtx = (jcontext) ((jthread) NULL_CHECK(self))->F_nativeContext;
+     threadCtx->lock.lock();
+     threadCtx->thread->F_interrupted = true;
+-    if (threadCtx->blockedBy)
+-        monitorWakeAllWaiters(getMonitor((jobject) threadCtx->blockedBy)); // warsmash-nx
++    if (jobject blocked = threadCtx->blockedBy.load())
++        monitorWakeAllWaiters(getMonitor(blocked)); // warsmash-nx
+     threadCtx->lock.unlock();
+ }
+ 

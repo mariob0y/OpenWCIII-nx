@@ -35,6 +35,7 @@ import com.etheller.warsmash.WarsmashGdxMultiScreenGame;
 import com.etheller.warsmash.audio.OpenALSound;
 import com.etheller.warsmash.units.DataTable;
 import com.etheller.warsmash.units.Element;
+import com.etheller.warsmash.util.LoadingStatus;
 import com.etheller.warsmash.util.StringBundle;
 import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.AudioContext;
@@ -72,6 +73,10 @@ public class DesktopLauncher {
 	public static void main(final String[] arg) {
 		final String[] normalizedArgs = normalizeArguments(arg);
 		System.out.println("Warsmash engine is starting...");
+		if (!String.valueOf(System.getenv("NX_LOADLOG")).matches("|null")) {
+			installLoadLog();
+		}
+		com.etheller.warsmash.datasources.FolderDataSource.setFastLister(DesktopLauncher::listFolder);
 		if (Arrays.asList(normalizedArgs).contains("-validate") || Arrays.asList(normalizedArgs).contains("--validate")) {
 			final String iniPath = findIniPathArg(normalizedArgs);
 			final DataTable warsmashIni = loadWarsmashIni(iniPath);
@@ -398,6 +403,71 @@ public class DesktopLauncher {
 		System.out.println("  INI: " + ((iniPath == null) ? "warsmash.ini" : iniPath));
 		System.out.println("  Auto-load: " + ((fileToLoad == null) ? "none" : fileToLoad));
 		System.out.println("  Logging: " + (noLogs ? "stdout/stderr console" : ("files in " + logDirectory)));
+	}
+
+	/**
+	 * Lists a game data folder for FolderDataSource with Files.walkFileTree, which takes each file's
+	 * attributes from the directory listing itself: the core's portable walk asks for them again per file
+	 * (two file-system calls each, about 6 s of the PC boot for war3.w3mod). Same result: every regular
+	 * file below the folder (links followed), relative to it. Null on an error, so the core walks instead.
+	 */
+	private static String listFolder(final String folder) {
+		final java.nio.file.Path root = java.nio.file.Paths.get(folder);
+		final StringBuilder out = new StringBuilder(1 << 20);
+		try {
+			java.nio.file.Files.walkFileTree(root, java.util.EnumSet.of(java.nio.file.FileVisitOption.FOLLOW_LINKS),
+					Integer.MAX_VALUE, new java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+						@Override
+						public java.nio.file.FileVisitResult visitFile(final java.nio.file.Path file,
+								final java.nio.file.attribute.BasicFileAttributes attrs) {
+							if (attrs.isRegularFile()) {
+								out.append(root.relativize(file).toString()).append('\n');
+							}
+							return java.nio.file.FileVisitResult.CONTINUE;
+						}
+					});
+		}
+		catch (final IOException | RuntimeException e) {
+			System.err.println("Folder listing fell back to the portable walk: " + folder + ": " + e);
+			return null;
+		}
+		return out.toString();
+	}
+
+	/**
+	 * warsmash-nx PC test tool (env NX_LOADLOG): logs each loading step with its time, as the console's
+	 * loading screen does ("loading: t s finished in x s: step"), so load times can be compared on the PC.
+	 */
+	private static void installLoadLog() {
+		final long start = System.nanoTime();
+		LoadingStatus.setListener(new LoadingStatus.Listener() {
+			private String step = "";
+			private long stepStart;
+
+			private float seconds(final long nanos) {
+				return Math.round(nanos / 1e8) / 10f;
+			}
+
+			@Override
+			public void status(final String newStep, final String detail) {
+				if (newStep.equals(this.step)) {
+					return;
+				}
+				final long now = System.nanoTime();
+				if (!this.step.isEmpty()) {
+					System.out.println("loading: " + seconds(now - start) + " s finished in "
+							+ (Math.round((now - this.stepStart) / 1e6) / 1000f) + " s: " + this.step);
+				}
+				this.step = newStep;
+				this.stepStart = now;
+			}
+
+			@Override
+			public void done(final String what) {
+				status("", "");
+				System.out.println("loading: " + seconds(System.nanoTime() - start) + " s done: " + what);
+			}
+		});
 	}
 
 	private static String[] normalizeArguments(final String[] arg) {

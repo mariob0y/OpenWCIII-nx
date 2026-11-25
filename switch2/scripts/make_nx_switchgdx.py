@@ -346,7 +346,7 @@ UPDATE = r'''// warsmash-nx: breadcrumbs. On kaiHEN's loader a CPU fault goes st
 // log where they are, with the process's memory: the last crumb before a silent death is where it
 // died. nx_crumb is limited to the first kCrumbFrames frames; nx_event (sounds, music) always logs.
 #include <malloc.h>
-constexpr int kCrumbFrames = 8; // each crumb is an SD-card write; 600 held the menu at ~8 fps
+constexpr int kCrumbFrames = 0; // off by default: each crumb flushes to SD (~3 ms), stalling menu appearance; raise to hunt crashes
 static int nxFrame = 0;
 
 extern "C" unsigned long long nx_start_tick; // userAppInit sets it

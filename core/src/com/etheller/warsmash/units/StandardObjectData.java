@@ -153,37 +153,72 @@ public class StandardObjectData {
 		return units;
 	}
 
-	public DataTable getStandardUnitMeta() {
-		final DataTable unitMetaData = new DataTable(this.worldEditStrings);
+	private static final Map<String, DataTable> READONLY_TABLE_CACHE = new HashMap<>();
+
+	private DataTable loadCachedSlk(final String path) {
+		final boolean overridden = com.etheller.warsmash.datasources.CompoundDataSource
+				.hasNonFolderOverride(this.source, path);
+		final String key = com.etheller.warsmash.util.WarsmashConstants.GAME_VERSION + "|slk|" + path.toLowerCase();
+		if (!overridden) {
+			synchronized (READONLY_TABLE_CACHE) {
+				final DataTable cached = READONLY_TABLE_CACHE.get(key);
+				if (cached != null) {
+					return cached;
+				}
+			}
+		}
+		final DataTable table = new DataTable(this.worldEditStrings);
 		try {
-			unitMetaData.readSLK(this.source.getResourceAsStream("Units\\UnitMetaData.slk"));
+			table.readSLK(this.source.getResourceAsStream(path));
 		}
 		catch (final IOException e) {
 			throw new RuntimeException(e);
 		}
-		return unitMetaData;
+		if (!overridden) {
+			synchronized (READONLY_TABLE_CACHE) {
+				READONLY_TABLE_CACHE.put(key, table);
+			}
+		}
+		return table;
+	}
+
+	private DataTable loadCachedTxt(final String path) {
+		final boolean overridden = com.etheller.warsmash.datasources.CompoundDataSource
+				.hasNonFolderOverride(this.source, path);
+		final String key = com.etheller.warsmash.util.WarsmashConstants.GAME_VERSION + "|txt|" + path.toLowerCase();
+		if (!overridden) {
+			synchronized (READONLY_TABLE_CACHE) {
+				final DataTable cached = READONLY_TABLE_CACHE.get(key);
+				if (cached != null) {
+					return cached;
+				}
+			}
+		}
+		final DataTable table = new DataTable(this.worldEditStrings);
+		try {
+			table.readTXT(this.source.getResourceAsStream(path), true);
+		}
+		catch (final IOException e) {
+			throw new RuntimeException(e);
+		}
+		if (!overridden) {
+			synchronized (READONLY_TABLE_CACHE) {
+				READONLY_TABLE_CACHE.put(key, table);
+			}
+		}
+		return table;
+	}
+
+	public DataTable getStandardUnitMeta() {
+		return loadCachedSlk("Units\\UnitMetaData.slk");
 	}
 
 	public DataTable getStandardDestructableMeta() {
-		final DataTable unitMetaData = new DataTable(this.worldEditStrings);
-		try {
-			unitMetaData.readSLK(this.source.getResourceAsStream("Units\\DestructableMetaData.slk"));
-		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
-		}
-		return unitMetaData;
+		return loadCachedSlk("Units\\DestructableMetaData.slk");
 	}
 
 	public DataTable getStandardDoodadMeta() {
-		final DataTable unitMetaData = new DataTable(this.worldEditStrings);
-		try {
-			unitMetaData.readSLK(this.source.getResourceAsStream("Doodads\\DoodadMetaData.slk"));
-		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
-		}
-		return unitMetaData;
+		return loadCachedSlk("Doodads\\DoodadMetaData.slk");
 	}
 
 	public WarcraftData getStandardAbilities() {
@@ -297,69 +332,27 @@ public class StandardObjectData {
 	}
 
 	public DataTable getStandardUpgradeMeta() {
-		final DataTable unitMetaData = new DataTable(this.worldEditStrings);
-		try {
-			unitMetaData.readSLK(this.source.getResourceAsStream("Units\\UpgradeMetaData.slk"));
-		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
-		}
-		return unitMetaData;
+		return loadCachedSlk("Units\\UpgradeMetaData.slk");
 	}
 
 	public DataTable getStandardUpgradeEffectMeta() {
-		final DataTable unitMetaData = new DataTable(this.worldEditStrings);
-		try {
-			unitMetaData.readSLK(this.source.getResourceAsStream("Units\\UpgradeEffectMetaData.slk"));
-		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
-		}
-		return unitMetaData;
+		return loadCachedSlk("Units\\UpgradeEffectMetaData.slk");
 	}
 
 	public DataTable getStandardAbilityMeta() {
-		final DataTable unitMetaData = new DataTable(this.worldEditStrings);
-		try {
-			unitMetaData.readSLK(this.source.getResourceAsStream("Units\\AbilityMetaData.slk"));
-		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
-		}
-		return unitMetaData;
+		return loadCachedSlk("Units\\AbilityMetaData.slk");
 	}
 
 	public DataTable getStandardAbilityBuffMeta() {
-		final DataTable unitMetaData = new DataTable(this.worldEditStrings);
-		try {
-			unitMetaData.readSLK(this.source.getResourceAsStream("Units\\AbilityBuffMetaData.slk"));
-		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
-		}
-		return unitMetaData;
+		return loadCachedSlk("Units\\AbilityBuffMetaData.slk");
 	}
 
 	public DataTable getUnitEditorData() {
-		final DataTable unitMetaData = new DataTable(this.worldEditStrings);
-		try {
-			unitMetaData.readTXT(this.source.getResourceAsStream("UI\\UnitEditorData.txt"), true);
-		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
-		}
-		return unitMetaData;
+		return loadCachedTxt("UI\\UnitEditorData.txt");
 	}
 
 	public DataTable getWorldEditData() {
-		final DataTable unitMetaData = new DataTable(this.worldEditStrings);
-		try {
-			unitMetaData.readTXT(this.source.getResourceAsStream("UI\\WorldEditData.txt"), true);
-		}
-		catch (final IOException e) {
-			throw new RuntimeException(e);
-		}
-		return unitMetaData;
+		return loadCachedTxt("UI\\WorldEditData.txt");
 	}
 
 	public WorldEditStrings getWorldEditStrings() {

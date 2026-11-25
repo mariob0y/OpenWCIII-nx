@@ -267,6 +267,7 @@ public class MenuUI {
 	private SpriteFrame loadingBackground;
 	private boolean unifiedCampaignInfo = false;
 	private MapInfoPane skirmishMapInfoPane;
+	private MapListContainer skirmishMapListContainer;
 	private War3MapConfig currentMapConfig;
 	private final DataTable musicSLK;
 	private Music[] currentMusics;
@@ -1448,7 +1449,8 @@ public class MenuUI {
 		final GlueTextButtonFrame playGameButton = (GlueTextButtonFrame) this.rootFrame.getFrameByName("PlayGameButton",
 				0);
 		final MapListContainer mapListContainer = new MapListContainer(this.rootFrame, this.uiViewport,
-				"MapListContainer", this.dataSource, profileListText.getFrameFont());
+				"MapListContainer", this.dataSource, profileListText.getFrameFont(), true);
+		this.skirmishMapListContainer = mapListContainer;
 		mapListContainer.addSelectionListener(new ListBoxSelelectionListener() {
 			War3Map lastMapListMap;
 			String prevSelectedItem = "";
@@ -2920,11 +2922,17 @@ public class MenuUI {
 				this.glueSpriteLayerTopRight.setSequence("SinglePlayer Stand");
 				break;
 			case GOING_TO_SINGLE_PLAYER_SKIRMISH:
+				if (this.skirmishMapListContainer != null) {
+					this.skirmishMapListContainer.ensurePopulated();
+				}
 				this.glueSpriteLayerTopLeft.setSequence("SinglePlayerSkirmish Birth");
 				this.glueSpriteLayerTopRight.setSequence("SinglePlayerSkirmish Birth");
 				this.menuState = MenuState.SINGLE_PLAYER_SKIRMISH;
 				break;
 			case SINGLE_PLAYER_SKIRMISH:
+				if (this.skirmishMapListContainer != null) {
+					this.skirmishMapListContainer.ensurePopulated();
+				}
 				this.skirmish.setVisible(true);
 				this.mapInfoPanel.setVisible(true);
 				this.advancedOptionsPanel.setVisible(false);

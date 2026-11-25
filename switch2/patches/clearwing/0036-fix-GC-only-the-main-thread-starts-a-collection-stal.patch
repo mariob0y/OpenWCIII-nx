@@ -1,0 +1,104 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Tue, 24 Nov 2026 22:49:46 +0200
+Subject: [PATCH] fix: GC - only the main thread starts a collection, stalled
+ stops are logged
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp | 48 ++++++++++++++++++++++++-
+ 1 file changed, 47 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 0a5d1e4..9ca303d 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -59,6 +59,7 @@ static std::mutex objectsLock;
+ static jthread collectionThread;
+ static std::map<std::string, jclass> *classes;
+ static std::recursive_mutex criticalLock;
++static jcontext vmMainContext; // warsmash-nx: set by runVM
+ static std::mutex *registryMutex;
+ static std::vector<jcontext> threadContexts;
+ static std::vector<jobject> deepMarkedObjects;
+@@ -103,6 +104,7 @@ Class class_void { .nativeName = (intptr_t)"V", .size = 0, .staticInitializer =
+ 
+ void runVM(main_ptr entrypoint) {
+     auto mainContext = initVM();
++    vmMainContext = mainContext; // warsmash-nx: the thread that starts collections (gcAllocObject)
+ 
+     auto thread = (jthread) gcAllocEternal(mainContext, &class_java_lang_Thread); // Todo: Ensure all fields are set, since constructor isn't called
+     thread->F_nativeContext = (intptr_t) mainContext;
+@@ -458,7 +460,12 @@ jobject gcAllocObject(jcontext ctx, jclass clazz, int mark) {
+     // collects returned from runGC (already running) and went on allocating, never stopping.
+     SAFEPOINT();
+ 
+-    if (heapUsage > GC_HEAP_THRESHOLD || heapUsage - lastCollectionHeapUsage > GC_MEM_THRESHOLD || allocationsSinceCollection > GC_OBJECT_THRESHOLD)
++    // warsmash-nx: only the main thread (vmMainContext) starts a collection below the hard limit. A
++    // worker crossing a threshold (millions of SLK cells parsed on the parallel-job workers) collected
++    // on its own small native stack, and the whole game froze with no log (map SLK step, 2026-11-24).
++    // The main thread allocates every frame and in every parallel job, so it collects soon after.
++    if (heapUsage > GC_HEAP_THRESHOLD || ((ctx == vmMainContext || !vmMainContext)
++            && (heapUsage - lastCollectionHeapUsage > GC_MEM_THRESHOLD || allocationsSinceCollection > GC_OBJECT_THRESHOLD)))
+         runGC(ctx);
+ 
+     if (heapUsage > GC_HEAP_THRESHOLD)
+@@ -672,6 +679,37 @@ static void collectionThreadFunc(jcontext ctx) {
+     ctx->suspended = true;
+ }
+ 
++/// warsmash-nx: a thread's name, ASCII, from its java.lang.Thread (alive: it is in threadContexts).
++static void printThreadName(jthread thread) {
++    auto name = thread ? (jstring) thread->F_name : nullptr;
++    if (!name || !name->F_value) {
++        printf("?");
++        return;
++    }
++    auto chars = (const jchar *) ((jarray) name->F_value)->data;
++    for (int i = 0; i < name->F_count && i < 48; i++)
++        putchar(chars[i] < 128 ? (char) chars[i] : '?');
++}
++
++/// warsmash-nx: logs the threads a collection has waited on for `seconds` to reach a safepoint.
++static void reportStoppingStall(jcontext ctx, int seconds) {
++    printf("[NxGcStall] %d s waiting for threads to stop; collecting on: ", seconds);
++    printThreadName(ctx->thread);
++    putchar(10);
++    acquireCriticalLock();
++    for (auto threadContext : threadContexts) {
++        if (threadContext == ctx || threadContext->suspended || !threadContext->thread->F_alive)
++            continue;
++        printf("[NxGcStall]   not stopped: ");
++        printThreadName(threadContext->thread);
++        printf(" (Java stack depth %d, blocked on a monitor: %s)", threadContext->stackDepth,
++               threadContext->blockedBy.load() ? "yes" : "no");
++        putchar(10);
++    }
++    releaseCriticalLock();
++    fflush(stdout);
++}
++
+ /// Runs the garbage collector
+ void runGC(jcontext ctx) {
+     static std::atomic_bool running;
+@@ -684,6 +722,7 @@ void runGC(jcontext ctx) {
+     auto frameRef = pushStackFrame(ctx, &frameInfo, nullptr);
+ 
+     auto blockTime = std::chrono::system_clock::now();
++    auto nextStallReport = std::chrono::duration_cast<std::chrono::system_clock::duration>(std::chrono::seconds(10));
+ 
+     // Suspend all threads before collecting (Suspended threads must have all owned objects reachable)
+     {
+@@ -712,6 +751,13 @@ void runGC(jcontext ctx) {
+         clearwingGcStats.blockingIsCollector = blockingIsCollector;
+         if (!blocked)
+             break;
++        if (std::chrono::system_clock::now() - blockTime >= nextStallReport) {
++            // warsmash-nx: every other Java thread (the loading watchdog too) is halted now, so this
++            // is the only thread that can say which ones a stuck stop waits for
++            nextStallReport += std::chrono::seconds(10);
++            reportStoppingStall(ctx, (int) std::chrono::duration_cast<std::chrono::seconds>(
++                    std::chrono::system_clock::now() - blockTime).count());
++        }
+         std::this_thread::sleep_for(std::chrono::microseconds(50)); // warsmash-nx: let them run
+     }
+ 

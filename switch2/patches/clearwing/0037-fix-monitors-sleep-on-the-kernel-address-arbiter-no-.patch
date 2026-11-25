@@ -1,0 +1,332 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: mariob0y <suroviymarioboy@gmail.com>
+Date: Tue, 24 Nov 2026 23:50:05 +0200
+Subject: [PATCH] fix: monitors sleep on the kernel address arbiter, no
+ condition mutex (load freeze in ParallelJobs)
+
+---
+ runtime/res/clearwing/src/Clearwing.cpp       | 66 +++++++++++++++----
+ runtime/res/clearwing/src/Clearwing.h         | 26 ++++++--
+ runtime/res/clearwing/src/Object.cpp          | 64 +++---------------
+ runtime/res/clearwing/src/PlatformThreads.cpp | 43 ++++++++++++
+ runtime/res/clearwing/src/Thread.cpp          |  6 +-
+ 5 files changed, 128 insertions(+), 77 deletions(-)
+
+diff --git a/runtime/res/clearwing/src/Clearwing.cpp b/runtime/res/clearwing/src/Clearwing.cpp
+index 9ca303d..5e582e2 100644
+--- a/runtime/res/clearwing/src/Clearwing.cpp
++++ b/runtime/res/clearwing/src/Clearwing.cpp
+@@ -165,7 +165,7 @@ void shutdownVM(jcontext ctx) {
+             done = false;
+             threadContext->lock.lock();
+             if (threadContext->blockedBy)
+-                getMonitor((jobject) threadContext->blockedBy)->condition.notify_all(); // warsmash-nx
++                monitorWakeAllWaiters(getMonitor((jobject) threadContext->blockedBy)); // warsmash-nx
+             threadContext->lock.unlock();
+         }
+         if (done)
+@@ -1177,19 +1177,19 @@ void monitorEnter(jcontext ctx, jobject object) {
+     }
+ 
+     // Park. Suspend thread to avoid deadlock blocking GC and deadlocking system
++    // warsmash-nx (round 11): waiters++, read parkSeq, CAS; monitorExit frees, reads waiters, bumps
++    // parkSeq (all seq_cst): either the CAS sees the monitor free or the sleep sees parkSeq moved.
+     ctx->blockedBy = object;
+     ctx->suspended = true;
+-    {
+-        std::unique_lock<std::mutex> park(monitor->parkMutex);
+-        monitor->waiters.fetch_add(1, std::memory_order_seq_cst);
+-        while (true) {
+-            expected = nullptr;
+-            if (monitor->owner.compare_exchange_strong(expected, ctx, std::memory_order_seq_cst))
+-                break;
+-            monitor->parkCondition.wait(park);
+-        }
+-        monitor->waiters.fetch_sub(1, std::memory_order_relaxed);
++    monitor->waiters.fetch_add(1, std::memory_order_seq_cst);
++    while (true) {
++        const uint32_t seen = monitor->parkSeq.load(std::memory_order_seq_cst);
++        expected = nullptr;
++        if (monitor->owner.compare_exchange_strong(expected, ctx, std::memory_order_seq_cst))
++            break;
++        monitorFutexWait(monitor->parkSeq, seen, 5000000);
+     }
++    monitor->waiters.fetch_sub(1, std::memory_order_relaxed);
+     monitor->depth = 1;
+     ctx->blockedBy = nullptr;
+     ctx->suspended = false;
+@@ -1207,9 +1207,49 @@ void monitorExit(jcontext ctx, jobject object) {
+     // warsmash-nx (round 7): free it, then wake a parked thread if there is one (see monitorEnter)
+     monitor->owner.store(nullptr, std::memory_order_seq_cst);
+     if (monitor->waiters.load(std::memory_order_seq_cst) > 0) {
+-        { std::lock_guard<std::mutex> park(monitor->parkMutex); }
+-        monitor->parkCondition.notify_one();
++        monitor->parkSeq.fetch_add(1, std::memory_order_seq_cst); // round 11: no mutex
++        monitorFutexWake(monitor->parkSeq, 1);
++    }
++}
++
++/// warsmash-nx (round 11): Object.wait. The notify sequence is read while the monitor is still
++/// held, and a notifier must hold the monitor to bump it, so a notify after this wait began always
++/// moves it past `seen`: the sleep returns at once or is woken. Spurious wakeups do not return.
++void monitorWait(jcontext ctx, jobject object, int64_t timeoutNs) {
++    monitorOwnerCheck(ctx, object);
++    interruptedCheck(ctx);
++    ctx->lock.lock();
++    ctx->blockedBy = object;
++    ctx->lock.unlock();
++
++    auto monitor = getMonitor(object);
++    const int32_t depth = monitor->depth; // round 7: wait releases every level
++    const uint32_t seen = monitor->notifySeq.load(std::memory_order_seq_cst);
++    const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(timeoutNs > 0 ? timeoutNs : 0);
++    monitor->depth = 1;
++    monitorExit(ctx, object);
++    ctx->suspended = true;
++    while (monitor->notifySeq.load(std::memory_order_seq_cst) == seen && !ctx->thread->F_interrupted) {
++        int64_t slice = 50000000; // a backstop only: a notify wakes the sleep
++        if (timeoutNs > 0) {
++            const int64_t left = std::chrono::duration_cast<std::chrono::nanoseconds>(
++                    deadline - std::chrono::steady_clock::now()).count();
++            if (left <= 0)
++                break;
++            if (left < slice)
++                slice = left;
++        }
++        monitorFutexWait(monitor->notifySeq, seen, slice);
+     }
++    ctx->suspended = false;
++    SAFEPOINT();
++
++    monitorEnter(ctx, object);
++    monitor->depth = depth;
++    ctx->lock.lock();
++    ctx->blockedBy = nullptr;
++    ctx->lock.unlock();
++    interruptedCheck(ctx);
+ }
+ 
+ /// Checks if the current thread owns a given monitor. Throws exceptions.
+diff --git a/runtime/res/clearwing/src/Clearwing.h b/runtime/res/clearwing/src/Clearwing.h
+index 9199f68..4a0c32e 100644
+--- a/runtime/res/clearwing/src/Clearwing.h
++++ b/runtime/res/clearwing/src/Clearwing.h
+@@ -5,6 +5,7 @@
+ 
+ #ifdef __cplusplus
+ #include <cstdint>
++#include <atomic> // warsmash-nx (round 11): the monitors' sequence words, declared below
+ #include <csetjmp>
+ #define NORETURN [[noreturn]]
+ #else
+@@ -284,6 +285,15 @@ jobject clearCurrentException(jframe frame);
+ 
+ void monitorEnter(jcontext ctx, jobject object);
+ void monitorExit(jcontext ctx, jobject object);
++/// warsmash-nx (round 11): sleeps while `word` still holds `seen`, at most `timeoutNs` (a backstop:
++/// the callers re-check and sleep again). May return early; callers loop on their own condition.
++void monitorFutexWait(std::atomic_uint32_t &word, uint32_t seen, int64_t timeoutNs);
++/// Wakes `count` threads sleeping on `word` (every one for count <= 0). Bump `word` first.
++void monitorFutexWake(std::atomic_uint32_t &word, int32_t count);
++/// Bumps the monitor's notify sequence and wakes every Object.wait on it (notifyAll, interrupt, exit).
++void monitorWakeAllWaiters(jmonitor monitor);
++/// Object.wait for a timeout in ns, <= 0 = until notified. The caller must own the monitor.
++void monitorWait(jcontext ctx, jobject object, int64_t timeoutNs);
+ void monitorOwnerCheck(jcontext ctx, jobject object);
+ void interruptedCheck(jcontext ctx);
+ int64_t getHeapUsage();
+@@ -929,16 +939,22 @@ public:
+ };
+ 
+ // warsmash-nx (round 7): an owner pointer and a depth instead of a std::recursive_mutex (see
+-// monitorEnter); the park mutex and condition are only used by contended threads.
++// monitorEnter).
++// warsmash-nx (round 11): no mutex or condition variable. Both sleeps (a contended monitorEnter,
++// Object.wait) are on a 32-bit sequence word that the waking side bumps before it signals; the
++// sleeper names the value it saw, so a bump before it sleeps makes it return at once. With a
++// mutex-guarded condition variable on the console, a load froze with one thread holding the
++// monitor while it waited for the condition mutex, and every other pool thread blocked behind it.
+ struct ObjectMonitor {
+     std::atomic<jcontext> owner{nullptr};
+     int32_t depth = 0; // only the owner reads or writes it
+     std::atomic_int32_t waiters{0}; // threads parked in monitorEnter
+-    std::mutex parkMutex;
+-    std::condition_variable parkCondition;
+-    std::condition_variable condition;
+-    std::mutex conditionMutex;
++    std::atomic_uint32_t parkSeq{0}; // bumped by a monitorExit that saw parked threads
++    std::atomic_uint32_t notifySeq{0}; // bumped by notify, notifyAll, interrupt, thread exit, shutdown
+ };
++static_assert(sizeof(std::atomic_uint32_t) == 4 && std::atomic_uint32_t::is_always_lock_free,
++              "the kernel waits on the sequence words as plain 32-bit values");
++
+ 
+ // warsmash-nx: an object's monitor is made on first use (synchronized, wait, notify), not with the
+ // object: almost no object is ever locked, and a monitor was an allocation and a free per object.
+diff --git a/runtime/res/clearwing/src/Object.cpp b/runtime/res/clearwing/src/Object.cpp
+index 4d7042c..2ae0384 100644
+--- a/runtime/res/clearwing/src/Object.cpp
++++ b/runtime/res/clearwing/src/Object.cpp
+@@ -48,47 +48,21 @@ jobject M_java_lang_Object_toString_R_java_lang_String(jcontext ctx, jobject sel
+ void M_java_lang_Object_finalize(jcontext ctx, jobject self) {
+ }
+ 
++// warsmash-nx (round 11): no condition variable; see monitorWait and ObjectMonitor (Clearwing.h).
+ void M_java_lang_Object_notify(jcontext ctx, jobject self) {
+     monitorOwnerCheck(ctx, self);
+     auto monitor = getMonitor(self);
+-    { std::lock_guard<std::mutex> lock(monitor->conditionMutex); } // warsmash-nx: see wait()
+-    monitor->condition.notify_one();
++    monitor->notifySeq.fetch_add(1, std::memory_order_seq_cst);
++    monitorFutexWake(monitor->notifySeq, 1);
+ }
+ 
+ void M_java_lang_Object_notifyAll(jcontext ctx, jobject self) {
+     monitorOwnerCheck(ctx, self);
+-    auto monitor = getMonitor(self);
+-    { std::lock_guard<std::mutex> lock(monitor->conditionMutex); } // warsmash-nx: see wait()
+-    monitor->condition.notify_all();
++    monitorWakeAllWaiters(getMonitor(self));
+ }
+ 
+ void M_java_lang_Object_wait(jcontext ctx, jobject self) {
+-    monitorOwnerCheck(ctx, self);
+-    interruptedCheck(ctx);
+-    ctx->lock.lock();
+-    ctx->blockedBy = self;
+-    ctx->lock.unlock();
+-
+-    // warsmash-nx: the condition mutex is taken before the monitor is released, so a notify (which
+-    // needs the monitor, then this mutex) cannot fall between the two and be lost.
+-    auto monitor = getMonitor(self);
+-    const int32_t depth = monitor->depth; // warsmash-nx (round 7): wait releases every level
+-    {
+-        std::unique_lock<std::mutex> lock(monitor->conditionMutex);
+-        monitor->depth = 1;
+-        monitorExit(ctx, self);
+-        ctx->suspended = true;
+-        monitor->condition.wait(lock);
+-    }
+-    ctx->suspended = false;
+-    SAFEPOINT();
+-
+-    monitorEnter(ctx, self);
+-    monitor->depth = depth;
+-    ctx->lock.lock();
+-    ctx->blockedBy = nullptr;
+-    ctx->lock.unlock();
+-    interruptedCheck(ctx);
++    monitorWait(ctx, self, 0);
+ }
+ 
+ void M_java_lang_Object_wait_long(jcontext ctx, jobject self, jlong millis) {
+@@ -96,30 +70,10 @@ void M_java_lang_Object_wait_long(jcontext ctx, jobject self, jlong millis) {
+ }
+ 
+ void M_java_lang_Object_wait_long_int(jcontext ctx, jobject self, jlong millis, jint nanos) {
+-    monitorOwnerCheck(ctx, self);
+-    interruptedCheck(ctx);
+-    ctx->lock.lock();
+-    ctx->blockedBy = self;
+-    ctx->lock.unlock();
+-
+-    auto monitor = getMonitor(self); // warsmash-nx: as in wait()
+-    const int32_t depth = monitor->depth; // warsmash-nx (round 7): wait releases every level
+-    {
+-        std::unique_lock<std::mutex> lock(monitor->conditionMutex);
+-        monitor->depth = 1;
+-        monitorExit(ctx, self);
+-        ctx->suspended = true;
+-        monitor->condition.wait_for(lock, std::chrono::milliseconds(millis) + std::chrono::nanoseconds(nanos));
+-    }
+-    ctx->suspended = false;
+-    SAFEPOINT();
+-
+-    monitorEnter(ctx, self);
+-    monitor->depth = depth;
+-    ctx->lock.lock();
+-    ctx->blockedBy = nullptr;
+-    ctx->lock.unlock();
+-    interruptedCheck(ctx);
++    // wait(0, 0) still returns at once, as it always did here (not the JVM's "until notified"):
++    // the runtime's ReferenceQueue.remove polls with wait(0) and its enqueue never notifies.
++    const int64_t timeoutNs = (millis <= 0 && nanos <= 0) ? 1 : (int64_t) millis * 1000000 + nanos;
++    monitorWait(ctx, self, timeoutNs);
+ }
+ 
+ static void *vtable_java_lang_Object[] {
+diff --git a/runtime/res/clearwing/src/PlatformThreads.cpp b/runtime/res/clearwing/src/PlatformThreads.cpp
+index dd3c7a5..41632e3 100644
+--- a/runtime/res/clearwing/src/PlatformThreads.cpp
++++ b/runtime/res/clearwing/src/PlatformThreads.cpp
+@@ -61,3 +61,46 @@ extern "C" void clearwingRaiseThreadPriority(void) {
+         (void)svcSetThreadPriority(CUR_THREAD_HANDLE, (u32)(priority - 1));
+ #endif
+ }
++
++// warsmash-nx (round 11): the monitors' sleeps (Clearwing.h, ObjectMonitor). On the Switch, the
++// kernel's address arbiter: no mutex is handed back to a woken thread, it only re-reads the word.
++#include <cstdio>
++#if !defined(__SWITCH__)
++#include <chrono>
++#include <thread>
++#endif
++
++void monitorFutexWait(std::atomic_uint32_t &word, uint32_t seen, int64_t timeoutNs) {
++    if (timeoutNs <= 0)
++        return;
++#if defined(__SWITCH__)
++    const Result rc = svcWaitForAddress((void *) &word, ArbitrationType_WaitIfEqual, (s64) (s32) seen, timeoutNs);
++    if (R_SUCCEEDED(rc))
++        return;
++    const u32 why = R_DESCRIPTION(rc);
++    if (why == KernelError_TimedOut || why == KernelError_InvalidState || why == KernelError_Cancelled)
++        return; // the backstop ran out / the word had already moved on / the wait was cancelled
++    static std::atomic_bool reported{false};
++    if (!reported.exchange(true))
++        printf("clearwing: svcWaitForAddress failed (0x%x); monitors sleep in steps instead\n", (unsigned) rc);
++    svcSleepThread(timeoutNs < 200000 ? timeoutNs : 200000); // never a spin
++#else
++    const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(timeoutNs);
++    while (word.load(std::memory_order_seq_cst) == seen && std::chrono::steady_clock::now() < deadline)
++        std::this_thread::sleep_for(std::chrono::microseconds(50));
++#endif
++}
++
++void monitorFutexWake(std::atomic_uint32_t &word, int32_t count) {
++#if defined(__SWITCH__)
++    (void) svcSignalToAddress((void *) &word, SignalType_Signal, 0, count <= 0 ? -1 : count);
++#else
++    (void) word;
++    (void) count;
++#endif
++}
++
++void monitorWakeAllWaiters(jmonitor monitor) {
++    monitor->notifySeq.fetch_add(1, std::memory_order_seq_cst);
++    monitorFutexWake(monitor->notifySeq, -1);
++}
+diff --git a/runtime/res/clearwing/src/Thread.cpp b/runtime/res/clearwing/src/Thread.cpp
+index 2f65c0a..8dd8b2a 100644
+--- a/runtime/res/clearwing/src/Thread.cpp
++++ b/runtime/res/clearwing/src/Thread.cpp
+@@ -48,9 +48,7 @@ void threadEntrypoint(jcontext ctx, jthread thread) {
+     if (!vmExiting) {
+         monitorEnter(ctx, (jobject) thread);
+         thread->F_alive = false;
+-        auto monitor = getMonitor((jobject) thread); // warsmash-nx
+-        { std::lock_guard<std::mutex> lock(monitor->conditionMutex); }
+-        monitor->condition.notify_all();
++        monitorWakeAllWaiters(getMonitor((jobject) thread)); // warsmash-nx (round 11)
+         monitorExit(ctx, (jobject) thread);
+     }
+     thread->F_alive = false;
+@@ -95,7 +93,7 @@ void M_java_lang_Thread_interrupt(jcontext ctx, jobject self) {
+     threadCtx->lock.lock();
+     threadCtx->thread->F_interrupted = true;
+     if (threadCtx->blockedBy)
+-        getMonitor((jobject) threadCtx->blockedBy)->condition.notify_all(); // warsmash-nx
++        monitorWakeAllWaiters(getMonitor((jobject) threadCtx->blockedBy)); // warsmash-nx
+     threadCtx->lock.unlock();
+ }
+ 

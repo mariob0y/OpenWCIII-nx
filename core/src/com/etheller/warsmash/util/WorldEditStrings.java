@@ -13,23 +13,40 @@ public class WorldEditStrings implements StringBundle {
 	private ResourceBundle bundle;
 	private ResourceBundle bundlegs;
 
-	public WorldEditStrings(final DataSource dataSource) {
-		if (dataSource.has("UI\\WorldEditStrings.txt")) {
-			try (InputStream fis = dataSource.getResourceAsStream("UI\\WorldEditStrings.txt");
-					InputStreamReader reader = new InputStreamReader(fis, "utf-8")) {
-				this.bundle = new PropertyResourceBundle(reader);
-			}
-			catch (final IOException e) {
-				throw new RuntimeException(e);
+	private static final java.util.Map<String, ResourceBundle> BUNDLE_CACHE = new java.util.HashMap<>();
+
+	private static ResourceBundle loadBundle(final DataSource dataSource, final String path) {
+		final boolean overridden = com.etheller.warsmash.datasources.CompoundDataSource
+				.hasNonFolderOverride(dataSource, path);
+		final String key = WarsmashConstants.GAME_VERSION + "|" + path.toLowerCase();
+		if (!overridden) {
+			synchronized (BUNDLE_CACHE) {
+				final ResourceBundle cached = BUNDLE_CACHE.get(key);
+				if (cached != null) {
+					return cached;
+				}
 			}
 		}
-		try (InputStream fis = dataSource.getResourceAsStream("UI\\WorldEditGameStrings.txt");
-				InputStreamReader reader = new InputStreamReader(fis, "utf-8")) {
-			this.bundlegs = new PropertyResourceBundle(reader);
+		try (InputStream fis = dataSource.getResourceAsStream(path);
+				java.io.BufferedReader reader = new java.io.BufferedReader(new InputStreamReader(fis, "utf-8"), 16384)) {
+			final ResourceBundle loaded = new PropertyResourceBundle(reader);
+			if (!overridden) {
+				synchronized (BUNDLE_CACHE) {
+					BUNDLE_CACHE.put(key, loaded);
+				}
+			}
+			return loaded;
 		}
 		catch (final IOException e) {
 			throw new RuntimeException(e);
 		}
+	}
+
+	public WorldEditStrings(final DataSource dataSource) {
+		if (dataSource.has("UI\\WorldEditStrings.txt")) {
+			this.bundle = loadBundle(dataSource, "UI\\WorldEditStrings.txt");
+		}
+		this.bundlegs = loadBundle(dataSource, "UI\\WorldEditGameStrings.txt");
 	}
 
 	@Override

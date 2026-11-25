@@ -64,8 +64,11 @@ public class MdxComplexInstance extends ModelInstance {
 	public float[][] uvAnims;
 	public Matrix4[] worldMatrices;
 	public FloatBuffer worldMatricesCopyHeap;
+	/** Created on first use (see {@link #getBoneTexture()}); stays null for models without bones. */
 	public DataTexture boneTexture;
-	public Texture[] replaceableTextures = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
+	/** warsmash-nx: the bone texture's width in texels, 0 for a model without bones */
+	private int boneTextureWidth;
+	public Texture[] replaceableTextures =new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
 	public Texture[] replaceableTextures_diffuse = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
 	public Texture[] replaceableTextures_normal = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
 	public Texture[] replaceableTextures_orm = new Texture[WarsmashConstants.REPLACEABLE_TEXTURE_LIMIT];
@@ -226,9 +229,24 @@ public class MdxComplexInstance extends ModelInstance {
 		// the model loaded.
 		setSequence(this.sequence);
 
-		if (model.bones.size() != 0) {
-			this.boneTexture = new DataTexture(model.viewer.gl, 4, model.bones.size() * 4, 1);
+		// warsmash-nx: the bone texture is made when the instance is first posed or drawn, not here. Creating
+		// a GL texture per placed doodad was most of a map's doodad step (thousands of glTexImage2D calls),
+		// and the scene only poses and draws instances in view, so off-screen ones may never need one.
+		this.boneTextureWidth = model.bones.size() * 4;
+		if ((this.boneTexture != null) && (this.boneTextureWidth != 0)) {
+			this.boneTexture.reserve(this.boneTextureWidth, 1);
 		}
+	}
+
+	/**
+	 * The bone texture, created and filled with the current pose if the instance is drawn before it was ever
+	 * posed; null for a model without bones.
+	 */
+	public DataTexture getBoneTexture() {
+		if ((this.boneTexture == null) && (this.boneTextureWidth != 0)) {
+			updateBoneTexture();
+		}
+		return this.boneTexture;
 	}
 
 	/*
@@ -575,6 +593,9 @@ public class MdxComplexInstance extends ModelInstance {
 	}
 
 	public void updateBoneTexture() {
+		if ((this.boneTexture == null) && (this.boneTextureWidth != 0)) {
+			this.boneTexture = new DataTexture(this.model.viewer.gl, 4, this.boneTextureWidth, 1);
+		}
 		if (this.boneTexture != null) {
 			// LibGDX stores Matrix4.val in column-major order where the constants
 			// M00=0, M10=1, M20=2, M30=3, M01=4, ... M33=15 are contiguous indices 0-15.

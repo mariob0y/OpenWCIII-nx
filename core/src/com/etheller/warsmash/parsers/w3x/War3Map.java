@@ -198,6 +198,11 @@ public class War3Map implements DataSource, AutoCloseable {
 		return this.baseDataSource;
 	}
 
+	/** The source this map reads through: the map and game files, plus the tileset's once it is set. */
+	public DataSource getDataSource() {
+		return this.dataSource;
+	}
+
 	public void setDataSource(DataSource tilesetSource) {
 		this.dataSource = tilesetSource;
 	}

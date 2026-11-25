@@ -250,10 +250,52 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 		return new GameSkin(userSkin, skinsTable);
 	}
 
+	private static final class CachedToc {
+		final FrameTemplateEnvironment templates;
+		final List<String> paths;
+		final int tocLines;
+
+		CachedToc(final FrameTemplateEnvironment templates, final List<String> paths, final int tocLines) {
+			this.templates = templates;
+			this.paths = paths;
+			this.tocLines = tocLines;
+		}
+	}
+
+	private static final Map<String, CachedToc> TOC_CACHE = new HashMap<>();
+
 	public void loadTOCFile(final String tocFilePath) throws IOException {
-		final DataSourceFDFParserBuilder dataSourceFDFParserBuilder = new DataSourceFDFParserBuilder(this.dataSource);
-		final FrameDefinitionVisitor fdfVisitor = new FrameDefinitionVisitor(this.templates,
-				dataSourceFDFParserBuilder);
+		final String cacheKey = WarsmashConstants.GAME_VERSION + "|" + tocFilePath.toLowerCase();
+		final CachedToc cached = TOC_CACHE.get(cacheKey);
+		if (cached != null) {
+			boolean overridden = com.etheller.warsmash.datasources.CompoundDataSource.hasNonFolderOverride(this.dataSource,
+					tocFilePath);
+			if (!overridden) {
+				for (int i = 0, n = cached.paths.size(); i < n; i++) {
+					if (com.etheller.warsmash.datasources.CompoundDataSource.hasNonFolderOverride(this.dataSource,
+							cached.paths.get(i))) {
+						overridden = true;
+						break;
+					}
+				}
+			}
+			if (!overridden) {
+				this.templates.putAll(cached.templates);
+				System.out.println("TOC file loaded " + cached.tocLines + " lines (cached)");
+				return;
+			}
+		}
+
+		final boolean canCache = !com.etheller.warsmash.datasources.CompoundDataSource
+				.hasNonFolderOverride(this.dataSource, tocFilePath);
+		final List<String> recordedPaths = canCache ? new ArrayList<>() : null;
+		final DataSourceFDFParserBuilder baseBuilder = new DataSourceFDFParserBuilder(this.dataSource);
+		final com.etheller.warsmash.fdfparser.FDFParserBuilder recordingBuilder = canCache ? path -> {
+			recordedPaths.add(path);
+			return baseBuilder.build(path);
+		} : baseBuilder;
+		final FrameTemplateEnvironment target = canCache ? new FrameTemplateEnvironment(this.templates) : this.templates;
+		final FrameDefinitionVisitor fdfVisitor = new FrameDefinitionVisitor(target, recordingBuilder);
 		System.err.println("Loading TOC file: " + tocFilePath);
 		try (BufferedReader reader = new BufferedReader(
 				new InputStreamReader(this.dataSource.getResourceAsStream(tocFilePath)))) {
@@ -261,11 +303,27 @@ public final class GameUI extends AbstractUIFrame implements UIFrame {
 			int tocLines = 0;
 			while ((line = reader.readLine()) != null) {
 				LoadingStatus.report("Loading interface layouts", line);
-				final FDFParser firstFileParser = dataSourceFDFParserBuilder.build(line);
+				final FDFParser firstFileParser = recordingBuilder.build(line);
 				fdfVisitor.visit(firstFileParser.program());
 				tocLines++;
 			}
 			LoadingStatus.finished();
+			if (canCache) {
+				boolean anyOverride = false;
+				for (int i = 0, n = recordedPaths.size(); i < n; i++) {
+					if (com.etheller.warsmash.datasources.CompoundDataSource.hasNonFolderOverride(this.dataSource,
+							recordedPaths.get(i))) {
+						anyOverride = true;
+						break;
+					}
+				}
+				if (!anyOverride) {
+					final FrameTemplateEnvironment detached = new FrameTemplateEnvironment();
+					detached.putAll(target);
+					TOC_CACHE.put(cacheKey, new CachedToc(detached, recordedPaths, tocLines));
+				}
+				this.templates.putAll(target);
+			}
 			System.out.println("TOC file loaded " + tocLines + " lines");
 		}
 	}

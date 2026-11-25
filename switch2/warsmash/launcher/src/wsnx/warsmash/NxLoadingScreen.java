@@ -16,6 +16,7 @@ import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator.FreeTypeFont
 import com.badlogic.gdx.graphics.glutils.ShaderProgram;
 import com.badlogic.gdx.utils.BufferUtils;
 import com.etheller.warsmash.util.LoadingStatus;
+import com.etheller.warsmash.util.ParallelJobs;
 
 /**
  * warsmash-nx: the loading screen. Warsmash loads everything inside create()/show(), before
@@ -37,6 +38,7 @@ public final class NxLoadingScreen implements LoadingStatus.Listener {
 	extern "C" void nx_present_loading_frame();
 	#include <switch.h>
 	extern "C" unsigned long long nx_start_tick;
+	extern "C" void nxLogThreadLoad(unsigned long long wallTicks);
 	*/
 
 	private static final String FONT = "sdmc:/switch/warsmash/wc3data/war3.w3mod/_locales/enus.w3mod/fonts/frizqt__.ttf";
@@ -120,7 +122,7 @@ public final class NxLoadingScreen implements LoadingStatus.Listener {
 		int depth = target->stackDepth;
 		if (depth > MAX_STACK_DEPTH)
 			depth = MAX_STACK_DEPTH;
-		printf("loading:   game thread, %d frames, innermost first:", depth);
+		printf("loading:     %d frames, innermost first:", depth);
 		putchar(10);
 		for (int i = depth - 1, shown = 0; i >= 0 && shown < 48; i--, shown++) {
 			const FrameInfo *info = target->frames[i].info;
@@ -163,6 +165,75 @@ public final class NxLoadingScreen implements LoadingStatus.Listener {
 	/** A step this long gets the game thread's stack in the log, and again every as long. */
 	private static final long STALL_NS = 20000000000L;
 
+	/**
+	 * Diagnostics: which of {@code candidates} owns {@code target}'s monitor (index), -1 for nobody, -2 for
+	 * a thread not among them. Also logs how many threads are parked waiting for it.
+	 */
+	private static native int monitorOwner(Object target, Thread[] candidates); /*
+		auto held = (jobject) target;
+		auto monitor = (jmonitor) __atomic_load_n(&held->monitor, __ATOMIC_ACQUIRE);
+		if (!monitor)
+			return -1;
+		printf("loading:   monitor: %d thread(s) parked waiting for it", (int) monitor->waiters.load());
+		putchar(10);
+		fflush(stdout);
+		auto owner = monitor->owner.load();
+		if (!owner)
+			return -1;
+		auto list = (jarray) candidates;
+		for (int i = 0; i < list->length; i++) {
+			auto candidate = (java_lang_Thread *) ((jobject *) list->data)[i];
+			if (candidate && (jcontext) candidate->F_nativeContext == owner)
+				return i;
+		}
+		return -2;
+	*/
+
+	/** Diagnostics: the VM's view of a thread (alive, stopped for the collector, blocked, stack depth). */
+	private static native String threadState(Thread thread); /*
+		auto javaThread = (java_lang_Thread *) thread;
+		auto target = (jcontext) javaThread->F_nativeContext;
+		char text[200];
+		if (!target)
+			snprintf(text, sizeof text, "no VM context (alive %d)", (int) javaThread->F_alive);
+		else
+			snprintf(text, sizeof text, "alive %d, parked or at a safepoint %d, blocked on a monitor %s, Java stack depth %d",
+					(int) javaThread->F_alive, (int) target->suspended, target->blockedBy.load() ? "yes" : "no",
+					target->stackDepth);
+		return (jobject) stringFromNative(ctx, text);
+	*/
+
+	/** Diagnostics: each thread's share of the CPU since the last dump ([NxThreads], nx_threads.cpp). */
+	private static native void logThreadLoad(); /*
+		static unsigned long long last = 0;
+		const unsigned long long now = armGetSystemTick();
+		if (last != 0)
+			nxLogThreadLoad(now - last);
+		last = now;
+		fflush(stdout);
+	*/
+
+	/** Diagnostics for a stall: the job pool, who holds its monitor, and every worker's stack. */
+	private void describeWorkers() {
+		final Thread[] workers = ParallelJobs.workerThreads();
+		final Thread[] all = new Thread[workers.length + 1];
+		all[0] = this.glThread;
+		System.arraycopy(workers, 0, all, 1, workers.length);
+		System.out.println("loading:   job pool: " + ParallelJobs.describe());
+		System.out.flush();
+		final int owner = monitorOwner(ParallelJobs.monitor(), all);
+		System.out.println("loading:   job pool monitor held by: "
+				+ ((owner == -1) ? "nobody" : (owner == -2) ? "a thread outside the pool" : all[owner].getName()));
+		System.out.println("loading:   game thread: " + threadState(this.glThread));
+		System.out.flush();
+		logThreadLoad();
+		for (final Thread worker : workers) {
+			System.out.println("loading:   " + worker.getName() + ": " + threadState(worker));
+			System.out.flush();
+			dumpStack(worker);
+		}
+	}
+
 	/** Installs the screen as Warsmash's listener and shows the first step at once. */
 	public static NxLoadingScreen install(final String firstStep) {
 		final NxLoadingScreen screen = new NxLoadingScreen();
@@ -202,7 +273,9 @@ public final class NxLoadingScreen implements LoadingStatus.Listener {
 			System.out.println("loading: " + seconds(now - this.startNs) + " still on: " + current
 					+ (this.detail.isEmpty() ? "" : " (" + this.detail + ")") + " for " + seconds(now - started));
 			System.out.flush();
+			System.out.println("loading:   game thread:");
 			dumpStack(this.glThread);
+			describeWorkers();
 		}
 	}
 

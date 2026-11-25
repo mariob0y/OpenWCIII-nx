@@ -19,9 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -364,54 +362,80 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		this.mapConfig = mapConfig;
 	}
 
+	private static final Map<String, MappedData> BASE_SLK_CACHE = new HashMap<>();
+
+	private static final String[] MAP_SLK_PATHS = {
+		"TerrainArt\\Terrain.slk",
+		"TerrainArt\\CliffTypes.slk",
+		"TerrainArt\\Water.slk",
+		"Doodads\\Doodads.slk",
+		"Doodads\\DoodadMetaData.slk",
+		"Units\\DestructableData.slk",
+		"Units\\DestructableMetaData.slk",
+		"Units\\UnitData.slk",
+		"Units\\unitUI.slk",
+		"Units\\ItemData.slk",
+		"Units\\UnitMetaData.slk"
+	};
+
 	public void loadSLKs(final WorldEditStrings worldEditStrings) throws IOException {
-		final GenericResource terrain = loadMapGeneric("TerrainArt\\Terrain.slk", FetchDataTypeName.SLK,
-				stringDataCallback);
-		final GenericResource cliffTypes = loadMapGeneric("TerrainArt\\CliffTypes.slk", FetchDataTypeName.SLK,
-				stringDataCallback);
-		final GenericResource water = loadMapGeneric("TerrainArt\\Water.slk", FetchDataTypeName.SLK,
-				stringDataCallback);
+		final int count = MAP_SLK_PATHS.length;
+		final MappedData[] parsed = new MappedData[count];
+		final String[] rawBuffers = new String[count];
+		final boolean[] cacheable = new boolean[count];
+		final int[] toParseIndices = new int[count];
+		int toParseCount = 0;
 
-		// == when loaded, which is always in our system ==
-		this.terrainData.load(terrain.data.toString());
-		this.cliffTypesData.load(cliffTypes.data.toString());
-		this.waterData.load(water.data.toString());
-		// emit terrain loaded??
+		for (int i = 0; i < count; i++) {
+			final String path = MAP_SLK_PATHS[i];
+			final boolean overridden = com.etheller.warsmash.datasources.CompoundDataSource
+					.hasNonFolderOverride(this.dataSource, path);
+			final String cacheKey = WarsmashConstants.GAME_VERSION + "|" + path.toLowerCase();
+			if (!overridden) {
+				final MappedData cached = BASE_SLK_CACHE.get(cacheKey);
+				if (cached != null) {
+					parsed[i] = cached;
+					continue;
+				}
+			}
+			final GenericResource resource = loadMapGeneric(path, FetchDataTypeName.SLK, stringDataCallback);
+			rawBuffers[i] = resource.data.toString();
+			cacheable[i] = !overridden;
+			toParseIndices[toParseCount++] = i;
+		}
 
-		final GenericResource doodads = loadMapGeneric("Doodads\\Doodads.slk", FetchDataTypeName.SLK,
-				stringDataCallback);
-		final GenericResource doodadMetaData = loadMapGeneric("Doodads\\DoodadMetaData.slk", FetchDataTypeName.SLK,
-				stringDataCallback);
-		final GenericResource destructableData = loadMapGeneric("Units\\DestructableData.slk", FetchDataTypeName.SLK,
-				stringDataCallback);
-		final GenericResource destructableMetaData = loadMapGeneric("Units\\DestructableMetaData.slk",
-				FetchDataTypeName.SLK, stringDataCallback);
+		if (toParseCount > 0) {
+			final int parseTotal = toParseCount;
+			com.etheller.warsmash.util.ParallelJobs.parallelFor(parseTotal, (idx, worker) -> {
+				final int slot = toParseIndices[idx];
+				parsed[slot] = new MappedData(rawBuffers[slot]);
+			});
+			for (int k = 0; k < parseTotal; k++) {
+				final int slot = toParseIndices[k];
+				if (cacheable[slot]) {
+					final String cacheKey = WarsmashConstants.GAME_VERSION + "|" + MAP_SLK_PATHS[slot].toLowerCase();
+					BASE_SLK_CACHE.put(cacheKey, parsed[slot]);
+				}
+			}
+		}
 
-		// == when loaded, which is always in our system ==
+		this.terrainData.loadFrom(parsed[0]);
+		this.cliffTypesData.loadFrom(parsed[1]);
+		this.waterData.loadFrom(parsed[2]);
+
 		this.doodadsAndDestructiblesLoaded = true;
-		this.doodadsData.load(doodads.data.toString());
-		this.doodadMetaData.load(doodadMetaData.data.toString());
-		this.doodadsData.load(destructableData.data.toString());
-		this.destructableMetaData.load(destructableMetaData.data.toString());
-		// emit doodads loaded
-
-		final GenericResource unitData = loadMapGeneric("Units\\UnitData.slk", FetchDataTypeName.SLK,
-				stringDataCallback);
-		final GenericResource unitUi = loadMapGeneric("Units\\unitUI.slk", FetchDataTypeName.SLK, stringDataCallback);
-		final GenericResource itemData = loadMapGeneric("Units\\ItemData.slk", FetchDataTypeName.SLK,
-				stringDataCallback);
-		final GenericResource unitMetaData = loadMapGeneric("Units\\UnitMetaData.slk", FetchDataTypeName.SLK,
-				stringDataCallback);
+		this.doodadsData.loadFrom(parsed[3]);
+		this.doodadMetaData.loadFrom(parsed[4]);
+		this.doodadsData.loadFrom(parsed[5]);
+		this.destructableMetaData.loadFrom(parsed[6]);
 
 		loadLightningData(worldEditStrings);
 
-		// == when loaded, which is always in our system ==
 		this.unitsAndItemsLoaded = true;
-		this.unitsData.load(unitData.data.toString());
-		this.unitsData.load(unitUi.data.toString());
-		this.unitsData.load(itemData.data.toString());
-		this.unitMetaData.load(unitMetaData.data.toString());
-		// emit loaded
+		this.unitsData.loadFrom(parsed[7]);
+		this.unitsData.loadFrom(parsed[8]);
+		this.unitsData.loadFrom(parsed[9]);
+		this.unitMetaData.loadFrom(parsed[10]);
 
 		this.unitAckSoundsTable = new DataTable(worldEditStrings);
 		try (InputStream terrainSlkStream = this.dataSource.getResourceAsStream("UI\\SoundInfo\\UnitAckSounds.slk")) {
@@ -889,6 +913,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				WorldEditorDataType.DESTRUCTIBLES);
 
 		final War3MapDoo doo = this.mapMpq.readDoodads(w3iFile);
+		preloadDoodadModels(doo, modifications);
 
 		for (final com.etheller.warsmash.parsers.w3x.doo.Doodad doodad : doo.getDoodads()) {
 			if ((doodad.getFlags() & 0x2) == 0) {
@@ -1061,6 +1086,11 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	private MdxModel getDoodadModel(final int doodadVariation, final GameObject row) {
+		return (MdxModel) load(getDoodadModelPath(doodadVariation, row), this.mapPathSolver, this.solverParams);
+	}
+
+	/** The model file a doodad or destructable of this type and variation loads. */
+	private String getDoodadModelPath(final int doodadVariation, final GameObject row) {
 		String file = row.readSLKTag("file");
 		final int numVar = row.readSLKTagInt("numVar");
 
@@ -1088,14 +1118,47 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		else {
 			path = file;
 		}
-		MdxModel model;
-		if (this.mapMpq.has(path)) {
-			model = (MdxModel) load(path, this.mapPathSolver, this.solverParams);
+		return this.mapMpq.has(path) ? path : fileVar;
+	}
+
+	/**
+	 * warsmash-nx: loads every model the map's doodads, destructables and their portraits will ask for, with
+	 * parsing and texture decoding in parallel (ModelViewer.preloadModels), so the placement loop that follows
+	 * finds them loaded. The same paths as getDoodadModel and loadModelMdx choose.
+	 */
+	private void preloadDoodadModels(final War3MapDoo doo, final Warcraft3MapRuntimeObjectData modifications) {
+		if (com.etheller.warsmash.util.ParallelJobs.workerCount() == 0) {
+			return;
 		}
-		else {
-			model = (MdxModel) load(fileVar, this.mapPathSolver, this.solverParams);
+		final java.util.Set<String> paths = new java.util.LinkedHashSet<>();
+		final java.util.Map<String, Boolean> seenTypes = new HashMap<>();
+		for (final com.etheller.warsmash.parsers.w3x.doo.Doodad doodad : doo.getDoodads()) {
+			if ((doodad.getFlags() & 0x2) == 0) {
+				continue;
+			}
+			final War3ID doodadId = doodad.getId();
+			GameObject row = modifications.getDoodads().get(doodadId);
+			boolean destructable = false;
+			if (row == null) {
+				row = modifications.getDestructibles().get(doodadId);
+				destructable = true;
+			}
+			if (row == null) {
+				continue;
+			}
+			paths.add(getDoodadModelPath(doodad.getVariation(), row));
+			if (destructable && (seenTypes.put(doodadId.asStringValue(), Boolean.TRUE) == null)) {
+				final String portraitModelPath = row.readSLKTag("portraitmodel");
+				if (!"".equals(portraitModelPath)) {
+					final String mdxPath = mdx(portraitModelPath);
+					if (this.dataSource.has(mdxPath)) {
+						paths.add(mdxPath);
+					}
+				}
+			}
 		}
-		return model;
+		paths.remove("");
+		this.preloadModels(paths, this.mapPathSolver, this.solverParams, 48);
 	}
 
 	private Rectangle getRotatedBoundingBox(final float x, final float y, final float angle,
@@ -2662,19 +2725,21 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	public final class AsyncMapLoader implements AutoCloseable {
 		private final AtomicInteger completedPrefetchSteps = new AtomicInteger(0);
-		private final ExecutorService prefetchExecutor;
+		private final FutureTask<AsyncPreloadResult> prefetchFuture;
+		private final Thread prefetchThread;
 		private final AsyncLoadCoordinator<AsyncPreloadResult> coordinator;
 
 		private AsyncMapLoader(final War3Map war3Map, final War3MapW3i w3iFile, final int localPlayerIndex) {
 			final WTS preloadedWtsSnapshot = War3MapViewer.this.preloadedWTS;
-			this.prefetchExecutor = Executors.newSingleThreadExecutor(runnable -> {
-				final Thread thread = new Thread(runnable, "warsmash-map-prefetch");
-				thread.setDaemon(true);
-				return thread;
-			});
-			final Future<AsyncPreloadResult> prefetchFuture = this.prefetchExecutor
-					.submit(() -> preloadMapData(war3Map, w3iFile, preloadedWtsSnapshot, this.completedPrefetchSteps));
-			this.coordinator = new AsyncLoadCoordinator<>(prefetchFuture,
+			// warsmash-nx: run the single prefetch job on a one-shot Thread instead of a pooled
+			// SingleThreadExecutor so the thread exits as soon as preloadMapData finishes rather
+			// than staying parked on LinkedBlockingQueue for the rest of the load.
+			this.prefetchFuture = new FutureTask<>(
+					() -> preloadMapData(war3Map, w3iFile, preloadedWtsSnapshot, this.completedPrefetchSteps));
+			this.prefetchThread = new Thread(this.prefetchFuture, "warsmash-map-prefetch");
+			this.prefetchThread.setDaemon(true);
+			this.prefetchThread.start();
+			this.coordinator = new AsyncLoadCoordinator<>(this.prefetchFuture,
 					() -> this.completedPrefetchSteps.get() / (float) ASYNC_PREFETCH_TOTAL_STEPS, ASYNC_PREFETCH_WEIGHT,
 					prefetchResult -> {
 						final MapLoader mapLoader = new MapLoader(war3Map, w3iFile, localPlayerIndex, prefetchResult);
@@ -2703,7 +2768,12 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		@Override
 		public void close() throws IOException {
 			this.coordinator.close();
-			this.prefetchExecutor.shutdownNow();
+			if (!this.prefetchFuture.isDone()) {
+				this.prefetchFuture.cancel(true);
+			}
+			if (this.prefetchThread.isAlive()) {
+				this.prefetchThread.interrupt();
+			}
 		}
 	}
 
@@ -2771,9 +2841,15 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			});
 
 			this.loadMapTasks.add(() -> {
-				War3MapViewer.this.terrain = new Terrain(this.terrainData, this.terrainPathing, w3iFile,
-						War3MapViewer.this.webGL, War3MapViewer.this.dataSource, War3MapViewer.this.worldEditStrings,
-						War3MapViewer.this, War3MapViewer.this.worldEditData);
+				try {
+					War3MapViewer.this.terrain = new Terrain(this.terrainData, this.terrainPathing, w3iFile,
+							War3MapViewer.this.webGL, War3MapViewer.this.dataSource,
+							War3MapViewer.this.worldEditStrings, War3MapViewer.this, War3MapViewer.this.worldEditData);
+				}
+				finally {
+					// the terrain's textures decoded ahead that it did not ask for
+					com.etheller.warsmash.util.ImageUtils.clearPredecoded();
+				}
 			});
 
 			this.loadMapTasks.add(() -> {

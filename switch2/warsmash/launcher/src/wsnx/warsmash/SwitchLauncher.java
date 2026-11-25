@@ -55,11 +55,15 @@ public class SwitchLauncher {
 					loading.fail(e); // shows why on screen for a while, then the game ends as before
 					throw e;
 				}
-				// The first frames after loading leave breadcrumbs in the log (a CPU fault on kaiHEN
-				// leaves nothing else); the native side adds the swaps, memory and audio events.
-				// Only 8: each crumb is a line, i.e. an SD-card write, and 600 frames of them held the
-				// menu at about 8 fps (2026-11-22). Raise it again to hunt a crash in later frames.
-				NxCrumbs.enable(8);
+				// The first frames after loading can leave breadcrumbs in the log for hunting silent
+				// kaiHEN faults, but each crumb is a flushed SD-card write (~2-5 ms each, causing
+				// 60-180 ms frames when the main menu first appears). Off by default; set
+				// [Emulator] Crumbs=N in warsmash.ini to enable.
+				final String crumbsField = emulatorConstants.getField("Crumbs").trim();
+				final int crumbFrames = crumbsField.isEmpty() ? 0 : emulatorConstants.getFieldValue("Crumbs");
+				if (crumbFrames > 0) {
+					NxCrumbs.enable(crumbFrames);
+				}
 			}
 
 			private long renderNs;

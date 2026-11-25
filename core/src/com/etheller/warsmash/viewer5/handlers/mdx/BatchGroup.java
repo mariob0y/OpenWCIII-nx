@@ -69,7 +69,7 @@ public class BatchGroup extends GenericGroup {
 
 		shader.setUniformMatrix(hd ? "u_VP" : "u_mvp", mvp);
 
-		final DataTexture boneTexture = instance.boneTexture;
+		final DataTexture boneTexture = instance.getBoneTexture();
 		final DataTexture unitLightsTexture = lightManager.getUnitLightsTexture();
 
 		unitLightsTexture.bind(14);

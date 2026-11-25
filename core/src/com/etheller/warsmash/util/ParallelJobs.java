@@ -66,6 +66,26 @@ public final class ParallelJobs {
 		}
 	}
 
+	/** Diagnostics (the console's stall watchdog): the worker threads, none before the first job. */
+	public static Thread[] workerThreads() {
+		final Thread[] current = threads;
+		final Thread[] copy = new Thread[current.length];
+		System.arraycopy(current, 0, copy, 0, current.length);
+		return copy;
+	}
+
+	/** Diagnostics: the monitor that jobs are handed out and claimed under. */
+	public static Object monitor() {
+		return lock;
+	}
+
+	/** Diagnostics: the pool's state, read without its monitor (whoever holds it may never let go). */
+	public static String describe() {
+		return "job " + ((job == null) ? "none" : "open") + ", generation " + generation + ", claimed " + next
+				+ " of " + count + ", workers in it " + active + ", started " + started + " of " + workers
+				+ ", failure " + ((failure == null) ? "none" : failure.toString());
+	}
+
 	/** The number of worker threads besides the game thread (starts them on first use). */
 	public static int workerCount() {
 		synchronized (lock) {

@@ -95,21 +95,20 @@ public abstract class RawOpenGLTextureResource extends Texture {
 	}
 
 	public void update(final PixelImage image, final boolean sRGBFix) {
-		final GL20 gl = this.viewer.gl;
-
 		final int imageWidth = image.getWidth();
 		final int imageHeight = image.getHeight();
 		final ByteBuffer buffer = ImageUtils.toRgbaBuffer(image);
 		buffer.flip();
+		updatePredecoded(imageWidth, imageHeight, buffer, sRGBFix);
+	}
+
+	public void updatePredecoded(final int imageWidth, final int imageHeight, final ByteBuffer buffer,
+			final boolean sRGBFix) {
+		final GL20 gl = this.viewer.gl;
 		this.data = buffer;
 
 		gl.glBindTexture(GL20.GL_TEXTURE_2D, this.handle);
 
-//		if ((this.width == imageWidth) && (this.height == imageHeight)) {
-//			gl.glTexSubImage2D(GL20.GL_TEXTURE_2D, 0, 0, 0, imageWidth, imageHeight, GL20.GL_RGBA,
-//					GL20.GL_UNSIGNED_BYTE, buffer);
-//		}
-//		else {
 		gl.glTexImage2D(GL20.GL_TEXTURE_2D, 0, sRGBFix ? GL30.GL_SRGB8_ALPHA8 : GL30.GL_RGBA8, imageWidth, imageHeight,
 				0, GL20.GL_RGBA, GL20.GL_UNSIGNED_BYTE, buffer);
 
@@ -117,7 +116,6 @@ public abstract class RawOpenGLTextureResource extends Texture {
 		this.height = imageHeight;
 		this.textureQuality.invalidate();
 		gl.glTexParameteri(GL20.GL_TEXTURE_2D, GL30.GL_TEXTURE_BASE_LEVEL, 0);
-//		}
 	}
 
 	/**

@@ -37,7 +37,9 @@ public class GroundTexture {
 		if (dataSource.has(path)) {
 			final AnyExtensionImage imageInfo = ImageUtils.getAnyExtensionImageFixRGB(dataSource, path,
 					"ground texture: " + this.tileId);
-			loadImage(path, gl, imageInfo.getImageData(), imageInfo.isNeedsSRGBFix());
+			// the sRGB-corrected image, made ahead of time when the terrain pre-decoded it
+			loadImage(path, gl, (imageInfo.getImageData() == null) ? null : imageInfo.getRGBCorrectImageData(),
+					false);
 		}
 	}
 

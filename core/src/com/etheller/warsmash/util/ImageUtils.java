@@ -40,8 +40,89 @@ public final class ImageUtils {
 		return null;
 	}
 
+	/**
+	 * warsmash-nx: images decoded ahead of time by {@link #predecodeAnyExtension}, each handed out once by
+	 * {@link #getAnyExtensionImageFixRGB}. Keyed by the exact path the later call asks for.
+	 */
+	private static final java.util.Map<String, AnyExtensionImage> PREDECODED = new java.util.HashMap<>();
+
+	/**
+	 * warsmash-nx: decodes several BLP images at once on the ParallelJobs workers, for a loader that is
+	 * about to ask for them one by one (the terrain's ground, cliff and water textures: sequential JPEG
+	 * decodes were most of its load time). The files are read here, on the calling thread (archive streams
+	 * are not thread-safe); only the decoding (and, with {@code withSRGB}, the sRGB copy that
+	 * {@link AnyExtensionImage#getRGBCorrectImageData()} makes) runs in parallel. A file that is missing or
+	 * fails to decode is left to the normal path, which reports it. Call {@link #clearPredecoded()} when the
+	 * loader is done, so nothing it did not ask for stays in memory.
+	 */
+	public static void predecodeAnyExtension(final DataSource dataSource, final java.util.Collection<String> paths,
+			final boolean withSRGB) {
+		if ((paths == null) || (paths.size() < 2) || (ParallelJobs.workerCount() == 0)) {
+			return;
+		}
+		final java.util.List<String> keys = new java.util.ArrayList<>(paths.size());
+		final java.util.List<byte[]> rawFiles = new java.util.ArrayList<>(paths.size());
+		final java.util.Set<String> queued = new java.util.HashSet<>();
+		for (final String path : paths) {
+			if (!path.toLowerCase().endsWith(".blp") || !queued.add(path)) {
+				continue;
+			}
+			synchronized (PREDECODED) {
+				if (PREDECODED.containsKey(path)) {
+					continue;
+				}
+			}
+			try (InputStream stream = dataSource.getResourceAsStream(path)) {
+				if (stream != null) {
+					keys.add(path);
+					rawFiles.add(ImageDecoders.readAll(stream));
+				}
+			}
+			catch (final IOException e) {
+				// the normal path reads it again and reports the error
+			}
+		}
+		final int count = keys.size();
+		if (count < 2) {
+			return;
+		}
+		final AnyExtensionImage[] results = new AnyExtensionImage[count];
+		ParallelJobs.parallelFor(count, (index, worker) -> {
+			try {
+				final PixelImage image = ImageDecoders.decode(rawFiles.get(index));
+				if (image != null) {
+					results[index] = new AnyExtensionImage(true, image, withSRGB ? image.forceSRGB() : null);
+				}
+			}
+			catch (final RuntimeException e) {
+				// left to the normal path
+			}
+		});
+		synchronized (PREDECODED) {
+			for (int i = 0; i < count; i++) {
+				if (results[i] != null) {
+					PREDECODED.put(keys.get(i), results[i]);
+				}
+			}
+		}
+	}
+
+	/** warsmash-nx: drops images decoded ahead that nobody asked for. */
+	public static void clearPredecoded() {
+		synchronized (PREDECODED) {
+			PREDECODED.clear();
+		}
+	}
+
 	public static AnyExtensionImage getAnyExtensionImageFixRGB(final DataSource dataSource, final String path,
 			final String errorType) throws IOException {
+		final AnyExtensionImage predecoded;
+		synchronized (PREDECODED) {
+			predecoded = PREDECODED.isEmpty() ? null : PREDECODED.remove(path);
+		}
+		if (predecoded != null) {
+			return predecoded;
+		}
 		if (path.toLowerCase().endsWith(".blp")) {
 			try (InputStream stream = dataSource.getResourceAsStream(path)) {
 				if (stream == null) {
@@ -79,10 +160,18 @@ public final class ImageUtils {
 	public static final class AnyExtensionImage {
 		private final boolean needsSRGBFix;
 		private final PixelImage imageData;
+		/** warsmash-nx: the sRGB copy, when it was made ahead of time (see predecodeAnyExtension) */
+		private final PixelImage srgbImageData;
 
 		public AnyExtensionImage(final boolean needsSRGBFix, final PixelImage imageData) {
+			this(needsSRGBFix, imageData, null);
+		}
+
+		public AnyExtensionImage(final boolean needsSRGBFix, final PixelImage imageData,
+				final PixelImage srgbImageData) {
 			this.needsSRGBFix = needsSRGBFix;
 			this.imageData = imageData;
+			this.srgbImageData = srgbImageData;
 		}
 
 		public PixelImage getImageData() {
@@ -90,7 +179,10 @@ public final class ImageUtils {
 		}
 
 		public PixelImage getRGBCorrectImageData() {
-			return this.needsSRGBFix ? this.imageData.forceSRGB() : this.imageData;
+			if (!this.needsSRGBFix) {
+				return this.imageData;
+			}
+			return (this.srgbImageData != null) ? this.srgbImageData : this.imageData.forceSRGB();
 		}
 
 		public boolean isNeedsSRGBFix() {
@@ -160,14 +252,17 @@ public final class ImageUtils {
 	/** Same bytes as {@link #getTextureBuffer}, left unflipped (position at the end). */
 	public static ByteBuffer toRgbaBuffer(final PixelImage image) {
 		final int[] pixels = image.getRGB();
-		final ByteBuffer buffer = ByteBuffer.allocateDirect(pixels.length * BYTES_PER_PIXEL)
-				.order(ByteOrder.nativeOrder());
-		for (final int pixel : pixels) {
-			buffer.put((byte) ((pixel >> 16) & 0xFF)); // Red component
-			buffer.put((byte) ((pixel >> 8) & 0xFF)); // Green component
-			buffer.put((byte) (pixel & 0xFF)); // Blue component
-			buffer.put((byte) ((pixel >> 24) & 0xFF)); // Alpha component
+		final int count = pixels.length;
+		final byte[] bytes = new byte[count * BYTES_PER_PIXEL];
+		for (int i = 0, o = 0; i < count; i++, o += 4) {
+			final int pixel = pixels[i];
+			bytes[o] = (byte) (pixel >> 16); // Red component
+			bytes[o + 1] = (byte) (pixel >> 8); // Green component
+			bytes[o + 2] = (byte) pixel; // Blue component
+			bytes[o + 3] = (byte) (pixel >> 24); // Alpha component
 		}
+		final ByteBuffer buffer = ByteBuffer.allocateDirect(bytes.length).order(ByteOrder.nativeOrder());
+		buffer.put(bytes);
 		return buffer;
 	}
 

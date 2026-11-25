@@ -17,15 +17,38 @@ import com.etheller.warsmash.util.LoadingStatus;
 public class MapListContainer {
 	private final SimpleFrame mapListContainer;
 	private final ListBoxFrame mapListBox;
+	private final GameUI rootFrame;
+	private final Viewport uiViewport;
+	private final DataSource dataSource;
+	private boolean populated;
 
 	public MapListContainer(final GameUI rootFrame, final Viewport uiViewport, final String containerKey,
 			final DataSource dataSource, final BitmapFont font) {
+		this(rootFrame, uiViewport, containerKey, dataSource, font, false);
+	}
+
+	public MapListContainer(final GameUI rootFrame, final Viewport uiViewport, final String containerKey,
+			final DataSource dataSource, final BitmapFont font, final boolean lazy) {
+		this.rootFrame = rootFrame;
+		this.uiViewport = uiViewport;
+		this.dataSource = dataSource;
 		this.mapListContainer = (SimpleFrame) rootFrame.getFrameByName(containerKey, 0);
 		this.mapListBox = (ListBoxFrame) rootFrame.createFrameByType("LISTBOX", "MapListBox", this.mapListContainer,
 				"WITHCHILDREN", 0);
 		this.mapListBox.setSetAllPoints(true);
 		this.mapListBox.setFrameFont(font);
-		final Collection<String> listfile = dataSource.getListfile();
+		this.mapListContainer.add(this.mapListBox);
+		if (!lazy) {
+			ensurePopulated();
+		}
+	}
+
+	public void ensurePopulated() {
+		if (this.populated) {
+			return;
+		}
+		this.populated = true;
+		final Collection<String> listfile = this.dataSource.getListfile();
 		final List<String> displayItemPaths = new ArrayList<>();
 		for (final String file : listfile) {
 			if ((file.toLowerCase().endsWith(".w3x") || file.toLowerCase().endsWith(".w3m")) && !file.contains("/")
@@ -36,10 +59,10 @@ public class MapListContainer {
 		int mapsRead = 0;
 		for (final String displayItemPath : displayItemPaths) {
 			LoadingStatus.report("Reading maps", (++mapsRead) + " / " + displayItemPaths.size() + ": " + displayItemPath);
-			this.mapListBox.addItem(displayItemPath, ListItemEnum.ITEM_MAP, rootFrame, uiViewport);
+			this.mapListBox.addItem(displayItemPath, ListItemEnum.ITEM_MAP, this.rootFrame, this.uiViewport);
 		}
 		this.mapListBox.sortItems();
-		this.mapListContainer.add(this.mapListBox);
+		this.mapListBox.positionBounds(this.rootFrame, this.uiViewport);
 	}
 
 	public void addSelectionListener(final ListBoxSelelectionListener listener) {

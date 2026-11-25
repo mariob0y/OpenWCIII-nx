@@ -170,6 +170,44 @@ public class Terrain {
 	private int visTileMaxX = -1;
 	private int visTileMaxY = -1;
 
+	/**
+	 * warsmash-nx: decodes the ground, blight, cliff and water textures in parallel before the constructor
+	 * asks for them one at a time (same paths as the loops below; the images come back through
+	 * ImageUtils.getAnyExtensionImageFixRGB). The War3MapViewer clears what is left once the terrain exists.
+	 */
+	private void predecodeTextures(final War3MapW3e w3eFile, final DataSource dataSource,
+			final DataTable worldEditData, final char tileset, final String texturesExt, final Element waterInfo) {
+		final List<String> colorTextures = new ArrayList<>();
+		for (final War3ID groundTile : w3eFile.getGroundTiles()) {
+			final Element terrainTileInfo = this.terrainTable.get(groundTile.asStringValue());
+			if (terrainTileInfo != null) {
+				colorTextures.add(terrainTileInfo.getField("dir") + "\\" + terrainTileInfo.getField("file") + texturesExt);
+			}
+		}
+		final Element tilesets = worldEditData.get("TileSets");
+		if (tilesets != null) {
+			final String[] tilesetFields = tilesets.getField(Character.toString(tileset)).split(",");
+			if (tilesetFields.length > 1) {
+				colorTextures.add(tilesetFields[1] + texturesExt);
+			}
+		}
+		for (final War3ID cliffTile : w3eFile.getCliffTiles()) {
+			final Element cliffInfo = this.cliffTable.get(cliffTile.asStringValue());
+			if (cliffInfo != null) {
+				colorTextures.add(cliffInfo.getField("texDir") + "\\" + cliffInfo.getField("texFile") + texturesExt);
+			}
+		}
+		ImageUtils.predecodeAnyExtension(dataSource, colorTextures, true);
+		if (waterInfo != null) {
+			final String fileName = waterInfo.getField("texFile");
+			final List<String> waterTextures = new ArrayList<>(this.waterTextureCount);
+			for (int i = 0; i < this.waterTextureCount; i++) {
+				waterTextures.add(fileName + (i < 10 ? "0" : "") + Integer.toString(i) + texturesExt);
+			}
+			ImageUtils.predecodeAnyExtension(dataSource, waterTextures, false);
+		}
+	}
+
 	public Terrain(final War3MapW3e w3eFile, final War3MapWpm terrainPathing, final War3MapW3i w3iFile,
 			final WebGL webGL, final DataSource dataSource, final WorldEditStrings worldEditStrings,
 			final War3MapViewer viewer, final DataTable worldEditData) throws IOException {
@@ -264,6 +302,8 @@ public class Terrain {
 				this.pathToCliff.put("CityCliffs" + cliffVar.getKey() + variation, this.cliffMeshes.size() - 1);
 			}
 		}
+
+		predecodeTextures(w3eFile, dataSource, worldEditData, tileset, texturesExt, waterInfo);
 
 		// Ground textures
 		for (final War3ID groundTile : w3eFile.getGroundTiles()) {

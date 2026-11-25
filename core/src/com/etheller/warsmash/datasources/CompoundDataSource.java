@@ -174,6 +174,30 @@ public class CompoundDataSource implements DataSource {
 		return getMergedListfile();
 	}
 
+	/**
+	 * warsmash-nx: true if any non-folder layer (e.g. a map MPQ or tileset subdir) in {@code dataSource}
+	 * contains {@code path}. Used to verify that cached base-game parses (FDFs, SLKs) are not overridden.
+	 */
+	public static boolean hasNonFolderOverride(final DataSource dataSource, final String path) {
+		if ((dataSource == null) || (dataSource instanceof FolderDataSource)) {
+			return false;
+		}
+		if (dataSource instanceof com.etheller.warsmash.parsers.w3x.War3Map) {
+			// a map is no layer itself: its has() answers for the game folders too, so ask its layers
+			return hasNonFolderOverride(((com.etheller.warsmash.parsers.w3x.War3Map) dataSource).getDataSource(), path);
+		}
+		if (dataSource instanceof CompoundDataSource) {
+			final CompoundDataSource compound = (CompoundDataSource) dataSource;
+			for (int i = 0, n = compound.mpqList.size(); i < n; i++) {
+				if (hasNonFolderOverride(compound.mpqList.get(i), path)) {
+					return true;
+				}
+			}
+			return false;
+		}
+		return dataSource.has(path);
+	}
+
 	@Override
 	public void close() throws IOException {
 		for (final DataSource mpqGuy : this.mpqList) {

@@ -87,6 +87,56 @@ public class MdxModel extends com.etheller.warsmash.viewer5.Model<MdxHandler> {
 		}
 	}
 
+	/**
+	 * The paths this model's textures load from, in texture order: replaceable IDs mapped to their
+	 * ReplaceableTextures file, empty paths to white.blp, and the DDS version of Reforged textures when the
+	 * game files have one. Also marks the textures of shader materials as Reforged, as loading does. Shared by
+	 * {@link #load(Object)} and the viewer's batch preload (warsmash-nx), so both resolve the same files.
+	 */
+	public static List<String> resolveTexturePaths(final MdlxModel parser,
+			final com.etheller.warsmash.datasources.DataSource dataSource) {
+		final boolean reforged = parser.getVersion() > 800;
+		for (final MdlxMaterial material : parser.getMaterials()) {
+			if ((material.shader != null) && (material.shader.length() > 1)) {
+				for (final MdlxLayer layer : material.layers) {
+					final int textureId = layer.textureId;
+					if ((textureId >= 0) && (textureId < parser.getTextures().size())) {
+						parser.getTextures().get(textureId).reforged = true;
+					}
+				}
+			}
+		}
+
+		final List<MdlxTexture> mdlxTextures = parser.getTextures();
+		final List<String> resolvedTexturePaths = new ArrayList<>(mdlxTextures.size());
+		for (final MdlxTexture texture : mdlxTextures) {
+			String path = texture.getPath();
+			final int replaceableId = texture.getReplaceableId();
+
+			if (replaceableId != 0) {
+				// TODO This uses dumb, stupid, terrible, no-good hardcoded replaceable IDs
+				// instead of the real system, because currently MdxSimpleInstance is not
+				// supporting it correctly.
+				final String idString = ((replaceableId == 1) || (replaceableId == 2)) ? ReplaceableIds.getIdString(0)
+						: "";
+				path = "ReplaceableTextures\\" + ReplaceableIds.getPathString(replaceableId) + idString + ".blp";
+			}
+
+			if ((texture.reforged || reforged) && !path.endsWith(".dds")) {
+				final String ddsPath = path.substring(0, path.length() - 4) + ".dds";
+				if (dataSource.has(ddsPath.replace("\\", "/")) || dataSource.has(ddsPath.replace("/", "\\"))
+						|| path.endsWith(".tif")) {
+					path = ddsPath;
+				}
+			}
+			else if ("".equals(path)) {
+				path = "Textures\\white.blp";
+			}
+			resolvedTexturePaths.add(path);
+		}
+		return resolvedTexturePaths;
+	}
+
 	private static final ThreadLocal<ByteBuffer> SCRATCH_MDX_BUFFER = ThreadLocal
 			.withInitial(() -> ByteBuffer.allocateDirect(1024 * 1024 * 2)); // 2MB reusable native direct buffer
 	private static final ThreadLocal<byte[]> CHUNK_BUFFER = ThreadLocal.withInitial(() -> new byte[16384]); // 16KB chunk
@@ -188,44 +238,17 @@ public class MdxModel extends com.etheller.warsmash.viewer5.Model<MdxHandler> {
 
 		final GL20 gl = viewer.gl;
 
-		for (final MdlxMaterial material : parser.getMaterials()) {
-			if ((material.shader != null) && (material.shader.length() > 1)) {
-				for (final MdlxLayer layer : material.layers) {
-					final int textureId = layer.textureId;
-					if ((textureId >= 0) && (textureId < parser.getTextures().size())) {
-						parser.getTextures().get(textureId).reforged = true;
-					}
-				}
-			}
-		}
-
 		// Textures.
-		for (final MdlxTexture texture : parser.getTextures()) {
-			String path = texture.getPath();
+		final List<MdlxTexture> mdlxTextures = parser.getTextures();
+		final List<String> resolvedTexturePaths = resolveTexturePaths(parser, viewer.dataSource);
+		if (resolvedTexturePaths.size() >= 2) {
+			viewer.predecodeTextures(resolvedTexturePaths, pathSolver, solverParams);
+		}
+		for (int ti = 0, tl = mdlxTextures.size(); ti < tl; ti++) {
+			final MdlxTexture texture = mdlxTextures.get(ti);
+			final String path = resolvedTexturePaths.get(ti);
 			final int replaceableId = texture.getReplaceableId();
 			final WrapMode wrapMode = texture.getWrapMode();
-
-			if (replaceableId != 0) {
-				// TODO This uses dumb, stupid, terrible, no-good hardcoded replaceable IDs
-				// instead of the real system, because currently MdxSimpleInstance is not
-				// supporting it correctly.
-				final String idString = ((replaceableId == 1) || (replaceableId == 2)) ? ReplaceableIds.getIdString(0)
-						: "";
-				path = "ReplaceableTextures\\" + ReplaceableIds.getPathString(replaceableId) + idString + ".blp";
-			}
-
-			if ((texture.reforged || reforged) && !path.endsWith(".dds")) {
-				final String ddsPath = path.substring(0, path.length() - 4) + ".dds";
-				if (viewer.dataSource.has(ddsPath.replace("\\", "/"))
-						|| viewer.dataSource.has(ddsPath.replace("/", "\\")) || path.endsWith(".tif")) {
-					path = ddsPath;
-				}
-				else {
-				}
-			}
-			else if ("".equals(path)) {
-				path = "Textures\\white.blp";
-			}
 
 			final Texture viewerTexture = (Texture) viewer.load(path, pathSolver, solverParams);
 

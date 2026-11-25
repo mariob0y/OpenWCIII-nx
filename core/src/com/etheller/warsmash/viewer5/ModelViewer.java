@@ -141,6 +141,187 @@ public abstract class ModelViewer {
 
 	private static final java.util.Set<String> REPORTED_MISSING = new java.util.HashSet<>();
 
+	private static final class PredecodedTexture {
+		final int width;
+		final int height;
+		final java.nio.ByteBuffer rgba;
+
+		PredecodedTexture(final int width, final int height, final java.nio.ByteBuffer rgba) {
+			this.width = width;
+			this.height = height;
+			this.rgba = rgba;
+		}
+	}
+
+	private final Map<String, PredecodedTexture> predecodedTextures = new HashMap<>();
+
+	/**
+	 * warsmash-nx: reads raw bytes of uncached BLP/DDS textures on the calling thread (safe for
+	 * non-thread-safe MPQ streams), then decodes JPEG/BLP/DDS + RGBA packing in parallel across
+	 * ParallelJobs workers. Subsequent load() calls consume the decoded buffers directly.
+	 */
+	public void predecodeTextures(final List<String> paths, final PathSolver pathSolver, final Object solverParams) {
+		if ((paths == null) || (paths.size() < 2) || (pathSolver == null)
+				|| (com.etheller.warsmash.util.ParallelJobs.workerCount() == 0)) {
+			return;
+		}
+		final List<String> keys = new ArrayList<>(paths.size());
+		final List<byte[]> rawFiles = new ArrayList<>(paths.size());
+		final java.util.Set<String> queued = new java.util.HashSet<>();
+		for (int i = 0, n = paths.size(); i < n; i++) {
+			final SolvedPath solved = pathSolver.solve(paths.get(i), solverParams);
+			if (!solved.isFetch()) {
+				continue;
+			}
+			String finalSrc = solved.getFinalSrc();
+			if (!this.dataSource.has(finalSrc)) {
+				final int dot = finalSrc.lastIndexOf('.');
+				if (dot >= 0) {
+					final String ddsPath = finalSrc.substring(0, dot) + ".dds";
+					if (this.dataSource.has(ddsPath)) {
+						finalSrc = ddsPath;
+					}
+					else {
+						continue;
+					}
+				}
+				else {
+					continue;
+				}
+			}
+			if (this.fetchCache.containsKey(finalSrc) || this.predecodedTextures.containsKey(finalSrc)
+					|| !queued.add(finalSrc)) {
+				continue;
+			}
+			String ext = solved.getExtension();
+			if (ext == null) {
+				continue;
+			}
+			if (!ext.startsWith(".")) {
+				ext = "." + ext;
+			}
+			final String lowerExt = ext.toLowerCase();
+			if (!".blp".equals(lowerExt) && !".dds".equals(lowerExt)) {
+				continue;
+			}
+			try (java.io.InputStream in = this.dataSource.getResourceAsStream(finalSrc)) {
+				if (in != null) {
+					keys.add(finalSrc);
+					rawFiles.add(com.etheller.warsmash.util.image.ImageDecoders.readAll(in));
+				}
+			}
+			catch (final Exception ignored) {
+				// Let load() handle error reporting normally.
+			}
+		}
+		final int count = keys.size();
+		if (count < 2) {
+			return;
+		}
+		final PredecodedTexture[] results = new PredecodedTexture[count];
+		com.etheller.warsmash.util.ParallelJobs.parallelFor(count, (idx, worker) -> {
+			try {
+				final com.etheller.warsmash.util.image.PixelImage img = com.etheller.warsmash.util.image.ImageDecoders
+						.decode(rawFiles.get(idx));
+				if (img != null) {
+					final java.nio.ByteBuffer buf = com.etheller.warsmash.util.ImageUtils.toRgbaBuffer(img);
+					buf.flip();
+					results[idx] = new PredecodedTexture(img.getWidth(), img.getHeight(), buf);
+				}
+			}
+			catch (final Exception ignored) {
+				// Fall back to normal sequential decode path in load().
+			}
+		});
+		for (int i = 0; i < count; i++) {
+			if (results[i] != null) {
+				this.predecodedTextures.put(keys.get(i), results[i]);
+			}
+		}
+	}
+
+	/** warsmash-nx: MDX files parsed ahead by {@link #preloadModels}, consumed by the next load() of each */
+	private final Map<String, com.hiveworkshop.rms.parsers.mdlx.MdlxModel> preparsedModels = new HashMap<>();
+
+	/**
+	 * warsmash-nx: loads many MDX models with their parsing and texture decoding spread over the ParallelJobs
+	 * workers, for a loader about to load them one by one (the map's doodads and destructables: one model at a
+	 * time, their JPEG textures decoding in sequence, was most of that load step). Per chunk of
+	 * {@code chunkSize} models: the files are read here (archive streams are not thread-safe), parsed in
+	 * parallel, all their textures decoded in one parallel batch, then each model is load()ed in order on this
+	 * thread (GL work), so the later loads are cache hits. Chunks bound how many decoded textures wait in memory
+	 * at once. Only binary MDX is parsed ahead; anything else, already loaded or missing is left to load().
+	 */
+	public void preloadModels(final java.util.Collection<String> paths, final PathSolver pathSolver,
+			final Object solverParams, final int chunkSize) {
+		if ((paths == null) || paths.isEmpty() || (pathSolver == null)
+				|| (com.etheller.warsmash.util.ParallelJobs.workerCount() == 0)) {
+			return;
+		}
+		final List<String> pending = new ArrayList<>(paths.size());
+		final java.util.Set<String> seen = new java.util.HashSet<>();
+		for (final String path : paths) {
+			if ((path == null) || (path.lastIndexOf('.') < 0) || !seen.add(path)) {
+				continue;
+			}
+			final SolvedPath solved = pathSolver.solve(path, solverParams);
+			final String finalSrc = solved.getFinalSrc();
+			if (!solved.isFetch() || !finalSrc.toLowerCase().endsWith(".mdx")
+					|| this.fetchCache.containsKey(finalSrc) || !this.dataSource.has(finalSrc)) {
+				continue;
+			}
+			pending.add(path);
+		}
+		for (int start = 0; start < pending.size(); start += chunkSize) {
+			final List<String> chunk = pending.subList(start, Math.min(pending.size(), start + chunkSize));
+			final List<String> keys = new ArrayList<>(chunk.size());
+			final List<byte[]> rawFiles = new ArrayList<>(chunk.size());
+			for (final String path : chunk) {
+				final String finalSrc = pathSolver.solve(path, solverParams).getFinalSrc();
+				try (java.io.InputStream in = this.dataSource.getResourceAsStream(finalSrc)) {
+					if (in != null) {
+						final byte[] bytes = com.etheller.warsmash.util.image.ImageDecoders.readAll(in);
+						// binary "MDLX" only: the text MDL parser is not checked for use off the game thread
+						if ((bytes.length > 4) && (bytes[0] == 'M') && (bytes[1] == 'D') && (bytes[2] == 'L')
+								&& (bytes[3] == 'X')) {
+							keys.add(finalSrc);
+							rawFiles.add(bytes);
+						}
+					}
+				}
+				catch (final Exception ignored) {
+					// load() reads it again and reports it
+				}
+			}
+			final int count = keys.size();
+			final com.hiveworkshop.rms.parsers.mdlx.MdlxModel[] parsed = new com.hiveworkshop.rms.parsers.mdlx.MdlxModel[count];
+			com.etheller.warsmash.util.ParallelJobs.parallelFor(count, (idx, worker) -> {
+				try {
+					parsed[idx] = new com.hiveworkshop.rms.parsers.mdlx.MdlxModel(
+							java.nio.ByteBuffer.wrap(rawFiles.get(idx)));
+				}
+				catch (final RuntimeException e) {
+					// load() parses it again and reports the error
+				}
+			});
+			final List<String> texturePaths = new ArrayList<>();
+			for (int i = 0; i < count; i++) {
+				if (parsed[i] != null) {
+					this.preparsedModels.put(keys.get(i), parsed[i]);
+					texturePaths.addAll(com.etheller.warsmash.viewer5.handlers.mdx.MdxModel
+							.resolveTexturePaths(parsed[i], this.dataSource));
+				}
+			}
+			predecodeTextures(texturePaths, pathSolver, solverParams);
+			for (final String path : chunk) {
+				load(path, pathSolver, solverParams);
+			}
+			// whatever a load did not reach (it failed first) is not kept in memory
+			this.preparsedModels.clear();
+			this.predecodedTextures.clear();
+		}
+	}
+
 	public Resource load(final String src, final PathSolver pathSolver, final Object solverParams) {
 		String finalSrc = src;
 		String extension = "";
@@ -198,9 +379,43 @@ public abstract class ModelViewer {
 				this.fetchCache.put(finalSrc, resource);
 //				}
 
+				final PredecodedTexture predecoded = this.predecodedTextures.remove(finalSrc);
+				if ((predecoded != null) && (resource instanceof RawOpenGLTextureResource)) {
+					final boolean sRGBFix = resource instanceof com.etheller.warsmash.viewer5.handlers.blp.BlpTexture;
+					((RawOpenGLTextureResource) resource).updatePredecoded(predecoded.width, predecoded.height,
+							predecoded.rgba, sRGBFix);
+					resource.loaded = true;
+					resource.ok = true;
+					resource.lateLoad();
+					return resource;
+				}
+
+				final com.hiveworkshop.rms.parsers.mdlx.MdlxModel preparsed = this.preparsedModels.isEmpty() ? null
+						: this.preparsedModels.remove(finalSrc);
+				if ((preparsed != null)
+						&& (resource instanceof com.etheller.warsmash.viewer5.handlers.mdx.MdxModel)) {
+					// the same steps as Resource.loadData, from the already parsed file
+					resource.loaded = true;
+					try {
+						((com.etheller.warsmash.viewer5.handlers.mdx.MdxModel) resource).load(preparsed);
+						resource.ok = true;
+						resource.lateLoad();
+					}
+					catch (final Exception e) {
+						resource.error(e);
+					}
+					return resource;
+				}
+
 				// TODO this is a synchronous hack, skipped some Ghostwolf code
 				try {
-					resource.loadData(this.dataSource.getResourceAsStream(finalSrc), null);
+					final java.io.InputStream stream = this.dataSource.getResourceAsStream(finalSrc);
+					if (stream == null) {
+						resource.loaded = true;
+						resource.ok = false;
+						return resource;
+					}
+					resource.loadData(stream, null);
 				}
 				catch (final Exception e) {
 					throw new IllegalStateException("Unable to load data: " + finalSrc, e);
