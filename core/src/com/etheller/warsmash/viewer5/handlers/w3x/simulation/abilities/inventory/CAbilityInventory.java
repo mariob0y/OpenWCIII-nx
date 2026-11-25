@@ -13,6 +13,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.AbstractGenericNoIconAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.SingleOrderAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.item.shop.CAbilityShopPurhaseItem;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilitySpellBase;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitor;
@@ -123,6 +124,22 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 		return super.checkBeforeQueue(game, caster, orderId, target);
 	}
 
+	/**
+	 * warsmash-nx: uses one charge of an item held by the unit (a perishable item with no charges left is
+	 * destroyed). Called by the spell behaviours when a spell cast from an item takes effect, so an order
+	 * that is cancelled while walking to its target keeps the charge.
+	 */
+	public static void useItemCharge(final CSimulation game, final CUnit caster, final CItem item) {
+		if ((item == null) || (caster.getInventoryData() == null)) {
+			return;
+		}
+		final CAbilityInventory inventory = caster.getInventoryData();
+		final int slot = inventory.getSlot(item);
+		if (slot != -1) {
+			inventory.consumePerishableCharge(game, caster, slot, item);
+		}
+	}
+
 	private void consumePerishableCharge(final CSimulation game, final CUnit caster, final int slot,
 			final CItem cItem) {
 		final int updatedCharges = cItem.getCharges() - 1;
@@ -178,8 +195,10 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 					forwardedOrderId = ((SingleOrderAbility) ability).getBaseOrderId();
 				}
 				final CBehavior behavior = ability.begin(game, caster, forwardedOrderId, target);
-				final CItem cItem = this.itemsHeld[slot];
-				consumePerishableCharge(game, caster, slot, cItem);
+				if (!(ability instanceof CAbilitySpellBase)) {
+					// warsmash-nx: spells use the charge when they take effect (useItemCharge)
+					consumePerishableCharge(game, caster, slot, this.itemsHeld[slot]);
+				}
 				return behavior;
 			}
 		}
@@ -213,8 +232,10 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 					forwardedOrderId = ((SingleOrderAbility) ability).getBaseOrderId();
 				}
 				final CBehavior behavior = ability.begin(game, caster, forwardedOrderId, point);
-				final CItem cItem = this.itemsHeld[slot];
-				consumePerishableCharge(game, caster, slot, cItem);
+				if (!(ability instanceof CAbilitySpellBase)) {
+					// warsmash-nx: spells use the charge when they take effect (useItemCharge)
+					consumePerishableCharge(game, caster, slot, this.itemsHeld[slot]);
+				}
 				return behavior;
 			}
 		}
@@ -233,8 +254,10 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 					forwardedOrderId = ((SingleOrderAbility) ability).getBaseOrderId();
 				}
 				final CBehavior behavior = ability.beginNoTarget(game, caster, forwardedOrderId);
-				final CItem cItem = this.itemsHeld[slot];
-				consumePerishableCharge(game, caster, slot, cItem);
+				if (!(ability instanceof CAbilitySpellBase)) {
+					// warsmash-nx: spells use the charge when they take effect (useItemCharge)
+					consumePerishableCharge(game, caster, slot, this.itemsHeld[slot]);
+				}
 				return behavior;
 			}
 		}
@@ -492,7 +515,9 @@ public class CAbilityInventory extends AbstractGenericNoIconAbility {
 			if (this.canUseItems && itemType.isUseAutomaticallyWhenAcquired()) {
 				if (itemType.isActivelyUsed()) {
 					item.setLife(simulation, 0);
-					// TODO when we give unit ability here, then use ability
+					// warsmash-nx: a power-up is gone once picked up (as in giveAutoItem)
+					item.setHidden(true);
+					simulation.removeItem(item);
 					final List<CAbility> addedAbilities = new ArrayList<>();
 					for (final War3ID abilityId : item.getItemType().getAbilityList()) {
 						final CAbilityType<?> abilityType = simulation.getAbilityData().getAbilityType(abilityId);

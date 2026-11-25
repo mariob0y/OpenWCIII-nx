@@ -612,7 +612,7 @@ public class CUnit extends CWidget {
 			final List<CUnitAttack> newAttackList = new ArrayList<CUnitAttack>();
 			for (int i = 0; i < this.unitSpecificAttacks.size(); i++) {
 				final CUnitAttack attack = this.unitSpecificAttacks.get(i);
-				if (((getUnitType().getAttacksEnabled() & (i + 1)) != 0) && !isDisableAttack
+				if ((((getUnitType().getAttacksEnabled() | nxExtraAttacksEnabled()) & (i + 1)) != 0) && !isDisableAttack
 						&& (!isDisableMeleeAttack || !attack.getWeaponType().equals(CWeaponType.NORMAL))
 						&& (!isDisableRangedAttack || attack.getWeaponType().equals(CWeaponType.NORMAL))
 						&& (!isDisableSpecialAttack || !((attack.getTargetsAllowed().size() == 1)
@@ -4537,6 +4537,26 @@ public class CUnit extends CWidget {
 	public int getUnitStockCurrent(final War3ID unitId) {
 		final int[] counts = this.unitStock.get(Integer.valueOf(unitId.getValue()));
 		return counts == null ? Integer.MAX_VALUE : counts[0];
+	}
+
+	// warsmash-nx: weapons switched on by held items (an orb's "Enabled Attack Index" lets a melee hero's
+	// second weapon hit air), counted per weapon so that two orbs do not cancel each other
+	private final int[] nxExtraAttackCounts = new int[2];
+
+	private int nxExtraAttacksEnabled() {
+		return (this.nxExtraAttackCounts[0] > 0 ? 1 : 0) | (this.nxExtraAttackCounts[1] > 0 ? 2 : 0);
+	}
+
+	public void nxEnableExtraAttack(final CSimulation game, final int attackIndex, final boolean enable) {
+		if ((attackIndex < 1) || (attackIndex > 2)) {
+			return;
+		}
+		final int before = nxExtraAttacksEnabled();
+		this.nxExtraAttackCounts[attackIndex - 1] = Math.max(0,
+				this.nxExtraAttackCounts[attackIndex - 1] + (enable ? 1 : -1));
+		if ((before != nxExtraAttacksEnabled()) && (this.unitSpecificAttacks != null)) {
+			computeUnitState(game, StateModBuffType.DISABLE_ATTACK);
+		}
 	}
 
 	public void setUnitSpecificAttacks(final List<CUnitAttack> unitSpecificAttacks) {

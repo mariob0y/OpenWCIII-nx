@@ -10,6 +10,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens;
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.PrimaryTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.AnimationTokens.SecondaryTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.SequenceUtils;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CItem;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
@@ -33,6 +34,7 @@ public abstract class CAbilitySpellBase extends AbstractGenericSingleIconNoSmart
 	private float duration;
 	private float heroDuration;
 	private War3ID code;
+	private CItem item;
 
 	public CAbilitySpellBase(final int handleId, final War3ID alias) {
 		super(handleId, alias, alias);
@@ -129,7 +131,7 @@ public abstract class CAbilitySpellBase extends AbstractGenericSingleIconNoSmart
 		}
 		final float cooldownRemaining = getCooldownRemaining(game, unit);
 		if (cooldownRemaining > 0) {
-			final float cooldownLengthDisplay = unit.getCooldownLengthDisplayTicks(game, getCode())
+			final float cooldownLengthDisplay = unit.getCooldownLengthDisplayTicks(game, getCooldownId())
 					* WarsmashConstants.SIMULATION_STEP_TIME;
 			receiver.cooldownNotYetReady(cooldownRemaining, cooldownLengthDisplay);
 		}
@@ -172,7 +174,33 @@ public abstract class CAbilitySpellBase extends AbstractGenericSingleIconNoSmart
 	}
 
 	public float getCooldownRemaining(final CSimulation game, final CUnit caster) {
-		return getCooldownRemaining(game, caster, getCode());
+		return getCooldownRemaining(game, caster, getCooldownId());
+	}
+
+	/**
+	 * warsmash-nx: the cooldown key. A spell held in an item uses the item's cooldown group, so items
+	 * sharing a group (Scroll of Healing and its runes...) share one cooldown, as in Warcraft III.
+	 */
+	public War3ID getCooldownId() {
+		if (this.item != null) {
+			if (this.item.getItemType().isIgnoreCooldown()) {
+				return War3ID.NONE;
+			}
+			if (this.item.getItemType().getCooldownGroup() != null) {
+				return this.item.getItemType().getCooldownGroup();
+			}
+		}
+		return getCode();
+	}
+
+	@Override
+	public void setItemAbility(final CItem item, final int slot) {
+		this.item = item;
+	}
+
+	@Override
+	public CItem getItem() {
+		return this.item;
 	}
 
 	public static float getCooldownRemaining(final CSimulation game, final CUnit caster, final War3ID code) {

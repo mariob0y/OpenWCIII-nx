@@ -104,6 +104,7 @@ public final class NxSpells {
 		put(map, "Aliq", (h, a) -> new AttackEffect(h, a, Recipe.LIQUID_FIRE));
 		put(map, "Asal", (h, a) -> new AttackEffect(h, a, Recipe.PILLAGE));
 		NxSpells2.register(map);
+		NxItems.register(map);
 	}
 
 	enum Recipe {

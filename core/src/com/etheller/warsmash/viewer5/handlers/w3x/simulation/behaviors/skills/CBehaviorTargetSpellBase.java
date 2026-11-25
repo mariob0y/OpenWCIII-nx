@@ -4,6 +4,7 @@ import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.inventory.CAbilityInventory;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilitySpellBase;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetStillAliveAndTargetableVisitor;
@@ -70,7 +71,9 @@ public class CBehaviorTargetSpellBase extends CAbstractRangedBehavior {
 							CommandStringErrorKeys.NOT_ENOUGH_MANA);
 					return this.unit.pollNextOrderBehavior(simulation);
 				}
-				this.unit.beginCooldown(simulation, this.ability.getCode(), this.ability.getCooldown());
+				this.unit.beginCooldown(simulation, this.ability.getCooldownId(), this.ability.getCooldown());
+				// warsmash-nx: a spell cast from an item uses up its charge only now, when it takes effect
+				CAbilityInventory.useItemCharge(simulation, this.unit, this.ability.getItem());
 				this.channeling = this.ability.doEffect(simulation, this.unit, this.target);
 				if (this.channeling) {
 					simulation.unitLoopSoundEffectEvent(this.unit, this.ability.getAlias());
