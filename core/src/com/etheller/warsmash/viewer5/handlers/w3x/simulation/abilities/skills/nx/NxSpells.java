@@ -766,6 +766,7 @@ public final class NxSpells {
 				return false;
 			}
 			trap.addClassification(CUnitClassification.SUMMONED);
+			caster.fireSummonEvents(game, trap);
 			trap.add(game, new CBuffTimedLife(game.getHandleIdAllocator().createId(), this.buffId,
 					getDuration() > 0 ? getDuration() : 150, false));
 			final int armed = game.getGameTurnTick() + ticks(this.armDelay);

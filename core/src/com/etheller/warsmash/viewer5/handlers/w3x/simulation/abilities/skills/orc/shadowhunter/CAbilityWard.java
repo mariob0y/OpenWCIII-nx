@@ -56,6 +56,7 @@ public class CAbilityWard extends CAbilityPointTargetSpellBase {
 				continue;
 			}
 			ward.addClassification(CUnitClassification.SUMMONED);
+			caster.fireSummonEvents(simulation, ward);
 			ward.add(simulation, new CBuffTimedLife(simulation.getHandleIdAllocator().createId(), this.buffId,
 					getDuration(), false));
 			simulation.createTemporarySpellEffectOnUnit(ward, getAlias(), CEffectType.SPECIAL);

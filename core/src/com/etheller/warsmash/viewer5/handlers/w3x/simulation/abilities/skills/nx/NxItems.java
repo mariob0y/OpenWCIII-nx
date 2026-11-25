@@ -676,6 +676,7 @@ public final class NxItems {
 				}
 				summoned.setPointAndCheckUnstuck(x, y, game);
 				summoned.addClassification(CUnitClassification.SUMMONED);
+				caster.fireSummonEvents(game, summoned);
 				if (getDuration() > 0) {
 					summoned.add(game,
 							new CBuffTimedLife(game.getHandleIdAllocator().createId(), this.buffId, getDuration(), true));
@@ -737,6 +738,7 @@ public final class NxItems {
 					u.setPlayerIndex(game, caster.getPlayerIndex(), true);
 				}
 				u.addClassification(CUnitClassification.SUMMONED);
+				caster.fireSummonEvents(game, u);
 				if (this.invulnerable) {
 					NxBuff.apply(game, u, buff(game, this.buffId, seconds).state(StateModBuffType.INVULNERABLE));
 				}

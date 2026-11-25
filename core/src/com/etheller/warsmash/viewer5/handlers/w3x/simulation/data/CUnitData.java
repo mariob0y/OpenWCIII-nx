@@ -362,8 +362,10 @@ public class CUnitData {
 		if (unitTypeInstance.isHero()) {
 			final List<War3ID> heroAbilityList = unitTypeInstance.getHeroAbilityList();
 			unit.add(simulation, new CAbilityHero(handleIdAllocator.createId(), heroAbilityList));
-			// reset initial mana after the value is adjusted for hero data
-			unit.setMana(manaInitial);
+			// a new hero starts with its initial mana plus what its Intelligence adds, up to the maximum:
+			// with the initial mana alone (100) a campaign hero cannot cast at the start (OrcX01's skipped
+			// intro has Rexxar summon Misha, 150 mana, at once)
+			setNewHeroMana(unit, unitTypeInstance, manaInitial);
 		}
 		for (final War3ID ability : unitTypeInstance.getAbilityList()) {
 			final CLevelingAbility existingAbility = unit
@@ -391,6 +393,11 @@ public class CUnitData {
 			unit.add(simulation,
 					simulation.getAbilityData().createAbility(War3ID.fromString("AInv"), handleIdAllocator.createId()));
 		}
+	}
+
+	private static void setNewHeroMana(final CUnit unit, final CUnitType unitType, final int manaInitial) {
+		final int intelligenceMana = Math.max(0, unit.getMaximumMana() - unitType.getManaMaximum());
+		unit.setMana(Math.min(unit.getMaximumMana(), manaInitial + intelligenceMana));
 	}
 
 	public void addMissingDefaultAbilitiesToUnit(final CSimulation simulation,
@@ -476,8 +483,10 @@ public class CUnitData {
 			}
 			else {
 				unit.add(simulation, new CAbilityHero(handleIdAllocator.createId(), heroAbilityList));
-				// reset initial mana after the value is adjusted for hero data
-				unit.setMana(manaInitial);
+				// a new hero starts with its initial mana plus what its Intelligence adds, up to the maximum:
+				// with the initial mana alone (100) a campaign hero cannot cast at the start (OrcX01's skipped
+				// intro has Rexxar summon Misha, 150 mana, at once)
+				setNewHeroMana(unit, unitTypeInstance, manaInitial);
 			}
 		}
 		for (final War3ID ability : unitTypeInstance.getAbilityList()) {

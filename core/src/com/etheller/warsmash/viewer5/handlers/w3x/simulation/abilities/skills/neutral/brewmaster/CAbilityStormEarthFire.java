@@ -74,6 +74,7 @@ public class CAbilityStormEarthFire extends CAbilityNoTargetSpellBase {
 				continue;
 			}
 			unit.addClassification(CUnitClassification.SUMMONED);
+			caster.fireSummonEvents(simulation, unit);
 			unit.add(simulation, new CBuffTimedLife(simulation.getHandleIdAllocator().createId(), this.buffId,
 					getDuration(), false));
 			simulation.createTemporarySpellEffectOnUnit(unit, getAlias(), CEffectType.SPECIAL);

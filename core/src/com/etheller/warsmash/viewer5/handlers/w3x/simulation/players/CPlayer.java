@@ -437,6 +437,17 @@ public class CPlayer extends CBasePlayer {
 		}
 	}
 
+	public void fireSummonEvents(final CUnit summoningUnit, final CUnit summonedUnit) {
+		final List<CPlayerEvent> eventList = getEventList(JassGameEventsWar3.EVENT_PLAYER_UNIT_SUMMON);
+		if (eventList != null) {
+			for (final CPlayerEvent event : new ArrayList<>(eventList)) {
+				event.fire(summonedUnit, CommonTriggerExecutionScope.unitSummonScope(
+						JassGameEventsWar3.EVENT_PLAYER_UNIT_SUMMON, event.getTrigger(), summoningUnit, summonedUnit,
+						this));
+			}
+		}
+	}
+
 	public void fireUnitDeathEvents(final CUnit dyingUnit, final CUnit killingUnit) {
 		final List<CPlayerEvent> eventList = getEventList(JassGameEventsWar3.EVENT_PLAYER_UNIT_DEATH);
 		if (eventList != null) {

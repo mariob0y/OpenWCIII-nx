@@ -632,6 +632,19 @@ public class CommonTriggerExecutionScope extends TriggerExecutionScope {
 		return scope;
 	}
 
+	/** EVENT_UNIT_SUMMON / EVENT_PLAYER_UNIT_SUMMON: the triggering unit is the summoned one. */
+	public static CommonTriggerExecutionScope unitSummonScope(final JassGameEventsWar3 triggerEventId,
+			final Trigger trigger, final CUnit summoningUnit, final CUnit summonedUnit, final CPlayerJass player) {
+		final CommonTriggerExecutionScope scope = new CommonTriggerExecutionScope(trigger, TriggerExecutionScope.EMPTY);
+		scope.triggerWidget = summonedUnit;
+		scope.triggeringUnit = summonedUnit;
+		scope.summoningUnit = summoningUnit;
+		scope.summonedUnit = summonedUnit;
+		scope.triggeringPlayer = player;
+		scope.triggerEventId = triggerEventId;
+		return scope;
+	}
+
 	public static CommonTriggerExecutionScope widgetTriggerScope(final JassGameEventsWar3 triggerEventId,
 			final Trigger trigger, final CWidget triggerWidget) {
 		final CommonTriggerExecutionScope scope = new CommonTriggerExecutionScope(trigger, TriggerExecutionScope.EMPTY);

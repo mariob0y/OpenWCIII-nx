@@ -47,6 +47,7 @@ public class CAbilitySummonGrizzly extends CAbilityNoTargetSpellBase {
 			final CUnit summonedUnit = simulation.createUnitSimple(this.summonUnitId, unit.getPlayerIndex(), x, y,
 					facing);
 			summonedUnit.addClassification(CUnitClassification.SUMMONED);
+			unit.fireSummonEvents(simulation, summonedUnit);
 			summonedUnit.add(simulation,
 					new CBuffTimedLife(simulation.getHandleIdAllocator().createId(), this.buffId, getDuration(), true));
 			simulation.createTemporarySpellEffectOnUnit(summonedUnit, getAlias(), CEffectType.TARGET);

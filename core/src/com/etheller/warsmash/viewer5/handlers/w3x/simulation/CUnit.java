@@ -5293,6 +5293,18 @@ public class CUnit extends CWidget {
 		game.getPlayer(this.playerIndex).fireSellItemEvents(this, buyingUnit, item);
 	}
 
+	/** This unit summoned summonedUnit: EVENT_UNIT_SUMMON, then its owner's EVENT_PLAYER_UNIT_SUMMON. */
+	public void fireSummonEvents(final CSimulation game, final CUnit summonedUnit) {
+		final List<CWidgetEvent> eventList = getEventList(JassGameEventsWar3.EVENT_UNIT_SUMMON);
+		if (eventList != null) {
+			for (final CWidgetEvent event : new ArrayList<>(eventList)) {
+				event.fire(this, CommonTriggerExecutionScope.unitSummonScope(JassGameEventsWar3.EVENT_UNIT_SUMMON,
+						event.getTrigger(), this, summonedUnit, null));
+			}
+		}
+		game.getPlayer(this.playerIndex).fireSummonEvents(this, summonedUnit);
+	}
+
 	public void firePickUpItemEvents(final CSimulation game, final CItem item) {
 		final List<CWidgetEvent> eventList = getEventList(JassGameEventsWar3.EVENT_UNIT_PICKUP_ITEM);
 		if (eventList != null) {
