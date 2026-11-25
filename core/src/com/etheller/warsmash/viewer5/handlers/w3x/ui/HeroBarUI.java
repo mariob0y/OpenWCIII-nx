@@ -18,16 +18,18 @@ import com.etheller.warsmash.parsers.fdf.frames.SimpleStatusBarFrame;
 import com.etheller.warsmash.parsers.fdf.frames.SpriteFrame;
 import com.etheller.warsmash.parsers.fdf.frames.TextureFrame;
 import com.etheller.warsmash.parsers.fdf.frames.UIFrame;
+import com.etheller.warsmash.util.War3ID;
 import com.etheller.warsmash.viewer5.handlers.w3x.War3MapViewer;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.ability.UnitIconUI;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.hero.CAbilityHero;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit.QueueItemType;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.command.ClickableActionFrame;
 
 /**
  * The hero bar: one button per hero of the local player down the top left of the screen, under the upper
  * button bar, in the order the heroes were gained. Each button shows the hero's icon (greyed while dead), a
- * life and a mana bar, and the skin's HeroBarPointModel (UI\Buttons\HeroLevel) while the hero has unspent
+ * life and a mana bar (for a dead hero, the life bar is its revival at an altar), and the skin's HeroBarPointModel (UI\Buttons\HeroLevel) while the hero has unspent
  * skill points. Clicks go to the {@link Listener}.
  */
 public class HeroBarUI {
@@ -188,7 +190,9 @@ public class HeroBarUI {
 				button.hero = hero;
 				button.dead = dead;
 			}
-			final float life = dead ? 0 : hero.getLife() / Math.max(1f, hero.getMaximumLife());
+			// a dead hero's life bar shows how far its revival at an altar has got
+			final float life = dead ? reviveProgress(hero, localPlayerIndex)
+					: hero.getLife() / Math.max(1f, hero.getMaximumLife());
 			button.setLifeRatio(life);
 			final boolean hasMana = hero.getMaximumMana() > 0;
 			button.manaBar.setVisible(hasMana);
@@ -200,6 +204,28 @@ public class HeroBarUI {
 		if (layoutChanged) {
 			this.container.positionBounds(this.rootFrame, this.uiViewport);
 		}
+	}
+
+	/**
+	 * How far the altar reviving this dead hero has got (0..1), or 0 when the hero is not being revived or is
+	 * still waiting behind other items in the altar's queue.
+	 */
+	private float reviveProgress(final CUnit hero, final int localPlayerIndex) {
+		if (!hero.getHeroData().isReviving()) {
+			return 0;
+		}
+		for (final CUnit altar : this.war3MapViewer.simulation.getUnits()) {
+			if ((altar.getPlayerIndex() != localPlayerIndex) || !altar.isBuildQueueActive()) {
+				continue;
+			}
+			final War3ID queued = altar.getBuildQueue()[0];
+			if ((altar.getBuildQueueTypes()[0] == QueueItemType.HERO_REVIVE) && (queued != null)
+					&& (queued.getValue() == hero.getHandleId())) {
+				final float reviveTime = altar.getBuildQueueTimeRemaining(this.war3MapViewer.simulation);
+				return reviveTime <= 0 ? 0 : Math.min(altar.getConstructionProgress() / reviveTime, 1f);
+			}
+		}
+		return 0;
 	}
 
 	private static boolean isBarHero(final CUnit unit, final int localPlayerIndex) {
