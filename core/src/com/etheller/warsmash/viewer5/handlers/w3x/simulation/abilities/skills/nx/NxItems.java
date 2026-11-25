@@ -33,6 +33,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.def
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbstractCAbilityTypeDefinition;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.CAbilityTypeDefinitionSpellBase;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehavior;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CTargetType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.CUnitAttack;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.CUnitAttackMissile;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.listeners.CUnitAttackEffectListenerStacking;
@@ -155,6 +156,22 @@ public final class NxItems {
 
 	private static float distance(final CUnit u, final float x, final float y) {
 		return (float) StrictMath.hypot(u.getX() - x, u.getY() - y);
+	}
+
+	/**
+	 * Dead units (not heroes, not buildings) within the radius, nearest first. The engine's corpse lookup
+	 * only holds corpses that have decayed to bones, so fresh ones are found by scanning the units.
+	 */
+	private static List<CUnit> deadUnitsNear(final CSimulation game, final float x, final float y,
+			final float radius) {
+		final List<CUnit> dead = new ArrayList<>();
+		for (final CUnit u : game.getUnits()) {
+			if (u.isDead() && !u.isHero() && !u.isBuilding() && !u.isHidden() && (distance(u, x, y) <= radius)) {
+				dead.add(u);
+			}
+		}
+		dead.sort(Comparator.comparingDouble((u) -> distance(u, x, y)));
+		return dead;
 	}
 
 	/** The player's town hall nearest to (x, y), else any of its buildings, else null. */
@@ -447,19 +464,16 @@ public final class NxItems {
 		 * creep died, so the nearest creep corpse is taken to be that creep.
 		 */
 		private void rebirth(final CSimulation game, final CUnit caster) {
-			final List<CUnit> corpses = new ArrayList<>();
-			game.getWorldCollision().enumCorpsesInRange(caster.getX(), caster.getY(), 600, (u) -> {
-				if (!u.isHero() && !u.isBuilding() && (u.getPlayerIndex() != caster.getPlayerIndex())
-						&& !caster.isUnitAlly(game.getPlayer(u.getPlayerIndex()))) {
-					corpses.add(u);
+			CUnit dead = null;
+			for (final CUnit u : deadUnitsNear(game, caster.getX(), caster.getY(), 600)) {
+				if (!caster.isUnitAlly(game.getPlayer(u.getPlayerIndex()))) {
+					dead = u;
+					break;
 				}
-				return false;
-			});
-			if (corpses.isEmpty()) {
+			}
+			if (dead == null) {
 				return;
 			}
-			corpses.sort(Comparator.comparingDouble((u) -> distance(u, caster.getX(), caster.getY())));
-			final CUnit dead = corpses.get(0);
 			final CUnit reborn = game.createUnit(dead.getTypeId(), caster.getPlayerIndex(), caster.getX(),
 					caster.getY(), caster.getFacing());
 			if (reborn != null) {
@@ -702,12 +716,11 @@ public final class NxItems {
 		@Override
 		public boolean doEffect(final CSimulation game, final CUnit caster, final AbilityTarget target) {
 			final List<CUnit> raised = new ArrayList<>();
-			game.getWorldCollision().enumCorpsesInRange(caster.getX(), caster.getY(), this.area, (u) -> {
-				if ((raised.size() < this.corpses) && !u.isHero() && !u.isBuilding()) {
+			for (final CUnit u : deadUnitsNear(game, caster.getX(), caster.getY(), this.area)) {
+				if ((raised.size() < this.corpses) && u.isRaisable()) {
 					raised.add(u);
 				}
-				return raised.size() >= this.corpses;
-			});
+			}
 			final float seconds = getDuration() > 0 ? getDuration() : 40;
 			for (final CUnit u : raised) {
 				u.resurrect(game);
@@ -964,11 +977,15 @@ public final class NxItems {
 				}
 				return false;
 			}
-			// Cloud of Fog: enemies in the cloud cannot attack (Data B: their chance to miss when it allows it)
+			// Cloud of Fog: enemies in the cloud cannot attack (Data B: their chance to miss when it allows it);
+			// targets "structure" alone (the item, the dragonhawk) means enemy buildings only
 			final float radius = this.area > 0 ? this.area : 300;
+			final boolean buildingsOnly = getTargetsAllowed().contains(CTargetType.STRUCTURE)
+					&& !getTargetsAllowed().contains(CTargetType.GROUND) && !getTargetsAllowed().contains(CTargetType.AIR);
 			game.spawnTemporarySpellEffectOnPoint(x, y, 0, getAlias(), CEffectType.EFFECT, 0);
 			game.getWorldCollision().enumUnitsInRange(x, y, radius, (u) -> {
-				if (!u.isDead() && NxSpells.enemies(game, caster, u) && u.canBeTargetedBy(game, caster, getTargetsAllowed())) {
+				if (!u.isDead() && NxSpells.enemies(game, caster, u)
+						&& (buildingsOnly ? u.isBuilding() : u.canBeTargetedBy(game, caster, getTargetsAllowed()))) {
 					NxBuff fog = buff(game, this.buffId, getDurationForTarget(u));
 					fog = this.a > 0 ? fog.state(StateModBuffType.DISABLE_ATTACK) : fog.miss(this.b / 100f);
 					NxBuff.apply(game, u, fog);
