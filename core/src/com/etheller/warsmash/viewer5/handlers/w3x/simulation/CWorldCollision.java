@@ -398,7 +398,7 @@ public class CWorldCollision {
 
 		@Override
 		public boolean onIntersect(final CUnit intersectingObject) {
-			if (intersectingObject.isHidden()
+			if (intersectingObject.isHidden() || intersectingObject.isNxLocust()
 					|| MovementType.FOOT_NO_COLLISION.equals(intersectingObject.getMovementType())
 					|| (this.forConstruction && intersectingObject.isNoBuildingCollision())
 					|| (!this.forConstruction && intersectingObject.isNoUnitCollision())) {
@@ -502,7 +502,7 @@ public class CWorldCollision {
 
 		@Override
 		public boolean onIntersect(final CUnit unit) {
-			if (unit.isHidden() || !this.intersectedUnits.add(unit)) {
+			if (unit.isHidden() || unit.isNxLocust() || !this.intersectedUnits.add(unit)) {
 				return false;
 			}
 			return this.callback.call(unit);

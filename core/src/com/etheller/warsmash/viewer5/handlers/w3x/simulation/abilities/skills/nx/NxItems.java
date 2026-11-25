@@ -229,6 +229,7 @@ public final class NxItems {
 		}
 		image.setLife(game, image.getMaximumLife() * (source.getLife() / Math.max(1f, source.getMaximumLife())));
 		image.setMana(0);
+		image.setNxIllusion(true);
 		image.addClassification(CUnitClassification.SUMMONED);
 		image.addDeathReplacementEffect(
 				com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.listeners.CUnitDeathReplacementEffectPriority.PHOENIXREVIVE,
@@ -693,13 +694,21 @@ public final class NxItems {
 		private float area;
 		private War3ID buffId;
 
+		private final int orderId;
+
 		public AnimateDead(final int handleId, final War3ID alias) {
+			this(handleId, alias, OrderIds.itemanimatedead);
+		}
+
+		/** Also the creep spell (ACad), with its own order. */
+		public AnimateDead(final int handleId, final War3ID alias, final int orderId) {
 			super(handleId, alias);
+			this.orderId = orderId;
 		}
 
 		@Override
 		public int getBaseOrderId() {
-			return OrderIds.itemanimatedead;
+			return this.orderId;
 		}
 
 		@Override

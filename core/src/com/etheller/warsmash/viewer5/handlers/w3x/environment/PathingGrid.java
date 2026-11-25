@@ -28,6 +28,8 @@ public class PathingGrid {
 
 	private final short[] pathingGrid;
 	private final short[] dynamicPathingOverlay; // for buildings and trees
+	/** warsmash-nx: bumped when walk, swim or fly pathing changes (pathfinding's coarse grid rebuilds then). */
+	private transient int nxPathingVersion;
 	private final int[] pathingGridSizes;
 	private final float[] centerOffset;
 	private final List<RemovablePathingMapInstance> dynamicPathingInstances;
@@ -43,8 +45,14 @@ public class PathingGrid {
 	// this blit function is basically copied from HiveWE, maybe remember to mention
 	// that in credits as well:
 	// https://github.com/stijnherfst/HiveWE/blob/master/Base/PathingMap.cpp
+	/** warsmash-nx: changes whenever walk, swim or fly pathing may have changed. */
+	public int getNxPathingVersion() {
+		return this.nxPathingVersion;
+	}
+
 	private void blitPathingOverlayTexture(final float positionX, final float positionY, final int rotationInput,
 			final PixelImage pathingTextureTga, boolean blocksVision) {
+		this.nxPathingVersion++;
 		final int rotation = (rotationInput + 450) % 360;
 		final int divW = ((rotation % 180) != 0) ? pathingTextureTga.getHeight() : pathingTextureTga.getWidth();
 		final int divH = ((rotation % 180) != 0) ? pathingTextureTga.getWidth() : pathingTextureTga.getHeight();
@@ -287,6 +295,10 @@ public class PathingGrid {
 		final int index = (cellY * this.pathingGridSizes[0]) + cellX;
 		if (index >= this.pathingGrid.length) {
 			return;
+		}
+		final int movement = PathingFlags.UNWALKABLE | PathingFlags.UNSWIMABLE | PathingFlags.UNFLYABLE;
+		if (((this.pathingGrid[index] ^ pathingValue) & movement) != 0) {
+			this.nxPathingVersion++;
 		}
 		this.pathingGrid[index] = pathingValue;
 	}
@@ -642,6 +654,7 @@ public class PathingGrid {
 		public void remove() {
 			PathingGrid.this.dynamicPathingInstances.remove(this);
 			Arrays.fill(PathingGrid.this.dynamicPathingOverlay, (short) 0);
+			PathingGrid.this.nxPathingVersion++;
 			for (final RemovablePathingMapInstance instance : PathingGrid.this.dynamicPathingInstances) {
 				instance.blit();
 			}

@@ -10,6 +10,9 @@ import java.util.Iterator;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.LinkedList;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.PriorityQueue;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -665,6 +668,10 @@ public class CPathfindingProcessor {
 						}
 						stepsBackward++;
 					}
+					if ((job.coarseTail != null) && !totalPath.isEmpty()) {
+						// reached the coarse waypoint: the rest of the coarse route leads on to the real goal
+						totalPath.addAll(job.coarseTail);
+					}
 					job.queueItem.pathFound(totalPath, simulation);
 					this.moveQueue.poll();
 					if (WarsmashConstants.ENABLE_DEBUG) System.out.println("Task " + this.pathfindJobId + " took " + this.totalIterations
@@ -748,13 +755,22 @@ public class CPathfindingProcessor {
 				workIterations++;
 				if (NXSTAT) nxstatIters++;
 				this.totalIterations++;
-				if (this.totalIterations > 20000) {
+				if (this.totalIterations > MAX_ITERATIONS) {
 					break;
 				}
 				if (workIterations >= WORK_BUDGET_PER_TICK) {
 					if (NXSTAT) nxstatBudgetTicks++;
 					// breaking jobs loop will implicitly exit without calling pathFound() below
 					break JobsLoop;
+				}
+			}
+			// warsmash-nx: the iteration cap on a long trip: a coarse search finds the way round (a detour
+			// past the cap), and the fine search starts again toward a waypoint a little way along it
+			if ((this.totalIterations > MAX_ITERATIONS) && !job.coarseTried) {
+				job.coarseTried = true;
+				if (planCoarseDetour(job)) {
+					job.jobStarted = false;
+					continue JobsLoop;
 				}
 			}
 			// warsmash-nx: no path to the goal (unreachable, or the iteration cap on a long trip): walk to the
@@ -774,6 +790,9 @@ public class CPathfindingProcessor {
 				closest = cameArr[closest];
 			}
 			if (NXSTAT) nxstatPartial++;
+			if ((job.coarseTail != null) && !partialPath.isEmpty()) {
+				partialPath.addAll(job.coarseTail);
+			}
 			job.queueItem.pathFound(partialPath, simulation);
 			this.moveQueue.poll();
 			if (WarsmashConstants.ENABLE_DEBUG) System.out.println("Task " + this.pathfindJobId + " took " + this.totalIterations + " iterations and "
@@ -781,12 +800,283 @@ public class CPathfindingProcessor {
 		}
 	}
 
+	// ------------------------------------------------------------------------------------------------
+	// warsmash-nx: coarse guide for long detours
+	// ------------------------------------------------------------------------------------------------
+
+	/** Fine search iterations per job before the direct search gives up. */
+	private static final int MAX_ITERATIONS = 20000;
+	/** Coarse block size, in pathing cells (4 x 32 = 128 world units). */
+	private static final int COARSE = 4;
+	/** How far along the coarse route the fine search aims, in blocks (~1,500 world units). */
+	private static final int COARSE_LEG = 12;
+
+	/**
+	 * The pathing grid in 4x4 blocks for one movement type: a block is open if any of its cells is, two
+	 * neighbouring blocks are linked if an open cell of one touches an open cell of the other, and linked
+	 * blocks are numbered by connected region. Built from the cell pathing (terrain, doodads, buildings),
+	 * ignoring units and collision size: a guide only; the fine search checks the real way. Built when first
+	 * needed and again after the pathing changes (~25 ms on the PC for a 768x768 cell map).
+	 */
+	private static final class CoarseGrid {
+		final int width, height;
+		/** Bit 0: open; bit 1: linked east; bit 2: linked north. */
+		final byte[] links;
+		final int[] region;
+		final int pathingVersion;
+
+		CoarseGrid(final int width, final int height, final int pathingVersion) {
+			this.width = width;
+			this.height = height;
+			this.links = new byte[width * height];
+			this.region = new int[width * height];
+			this.pathingVersion = pathingVersion;
+		}
+
+		boolean linked(final int from, final int to) {
+			if ((to < 0) || (to >= this.links.length)) {
+				return false;
+			}
+			final int fx = from % this.width;
+			final int tx = to % this.width;
+			if (to == (from + 1)) {
+				return ((fx + 1) == tx) && ((this.links[from] & 2) != 0);
+			}
+			if (to == (from - 1)) {
+				return ((tx + 1) == fx) && ((this.links[to] & 2) != 0);
+			}
+			if (to == (from + this.width)) {
+				return (this.links[from] & 4) != 0;
+			}
+			if (to == (from - this.width)) {
+				return (this.links[to] & 4) != 0;
+			}
+			return false;
+		}
+	}
+
+	private final transient Map<MovementType, CoarseGrid> coarseGrids = new EnumMap<>(MovementType.class);
+
+	private CoarseGrid coarseGrid(final MovementType movementType) {
+		final int version = this.pathingGrid.getNxPathingVersion();
+		final CoarseGrid cached = this.coarseGrids.get(movementType);
+		if ((cached != null) && (cached.pathingVersion == version)) {
+			return cached;
+		}
+		final PathingGrid grid = this.pathingGrid;
+		final int fw = grid.getWidth();
+		final int fh = grid.getHeight();
+		final boolean[] open = new boolean[fw * fh];
+		for (int y = 0; y < fh; y++) {
+			for (int x = 0; x < fw; x++) {
+				open[(y * fw) + x] = grid.isCellPathable(x, y, movementType);
+			}
+		}
+		final int cw = (fw + COARSE - 1) / COARSE;
+		final int ch = (fh + COARSE - 1) / COARSE;
+		final CoarseGrid coarse = new CoarseGrid(cw, ch, version);
+		for (int cy = 0; cy < ch; cy++) {
+			for (int cx = 0; cx < cw; cx++) {
+				byte bits = 0;
+				final int x0 = cx * COARSE;
+				final int y0 = cy * COARSE;
+				final int x1 = Math.min(fw, x0 + COARSE);
+				final int y1 = Math.min(fh, y0 + COARSE);
+				findOpen: for (int y = y0; y < y1; y++) {
+					for (int x = x0; x < x1; x++) {
+						if (open[(y * fw) + x]) {
+							bits |= 1;
+							break findOpen;
+						}
+					}
+				}
+				if (x1 < fw) {
+					// east: an open cell either side of the shared edge, straight across or one row off
+					for (int y = y0; (y < y1) && ((bits & 2) == 0); y++) {
+						if (open[(y * fw) + (x1 - 1)]) {
+							for (int dy = -1; dy <= 1; dy++) {
+								final int ny = y + dy;
+								if ((ny >= 0) && (ny < fh) && open[(ny * fw) + x1]) {
+									bits |= 2;
+									break;
+								}
+							}
+						}
+					}
+				}
+				if (y1 < fh) {
+					for (int x = x0; (x < x1) && ((bits & 4) == 0); x++) {
+						if (open[((y1 - 1) * fw) + x]) {
+							for (int dx = -1; dx <= 1; dx++) {
+								final int nx = x + dx;
+								if ((nx >= 0) && (nx < fw) && open[(y1 * fw) + nx]) {
+									bits |= 4;
+									break;
+								}
+							}
+						}
+					}
+				}
+				coarse.links[(cy * cw) + cx] = bits;
+			}
+		}
+		// connected regions
+		final int[] queue = new int[cw * ch];
+		int regions = 0;
+		for (int first = 0; first < queue.length; first++) {
+			if (((coarse.links[first] & 1) == 0) || (coarse.region[first] != 0)) {
+				continue;
+			}
+			regions++;
+			int head = 0;
+			int tail = 0;
+			queue[tail++] = first;
+			coarse.region[first] = regions;
+			while (head < tail) {
+				final int c = queue[head++];
+				for (int k = 0; k < 4; k++) {
+					final int n = (k == 0) ? (c + 1) : (k == 1) ? (c - 1) : (k == 2) ? (c + cw) : (c - cw);
+					if (coarse.linked(c, n) && (coarse.region[n] == 0)) {
+						coarse.region[n] = regions;
+						queue[tail++] = n;
+					}
+				}
+			}
+		}
+		this.coarseGrids.put(movementType, coarse);
+		return coarse;
+	}
+
+	private int coarseCell(final CoarseGrid coarse, final float worldX, final float worldY) {
+		final int cx = Math.max(0, Math.min(coarse.width - 1, this.pathingGrid.getCellX(worldX) / COARSE));
+		final int cy = Math.max(0, Math.min(coarse.height - 1, this.pathingGrid.getCellY(worldY) / COARSE));
+		return (cy * coarse.width) + cx;
+	}
+
+	/** The open cell of a block nearest the block's middle, as a world point (null if none). */
+	private Point2D.Float coarsePoint(final CoarseGrid coarse, final int cell, final MovementType movementType) {
+		final int x0 = (cell % coarse.width) * COARSE;
+		final int y0 = (cell / coarse.width) * COARSE;
+		Point2D.Float best = null;
+		float bestD = Float.MAX_VALUE;
+		for (int y = y0; y < (y0 + COARSE); y++) {
+			for (int x = x0; x < (x0 + COARSE); x++) {
+				if ((x < this.pathingGrid.getWidth()) && (y < this.pathingGrid.getHeight())
+						&& this.pathingGrid.isCellPathable(x, y, movementType)) {
+					final float dx = (x - x0) - 1.5f;
+					final float dy = (y - y0) - 1.5f;
+					final float d = (dx * dx) + (dy * dy);
+					if (d < bestD) {
+						bestD = d;
+						best = new Point2D.Float(this.pathingGrid.getWorldX(x), this.pathingGrid.getWorldY(y));
+					}
+				}
+			}
+		}
+		return best;
+	}
+
+	/**
+	 * After the fine search ran out of iterations: finds the way to the goal on the coarse grid and points
+	 * the job at a waypoint COARSE_LEG blocks along it, keeping the rest of the route as the path's tail.
+	 * False when the coarse grid sees no way (goal unreachable): the caller walks to the closest point.
+	 */
+	private boolean planCoarseDetour(final PathfindingJob job) {
+		if ((job.movementType == null) || (job.movementType == MovementType.FLY)
+				|| (job.movementType == MovementType.DISABLED)) {
+			return false;
+		}
+		final MovementType movementType = (job.movementType == MovementType.FOOT_NO_COLLISION) ? MovementType.FOOT
+				: job.movementType;
+		final CoarseGrid coarse = coarseGrid(movementType);
+		final int start = coarseCell(coarse, job.startX, job.startY);
+		final int region = coarse.region[start];
+		if (region == 0) {
+			return false;
+		}
+		// the goal's block, or the nearest block around it in the start's region (a goal on a cliff edge)
+		int goal = -1;
+		final int goalX = coarseCell(coarse, job.goal.x, job.goal.y) % coarse.width;
+		final int goalY = coarseCell(coarse, job.goal.x, job.goal.y) / coarse.width;
+		for (int r = 0; (r <= 2) && (goal == -1); r++) {
+			for (int dy = -r; (dy <= r) && (goal == -1); dy++) {
+				for (int dx = -r; dx <= r; dx++) {
+					final int gx = goalX + dx;
+					final int gy = goalY + dy;
+					if ((gx >= 0) && (gy >= 0) && (gx < coarse.width) && (gy < coarse.height)
+							&& (coarse.region[(gy * coarse.width) + gx] == region)) {
+						goal = (gy * coarse.width) + gx;
+						break;
+					}
+				}
+			}
+		}
+		if ((goal == -1) || (goal == start)) {
+			return false;
+		}
+		// breadth-first from the goal: each block then knows its next step toward it
+		final int[] next = new int[coarse.links.length];
+		Arrays.fill(next, -2);
+		final int[] queue = new int[coarse.links.length];
+		int head = 0;
+		int tail = 0;
+		queue[tail++] = goal;
+		next[goal] = -1;
+		while ((head < tail) && (next[start] == -2)) {
+			final int c = queue[head++];
+			for (int k = 0; k < 4; k++) {
+				final int n = (k == 0) ? (c + 1) : (k == 1) ? (c - 1) : (k == 2) ? (c + coarse.width) : (c - coarse.width);
+				if (coarse.linked(c, n) && (next[n] == -2)) {
+					next[n] = c;
+					queue[tail++] = n;
+				}
+			}
+		}
+		if (next[start] == -2) {
+			return false;
+		}
+		// the route as world points where it turns; the first leg's end is the fine search's new goal
+		final List<Point2D.Float> route = new ArrayList<>();
+		int c = next[start];
+		int steps = 1;
+		int lastStep = c - start;
+		Point2D.Float waypoint = null;
+		while (c != -1) {
+			final int n = next[c];
+			final int step = (n == -1) ? 0 : (n - c);
+			if (waypoint == null) {
+				if ((steps >= COARSE_LEG) || (n == -1)) {
+					waypoint = coarsePoint(coarse, c, movementType);
+				}
+			}
+			else if ((n == -1) || (step != lastStep)) {
+				final Point2D.Float p = coarsePoint(coarse, c, movementType);
+				if (p != null) {
+					route.add(p);
+				}
+			}
+			lastStep = step;
+			c = n;
+			steps++;
+		}
+		if (waypoint == null) {
+			return false;
+		}
+		route.add(job.goal);
+		job.coarseTail = route;
+		job.goal = waypoint;
+		return true;
+	}
+
 	public static final class PathfindingJob {
 		private final CUnit ignoreIntersectionsWithThisUnit;
 		private final CUnit ignoreIntersectionsWithThisSecondUnit;
 		private final float startX;
 		private final float startY;
-		private final Point2D.Float goal;
+		private Point2D.Float goal;
+		/** warsmash-nx: the rest of the coarse route, while searching toward one of its waypoints. */
+		private List<Point2D.Float> coarseTail;
+		private boolean coarseTried;
 		private final MovementType movementType;
 		private final float collisionSize;
 		private final boolean allowSmoothing;

@@ -598,6 +598,7 @@ public final class NxSpells2 {
 				}
 				image.setLife(game, image.getMaximumLife() * (caster.getLife() / Math.max(1f, caster.getMaximumLife())));
 				image.setMana(0);
+				image.setNxIllusion(true);
 				image.addDeathReplacementEffect(CUnitDeathReplacementEffectPriority.PHOENIXREVIVE,
 						(sim, unit, killer, result) -> {
 							// an image vanishes instead of dying

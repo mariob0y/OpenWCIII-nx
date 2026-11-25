@@ -46,7 +46,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.C
  * <li>unit target: Hex and Polymorph (a random critter form from Data B..E by movement type: its model,
  * portrait, sounds and speed; no attacks, no spells; see NxHex), Ensnare, Bloodlust, Unholy Frenzy, Cripple, Lightning
  * Shield, Purge, Drunken Haze, Spirit Link, Ancestral Spirit, Devour, Unstable Concoction;</li>
- * <li>no target: Berserk, Locust Swarm (no visible locusts: each bite shows the spell's effect art);</li>
+ * <li>no target: Berserk, Locust Swarm;</li>
  * <li>point: Dispel Magic / Disenchant, Stasis Trap;</li>
  * <li>passive attack effects: Venom Spears, Slow Poison, Liquid Fire, Pillage.</li>
  * </ul>
@@ -105,6 +105,7 @@ public final class NxSpells {
 		put(map, "Asal", (h, a) -> new AttackEffect(h, a, Recipe.PILLAGE));
 		NxSpells2.register(map);
 		NxItems.register(map);
+		NxSpells3.register(map);
 	}
 
 	enum Recipe {
@@ -371,7 +372,8 @@ public final class NxSpells {
 
 				@Override
 				public boolean update(final CSimulation g) {
-					if (t.isDead()) {
+					// eaten unit dead, or removed from the game by a script
+					if (t.isDead() || (g.getUnit(t.getHandleId()) == null)) {
 						TargetSpell.this.devoured = null;
 						return true;
 					}
@@ -397,6 +399,10 @@ public final class NxSpells {
 
 		private void release(final CSimulation game, final CUnit caster, final CUnit t) {
 			this.devoured = null;
+			if (game.getUnit(t.getHandleId()) == null) {
+				// removed meanwhile: it has no art left to move (repositioning it crashed the renderer)
+				return;
+			}
 			t.setInvulnerable(false);
 			t.setPaused(false);
 			t.setHidden(false);
@@ -456,7 +462,8 @@ public final class NxSpells {
 	/**
 	 * Locust Swarm (AUls): Data A locusts, released one per Data B seconds, at most Data C on one target;
 	 * each bites enemies around the caster (within Area) with the locust unit's damage and, after Data E
-	 * damage, flies back to give the caster Data D of it as life.
+	 * damage, flies back to give the caster Data D of it as life. Each locust is a unit of the spell's unit
+	 * type (uloc, Aloc: unselectable, untargetable) flown here between the caster and its victims.
 	 */
 	public static final class LocustSwarm extends CAbilityNoTargetSpellBase {
 		private int count, perTarget;
@@ -501,10 +508,15 @@ public final class NxSpells {
 			final float biteDamage = bite;
 			final int end = game.getGameTurnTick() + ticks(getDuration() > 0 ? getDuration() : 30);
 			game.createTemporarySpellEffectOnUnit(caster, getAlias(), CEffectType.CASTER);
+			final War3ID bodyType = this.locustType;
 			game.registerEffect(new CEffect() {
 				private final int[] nextBite = new int[LocustSwarm.this.count];
 				private final float[] carried = new float[LocustSwarm.this.count];
 				private final CUnit[] on = new CUnit[LocustSwarm.this.count];
+				/** The locusts themselves (Data A units of the spell's unit type, Aloc): art only, moved here. */
+				private final CUnit[] body = new CUnit[LocustSwarm.this.count];
+				/** Flying back to the caster with the life it carries. */
+				private final boolean[] returning = new boolean[LocustSwarm.this.count];
 				private final Map<CUnit, Integer> load = new HashMap<>();
 
 				{
@@ -516,12 +528,39 @@ public final class NxSpells {
 				@Override
 				public boolean update(final CSimulation g) {
 					if (caster.isDead() || (g.getGameTurnTick() >= end)) {
+						for (final CUnit b : this.body) {
+							if ((b != null) && (g.getUnit(b.getHandleId()) != null)) {
+								g.removeUnit(b);
+							}
+						}
 						return true;
 					}
 					final int now = g.getGameTurnTick();
 					for (int i = 0; i < this.nextBite.length; i++) {
-						if (now < this.nextBite[i]) {
+						if (this.returning[i]) {
+							// back home: the carried life goes to the caster
+							if (fly(g, i, caster.getX(), caster.getY())) {
+								caster.setLife(g, Math.min(caster.getMaximumLife(),
+										caster.getLife() + (this.carried[i] * LocustSwarm.this.returnFactor)));
+								this.carried[i] = 0;
+								this.returning[i] = false;
+								this.nextBite[i] = now + ticks(0.5f);
+							}
 							continue;
+						}
+						if (now < this.nextBite[i]) {
+							hover(g, i, now);
+							continue;
+						}
+						if ((this.body[i] == null) && (bodyType != null)) {
+							// released: leaves the caster
+							final CUnit b = g.createUnit(bodyType, caster.getPlayerIndex(), caster.getX(), caster.getY(),
+									caster.getFacing());
+							if (b != null) {
+								b.setAcquisitionRange(0);
+								b.addClassification(CUnitClassification.SUMMONED);
+								this.body[i] = b;
+							}
 						}
 						CUnit t = this.on[i];
 						if ((t == null) || t.isDead() || (dist(t, caster) > LocustSwarm.this.area)) {
@@ -536,24 +575,73 @@ public final class NxSpells {
 							}
 							this.load.merge(t, 1, Integer::sum);
 						}
+						if (!fly(g, i, t.getX(), t.getY())) {
+							// still on its way: bites on arrival
+							continue;
+						}
 						spellDamage(g, caster, t, biteDamage, CDamageType.NORMAL);
 						if ((g.getSeededRandom().nextInt(4)) == 0) {
 							g.createTemporarySpellEffectOnUnit(t, getAlias(), CEffectType.TARGET);
 						}
 						this.carried[i] += biteDamage;
 						if (this.carried[i] >= LocustSwarm.this.returnThreshold) {
-							caster.setLife(g, Math.min(caster.getMaximumLife(),
-									caster.getLife() + (this.carried[i] * LocustSwarm.this.returnFactor)));
-							this.carried[i] = 0;
 							this.load.merge(t, -1, Integer::sum);
 							this.on[i] = null;
-							this.nextBite[i] = now + ticks(1.5f);
+							if (this.body[i] != null) {
+								this.returning[i] = true;
+							}
+							else {
+								caster.setLife(g, Math.min(caster.getMaximumLife(),
+										caster.getLife() + (this.carried[i] * LocustSwarm.this.returnFactor)));
+								this.carried[i] = 0;
+								this.nextBite[i] = now + ticks(1.5f);
+							}
 						}
 						else {
 							this.nextBite[i] = now + ticks(1.0f);
 						}
 					}
 					return false;
+				}
+
+				/**
+				 * Moves locust i a step toward the point (circling it once there); true when it is there. Without a
+				 * body (no unit type) it is always there.
+				 */
+				private boolean fly(final CSimulation g, final int i, final float x, final float y) {
+					final CUnit b = this.body[i];
+					if ((b == null) || (g.getUnit(b.getHandleId()) == null)) {
+						this.body[i] = null;
+						return true;
+					}
+					final double angle = (i * 2.399) + (g.getGameTurnTick() * 0.15);
+					final float gx = x + (float) (Math.cos(angle) * 40);
+					final float gy = y + (float) (Math.sin(angle) * 40);
+					final float dx = gx - b.getX();
+					final float dy = gy - b.getY();
+					final float d = (float) Math.hypot(dx, dy);
+					final float step = Math.max(1, b.getSpeed()) * WarsmashConstants.SIMULATION_STEP_TIME;
+					if (d > 0.01f) {
+						final float k = Math.min(1, step / d);
+						b.setPoint(b.getX() + (dx * k), b.getY() + (dy * k), g.getWorldCollision(), g.getRegionManager());
+						b.setFacing((float) Math.toDegrees(Math.atan2(dy, dx)));
+						g.unitRepositioned(b);
+					}
+					return d <= (step + 60);
+				}
+
+				/** Between bites a locust keeps circling its victim (or the caster). */
+				private void hover(final CSimulation g, final int i, final int now) {
+					if (this.body[i] == null) {
+						return;
+					}
+					final CUnit t = this.on[i];
+					if ((t != null) && !t.isDead()) {
+						fly(g, i, t.getX(), t.getY());
+					}
+					else {
+						fly(g, i, caster.getX(), caster.getY());
+					}
 				}
 
 				private CUnit pick(final CSimulation g) {

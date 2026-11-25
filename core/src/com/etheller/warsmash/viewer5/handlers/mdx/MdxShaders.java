@@ -1077,6 +1077,14 @@ public class MdxShaders {
 			"      if (u_emitter == EMITTER_RIBBON && u_filterMode == 1.0 && color.a < 0.75) {\r\n" + //
 			"        discard;\r\n" + //
 			"      }\r\n" + //
+			// warsmash-nx: modulate blending (destination times source colour) ignores alpha, so a particle's
+			// transparency has to fade it toward the neutral colour (white; grey for 2x). Otherwise the
+			// transparent, black-stored corners darkened the ground into black squares (Locust Swarm's trail).
+			"      if (u_emitter == 0.0 && u_filterMode == 2.0) {\r\n" + //
+			"        color = vec4(mix(vec3(1.0), color.rgb, color.a), 1.0);\r\n" + //
+			"      } else if (u_emitter == 0.0 && u_filterMode == 3.0) {\r\n" + //
+			"        color = vec4(mix(vec3(0.5), color.rgb, color.a), 1.0);\r\n" + //
+			"      }\r\n" + //
 			Shaders.fogSystem(true,
 					"(u_filterMode != 1.0 && u_filterMode != 4.0 && u_emitter != EMITTER_RIBBON) || ((u_filterMode < 3.0 || u_filterMode > 4.0) && u_emitter == EMITTER_RIBBON)")
 			+ //

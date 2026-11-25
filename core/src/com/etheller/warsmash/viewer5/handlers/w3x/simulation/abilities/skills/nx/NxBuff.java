@@ -128,6 +128,38 @@ public class NxBuff extends CBuffTimed {
 		return this;
 	}
 
+	/** A curse: damage over time, misses, more damage taken, a lowered stat, a disabling state or a morph. */
+	public boolean isHarmful() {
+		if ((this.damagePerSecond > 0) || (this.missChance > 0) || (this.damageTakenFactor > 1f)
+				|| (this.morph != null)) {
+			return true;
+		}
+		for (final NonStackingStatBuff stat : this.stats) {
+			if (stat.getValue() < 0) {
+				return true;
+			}
+		}
+		for (final StateModBuff state : this.states) {
+			switch (state.getBuffType()) {
+			case INVULNERABLE:
+			case MAGIC_IMMUNE:
+			case RESISTANT:
+			case INVISIBLE:
+			case DETECTOR:
+				break;
+			default:
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** A blessing: something raised or protected, and nothing harmful (Spell Steal moves these). */
+	public boolean isHelpful() {
+		return !isHarmful() && (!this.stats.isEmpty() || !this.states.isEmpty() || (this.auraDamagePerSecond > 0)
+				|| (this.damageTakenFactor < 1f));
+	}
+
 	/** Puts the buff on a unit, replacing the same buff from an earlier cast. */
 	public static void apply(final CSimulation game, final CUnit target, final NxBuff buff) {
 		for (final CAbility ability : new ArrayList<>(target.getAbilities())) {

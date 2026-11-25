@@ -183,7 +183,7 @@ public class MeleeUIMinimap {
 		// player color (1 SpriteBatch draw call instead of dozens of per-player texture flushes).
 		for (final RenderUnit unit : units) {
 			final CUnit simUnit = unit.getSimulationUnit();
-			if (!simUnit.isHidden() && !simUnit.isDead() && simUnit.isVisible(game, localPlayerId)) {
+			if (!simUnit.isHidden() && !simUnit.isNxLocust() && !simUnit.isDead() && simUnit.isVisible(game, localPlayerId)) {
 				if ((simUnit.getGoldMineData() != null) || (simUnit.getOverlayedGoldMineData() != null)
 						|| simUnit.getUnitType().isNeutralBuildingShowMinimapIcon() || simUnit.isHero()) {
 					specialUnits.add(unit);

@@ -1156,6 +1156,10 @@ public class Jass2 {
 								.visit(ObjectJassValueVisitor.<CPlayerJass>getInstance());
 						final TriggerBooleanExpression filter = nullable(arguments, 2,
 								ObjectJassValueVisitor.<TriggerBooleanExpression>getInstance());
+						// warsmash-nx: a null group or player enumerates nothing, as in WC3
+						if ((group == null) || (player == null)) {
+							return null;
+						}
 						for (final CUnit unit : CommonEnvironment.this.simulation.getUnits()) {
 							if (unit.getPlayerIndex() == player.getId()) {
 								if ((filter == null) || filter.evaluate(globalScope,
@@ -3606,7 +3610,9 @@ public class Jass2 {
 					(arguments, globalScope, triggerScope) -> {
 						final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 						final double facing = arguments.get(1).visit(RealJassValueVisitor.getInstance());
-						whichUnit.setFacing((float) facing);
+						if (whichUnit != null) {
+							whichUnit.setFacing((float) facing);
+						}
 						return null;
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("SetUnitFacingTimed",
@@ -3614,7 +3620,10 @@ public class Jass2 {
 						// time-interpolated rotation is not yet simulated; apply facing immediately
 						final CUnit whichUnit = arguments.get(0).visit(ObjectJassValueVisitor.getInstance());
 						final double facing = arguments.get(1).visit(RealJassValueVisitor.getInstance());
-						whichUnit.setFacing((float) facing);
+						// warsmash-nx: a null unit is ignored, as in WC3 (OrcX03b's intro cleanup turns absent heroes)
+						if (whichUnit != null) {
+							whichUnit.setFacing((float) facing);
+						}
 						return null;
 					});
 			jassProgramVisitor.getJassNativeManager().createNative("SetUnitMoveSpeed",

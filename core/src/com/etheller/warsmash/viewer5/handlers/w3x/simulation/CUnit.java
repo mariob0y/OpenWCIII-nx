@@ -3358,6 +3358,10 @@ public class CUnit extends CWidget {
 
 	public boolean canBeTargetedBy(final CSimulation simulation, final CUnit source, final boolean targeted,
 			final EnumSet<CTargetType> targetsAllowed, final AbilityTargetCheckReceiver<CWidget> receiver) {
+		if (this.nxLocust && (this != source)) {
+			receiver.targetCheckFailed(CommandStringErrorKeys.UNABLE_TO_TARGET_THIS_UNIT);
+			return false;
+		}
 		if ((this == source) && targetsAllowed.contains(CTargetType.NOTSELF)
 				&& !targetsAllowed.contains(CTargetType.SELF)) {
 			receiver.targetCheckFailed(CommandStringErrorKeys.UNABLE_TO_TARGET_SELF);
@@ -4017,6 +4021,36 @@ public class CUnit extends CWidget {
 
 	public void setInvulnerable(final boolean invulnerable) {
 		this.invulnerable = invulnerable;
+	}
+
+	/**
+	 * Locust (Aloc): the unit cannot be selected or targeted, takes no damage, blocks nothing, and area
+	 * searches (spells, auto-acquire, GroupEnumUnitsInRange/InRect) skip it; player/type lists still have it.
+	 */
+	private boolean nxLocust;
+
+	/** The game tick the unit died on (later death phases move it on; 0 while alive). */
+	public int getDeathTurnTick() {
+		return this.deathTurnTick;
+	}
+
+	private boolean nxIllusion;
+
+	/** An illusion (Mirror Image, Wand of Illusion): drawn tinted blue for its owner and allies. */
+	public boolean isNxIllusion() {
+		return this.nxIllusion;
+	}
+
+	public void setNxIllusion(final boolean illusion) {
+		this.nxIllusion = illusion;
+	}
+
+	public boolean isNxLocust() {
+		return this.nxLocust;
+	}
+
+	public void setNxLocust(final boolean locust) {
+		this.nxLocust = locust;
 	}
 
 	@Override

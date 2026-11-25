@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.rendersim;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
 import java.util.EnumSet;
 
 import com.badlogic.gdx.Gdx;
@@ -71,6 +72,8 @@ public class RenderUnit implements RenderWidget {
 	private float selectionHeight;
 	private RenderUnit preferredSelectionReplacement;
 	private float[] currentColor = { 1, 1, 1, 1 };
+	/** Drawn as an illusion: the owner and allies see it tinted blue (WC3); enemies cannot tell it apart. */
+	private boolean illusionTint;
 	private static final Quaternion tempQuat2 = new Quaternion();
 	private boolean poseCached;
 	private float lastGroundHeightTerrain;
@@ -315,6 +318,16 @@ public class RenderUnit implements RenderWidget {
 			this.unitAnimationListenerImpl.forceResetCurrentAnimation();
 		}
 		boolean colorNeedsUpdate = false;
+		if (this.simulationUnit.isNxIllusion()) {
+			final int owner = this.simulationUnit.getPlayerIndex();
+			final int local = map.getLocalPlayerIndex();
+			final boolean tint = (owner == local)
+					|| map.simulation.getPlayer(local).hasAlliance(owner, CAllianceType.PASSIVE);
+			if (tint != this.illusionTint) {
+				this.illusionTint = tint;
+				colorNeedsUpdate = true;
+			}
+		}
 		if (invisible && !this.invisible) {
 			// turn invisible instantly
 			colorNeedsUpdate = true;
@@ -693,7 +706,7 @@ public class RenderUnit implements RenderWidget {
 
 	@Override
 	public boolean isSelectable(final CSimulation simulation, final int byPlayer) {
-		return this.simulationUnit.isVisible(simulation, byPlayer); // later needs locust
+		return !this.simulationUnit.isNxLocust() && this.simulationUnit.isVisible(simulation, byPlayer);
 	}
 
 	@Override
@@ -773,6 +786,11 @@ public class RenderUnit implements RenderWidget {
 				final float fadeAmount = map.getRemainingSecondsForRender(fadeTimer) / fadeTimer.getTimeoutTime();
 				finalAlpha *= (fadeAmount * 0.5f) + 0.5f;
 			}
+		}
+		if (this.illusionTint) {
+			this.instance.setVertexColor(this.currentColor[0] * 0.35f, this.currentColor[1] * 0.55f,
+					this.currentColor[2], finalAlpha);
+			return;
 		}
 		this.instance.setVertexColor(this.currentColor[0], this.currentColor[1], this.currentColor[2], finalAlpha);
 	}

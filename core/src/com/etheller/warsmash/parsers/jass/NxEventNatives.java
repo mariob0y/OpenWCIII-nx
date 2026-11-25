@@ -5,6 +5,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.CLeaderboard;
+
 import com.etheller.interpreter.ast.scope.GlobalScope;
 import com.etheller.interpreter.ast.scope.TriggerExecutionScope;
 import com.etheller.interpreter.ast.scope.trigger.RemovableTriggerEvent;
@@ -72,8 +74,9 @@ final class NxEventNatives {
 	private static JassProgram program;
 
 	private static void define(final String name, final JassFunction function) {
-		// Warsmash's two leaderboard getters are "NYI" stubs returning 0: replace them
-		if (!program.getJassNativeManager().hasNative(name) || name.startsWith("Leaderboard")) {
+		// only natives the engine lacks: OpenWCIII's leaderboard (CLeaderboard) is complete, and replacing some
+		// of its natives with ones expecting our own leaderboard object threw ClassCastException in the maps
+		if (!program.getJassNativeManager().hasNative(name)) {
 			program.getJassNativeManager().createNative(name, function);
 		}
 	}
@@ -183,6 +186,16 @@ final class NxEventNatives {
 				return t;
 			}
 		};
+	}
+
+	private static JassValue sortLeaderboard(final List<JassValue> a,
+			final java.util.Comparator<CLeaderboard.Item> order) {
+		final Object board = obj(a, 0);
+		if (board instanceof CLeaderboard) {
+			final java.util.Comparator<CLeaderboard.Item> sorted = b(a, 1) ? order : order.reversed();
+			((CLeaderboard) board).getItems().sort(sorted);
+		}
+		return null;
 	}
 
 	static <T> T obj(final List<JassValue> a, final int i) {
@@ -559,8 +572,14 @@ final class NxEventNatives {
 			}
 			return null;
 		});
-		for (final String name : new String[] { "LeaderboardSetSizeByItemCount", "LeaderboardSortItemsByValue",
-				"LeaderboardSortItemsByPlayer", "LeaderboardSortItemsByLabel", "LeaderboardSetLabelColor",
+		// sorting, which OpenWCIII's leaderboard natives lack (true = ascending)
+		define("LeaderboardSortItemsByValue", (a, g, s) -> sortLeaderboard(a,
+				java.util.Comparator.comparingInt((final CLeaderboard.Item item) -> item.value)));
+		define("LeaderboardSortItemsByPlayer", (a, g, s) -> sortLeaderboard(a,
+				java.util.Comparator.comparingInt((final CLeaderboard.Item item) -> item.playerIndex)));
+		define("LeaderboardSortItemsByLabel", (a, g, s) -> sortLeaderboard(a,
+				java.util.Comparator.comparing((final CLeaderboard.Item item) -> item.label == null ? "" : item.label)));
+		for (final String name : new String[] { "LeaderboardSetSizeByItemCount", "LeaderboardSetLabelColor",
 				"LeaderboardSetValueColor", "LeaderboardSetItemStyle", "LeaderboardSetItemLabelColor",
 				"LeaderboardSetItemValueColor" }) {
 			define(name, (a, g, s) -> null);
