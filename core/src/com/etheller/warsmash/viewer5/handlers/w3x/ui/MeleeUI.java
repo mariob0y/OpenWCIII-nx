@@ -506,6 +506,8 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	private float worldFrameUnitMessageFontHeight;
 	private UIFrame upperButtonBar;
 	private UIFrame cinematicPanel;
+	private UIFrame cinematicBottomBorder;
+	private UIFrame cinematicTopBorder;
 	private volatile boolean moviePlaying;
 	private boolean cinematicSkipAllowed = true;
 	private JassThread movieSleepingThread;
@@ -1539,6 +1541,18 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 
 		this.cinematicPanel = this.rootFrame.createFrame("CinematicPanel", this.rootFrame, 0, 0);
 		this.cinematicPanel.setVisible(false);
+		this.cinematicBottomBorder = this.rootFrame.getFrameByName("CinematicBottomBorder", 0);
+		if (this.cinematicBottomBorder instanceof AbstractRenderableFrame) {
+			((AbstractRenderableFrame) this.cinematicBottomBorder).clearFramePointAssignments();
+			this.cinematicBottomBorder.addSetPoint(
+					new SetPoint(FramePoint.BOTTOM, this.cinematicPanel, FramePoint.BOTTOM, 0, 0));
+		}
+		this.cinematicTopBorder = this.rootFrame.getFrameByName("CinematicTopBorder", 0);
+		if (this.cinematicTopBorder instanceof AbstractRenderableFrame) {
+			((AbstractRenderableFrame) this.cinematicTopBorder).clearFramePointAssignments();
+			this.cinematicTopBorder.addSetPoint(
+					new SetPoint(FramePoint.TOP, this.cinematicPanel, FramePoint.TOP, 0, 0));
+		}
 		this.cinematicSpeakerText = (StringFrame) this.rootFrame.getFrameByName("CinematicSpeakerText", 0);
 		this.rootFrame.setText(this.cinematicSpeakerText, "");
 		this.cinematicDialogueText = (StringFrame) this.rootFrame.getFrameByName("CinematicDialogueText", 0);
@@ -1578,6 +1592,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.waypointModel = this.war3MapViewer.loadModelMdx(this.rootFrame.getSkinField("WaypointIndicator"));
 
 		this.rootFrame.positionBounds(this.rootFrame, this.uiViewport);
+		positionCinematicBorders();
 
 		selectUnit(null);
 
@@ -4101,8 +4116,23 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		positionPortrait();
 		positionScoreBackdrop();
 		positionCineFilterFrame();
+		positionCinematicBorders();
 		if (this.rootFrame.isAutoPosition()) {
 			this.rootFrame.positionBounds(this.rootFrame, this.uiViewport);
+		}
+	}
+
+	private void positionCinematicBorders() {
+		// warsmash-nx: span the full widescreen UI viewport (not just the 4:3 rootFrame) so the
+		// top/bottom cinematic letterbox bars and riveted wood borders cover the left/right wings.
+		final float fullWidth = Math.max(this.uiViewport.getWorldWidth(), this.uiViewport.getMinWorldWidth());
+		if (this.cinematicBottomBorder != null) {
+			this.cinematicBottomBorder.setWidth(fullWidth);
+			this.cinematicBottomBorder.positionBounds(this.rootFrame, this.uiViewport);
+		}
+		if (this.cinematicTopBorder != null) {
+			this.cinematicTopBorder.setWidth(fullWidth);
+			this.cinematicTopBorder.positionBounds(this.rootFrame, this.uiViewport);
 		}
 	}
 
