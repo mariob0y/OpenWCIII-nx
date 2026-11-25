@@ -530,6 +530,7 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 	private boolean questDialogPausedGame;
 	/** FlashQuestDialogButton: the Quests button blinks until the quest log is opened. */
 	private boolean questButtonFlashing;
+	private HeroBarUI heroBar;
 	private float questButtonFlashClock;
 	private CScriptDialog scoreDialog;
 	private Runnable scoreDialogCancel;
@@ -1572,6 +1573,22 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		// this.tooltipFrame = this.rootFrame.createFrameByType("BACKDROP",
 		// "SmashToolTipBackdrop", this.rootFrame, "", 0);
 
+		this.heroBar = new HeroBarUI(this.rootFrame, this.uiViewport, this.war3MapViewer, this.questsButton,
+				new HeroBarUI.Listener() {
+					@Override
+					public void heroButtonClicked(final CUnit hero, final boolean doubleClick) {
+						heroBarClicked(hero, doubleClick);
+					}
+
+					@Override
+					public void heroButtonRightClicked(final CUnit hero) {
+						final RenderUnit peer = MeleeUI.this.war3MapViewer.getRenderPeer(hero);
+						if (peer != null) {
+							smartOrderSelectionOn(peer);
+						}
+					}
+				});
+
 		this.questDialogUI = new com.etheller.warsmash.viewer5.handlers.w3x.ui.dialog.QuestDialogUI(this.rootFrame,
 				this.uiViewport, this.war3MapViewer, this::hideQuestDialog);
 
@@ -1856,6 +1873,9 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		final boolean right = (mouseX >= (maxX - 3)) && WarsmashConstants.CATCH_CURSOR && this.userControlEnabled;
 		final boolean up = (mouseY <= (minY + 3)) && WarsmashConstants.CATCH_CURSOR && this.userControlEnabled;
 		final boolean down = (mouseY >= (maxY - 3)) && WarsmashConstants.CATCH_CURSOR && this.userControlEnabled;
+		if (this.heroBar != null) {
+			this.heroBar.update(this.war3MapViewer.getLocalPlayerIndex());
+		}
 		if (this.questButtonFlashing && (this.questsButton != null)) {
 			this.questButtonFlashClock += deltaTime;
 			this.questsButton.setForcedHighlight(((int) (this.questButtonFlashClock / 0.5f) % 2) == 0);
@@ -4398,6 +4418,74 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 				: this.subMenuOrderIdStack.get(this.subMenuOrderIdStack.size() - 1);
 	}
 
+	/**
+	 * A hero bar button (or its hotkey): with a spell waiting for a target, the hero is the target; shift adds
+	 * or removes the hero from the selection; otherwise the hero alone is selected, and a double click also
+	 * centres the camera on it.
+	 */
+	private void heroBarClicked(final CUnit hero, final boolean doubleClick) {
+		final RenderUnit peer = this.war3MapViewer.getRenderPeer(hero);
+		if (peer == null) {
+			return;
+		}
+		if (this.activeCommand != null) {
+			if (!hero.isDead()) {
+				useActiveCommandOnUnit(isShiftDown(), peer);
+			}
+			return;
+		}
+		if (hero.isDead()) {
+			return;
+		}
+		if (isShiftDown()) {
+			nxSelectUnit(hero, !this.selectedUnits.contains(peer));
+			return;
+		}
+		final List<RenderWidget> selection = new ArrayList<>();
+		selection.add(peer);
+		selectWidgets(selection);
+		this.war3MapViewer.doSelectUnit(selection);
+		if (doubleClick) {
+			this.cameraManager.setTarget(hero.getX(), hero.getY());
+		}
+	}
+
+	/** A right click on a unit's button: the selected units' "smart" order on it (follow, attack, ...). */
+	private void smartOrderSelectionOn(final RenderWidget target) {
+		if ((getSelectedUnit() == null)
+				|| (getSelectedUnit().getSimulationUnit().getPlayerIndex() != this.war3MapViewer.getLocalPlayerIndex())) {
+			return;
+		}
+		boolean ordered = false;
+		for (final RenderUnit unit : this.selectedUnits) {
+			if (unit.getSimulationUnit() == target.getSimulationWidget()) {
+				continue;
+			}
+			CAbility abilityToUse = null;
+			CWidget targetToUse = null;
+			for (final CAbility ability : unit.getSimulationUnit().getAbilities()) {
+				ability.checkCanTarget(this.war3MapViewer.simulation, unit.getSimulationUnit(), OrderIds.smart,
+						target.getSimulationWidget(), CWidgetAbilityTargetCheckReceiver.INSTANCE);
+				final CWidget targetWidget = CWidgetAbilityTargetCheckReceiver.INSTANCE.getTarget();
+				if (targetWidget != null) {
+					abilityToUse = ability;
+					targetToUse = targetWidget;
+				}
+			}
+			if (abilityToUse != null) {
+				this.unitOrderListener.issueTargetOrder(unit.getSimulationUnit().getHandleId(),
+						abilityToUse.getHandleId(), OrderIds.smart, targetToUse.getHandleId(), isShiftDown());
+				ordered = true;
+			}
+		}
+		if (ordered) {
+			final UnitSound yesSound = getSelectedUnit().soundset.yes;
+			if (yesSound.playUnitResponse(this.war3MapViewer.worldScene.audioContext, getSelectedUnit())) {
+				portraitTalk(yesSound);
+			}
+		}
+	}
+
 	public RenderUnit getSelectedUnit() {
 		return this.selectedUnit;
 	}
@@ -4438,6 +4526,11 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 				hideQuestDialog();
 				this.war3MapViewer.getUiSounds().getSound("InterfaceClick").play(this.uiScene.audioContext, 0, 0, 0);
 			}
+			return true;
+		}
+		if ((keycode >= Input.Keys.F1) && (keycode <= Input.Keys.F3) && (this.heroBar != null)
+				&& this.userControlEnabled && !this.moviePlaying && (this.cinematicCameraInstance == null)
+				&& this.consoleUI.isVisible() && this.heroBar.hotkey(keycode - Input.Keys.F1)) {
 			return true;
 		}
 		if ((keycode == Input.Keys.F9) && this.userControlEnabled && !this.moviePlaying
@@ -6128,6 +6221,9 @@ public class MeleeUI implements CUnitStateListener, CommandButtonListener, Comma
 		this.inventoryCover.setVisible(show);
 		this.inventoryBarFrame.setVisible(show);
 		this.inventoryTitleFrame.setVisible(show);
+		if (this.heroBar != null) {
+			this.heroBar.setVisible(show);
+		}
 		this.cinematicPanel.setVisible(!show && !showingResult);
 
 		positionPortrait();

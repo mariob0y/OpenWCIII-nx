@@ -221,6 +221,8 @@ public final class NxCampaignNatives {
 			return com.badlogic.gdx.Input.Keys.DPAD_RIGHT;
 		case "ESCAPE":
 			return com.badlogic.gdx.Input.Keys.ESCAPE;
+		case "F1":
+			return com.badlogic.gdx.Input.Keys.F1;
 		case "F9":
 			return com.badlogic.gdx.Input.Keys.F9;
 		default:
