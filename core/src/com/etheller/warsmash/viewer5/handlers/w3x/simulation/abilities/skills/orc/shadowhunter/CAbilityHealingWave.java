@@ -6,35 +6,31 @@ import java.util.Set;
 
 import com.etheller.warsmash.units.GameObject;
 import com.etheller.warsmash.util.War3ID;
-import com.etheller.warsmash.util.WarsmashConstants;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.CAbilityTargetSpellBase;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTargetVisitor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbilityFields;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.types.definitions.impl.AbstractCAbilityTypeDefinition;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CTargetType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.CEffect;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.orders.OrderIds;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
-import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentLightning;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.AbilityTargetCheckReceiver;
 
-/**
- * warsmash-nx: Healing Wave (AOhw: the Shadow Hunter's, and Rokhan's ANhw in the Frozen Throne orc
- * campaign). Chain Lightning's mechanics (CAbilityChainLightning) with healing: Data A = healing on the
- * first target, Data B = number of targets, Data C = reduction per bounce; it bounces to the most wounded
- * allowed unit in range that it has not healed yet.
- */
-public class CAbilityHealingWave extends CAbilityTargetSpellBase {
-	private static final float SECONDS_BETWEEN_JUMPS = 0.25f;
-	private static final float BOLT_LIFETIME_SECONDS = 2.00f;
-	private War3ID lightningIdPrimary;
-	private War3ID lightningIdSecondary;
-	private float healPerTarget;
-	private float healReductionPerTarget;
-	private int numberOfTargetsHit;
-	private float areaOfEffect;
+public final class CAbilityHealingWave extends CAbilityTargetSpellBase {
+	private static final War3ID PRIMARY_BOLT = War3ID.fromString("HWPB");
+	private static final War3ID SECONDARY_BOLT = War3ID.fromString("HWSB");
+	private static final float BOLT_DURATION = 2f;
+	private static final float BOUNCE_DELAY = 0.25f;
+
+	private War3ID primaryBolt;
+	private War3ID secondaryBolt;
+	private float healing;
+	private float remainingFraction;
+	private int targetLimit;
+	private float bounceRadius;
 
 	public CAbilityHealingWave(final int handleId, final War3ID alias) {
 		super(handleId, alias);
@@ -46,117 +42,94 @@ public class CAbilityHealingWave extends CAbilityTargetSpellBase {
 	}
 
 	@Override
-	public void populateData(final GameObject worldEditorAbility, final int level) {
-		this.lightningIdPrimary = AbstractCAbilityTypeDefinition.getLightningId(worldEditorAbility, level, 0);
-		this.lightningIdSecondary = AbstractCAbilityTypeDefinition.getLightningId(worldEditorAbility, level, 1);
-		if (this.lightningIdSecondary == null) {
-			this.lightningIdSecondary = this.lightningIdPrimary;
+	public void populateData(final GameObject data, final int level) {
+		this.healing = data.getFieldAsFloat(AbilityFields.DATA_A + level, 0);
+		this.targetLimit = data.getFieldAsInteger(AbilityFields.DATA_B + level, 0);
+		this.remainingFraction = 1 - data.getFieldAsFloat(AbilityFields.DATA_C + level, 0);
+		this.bounceRadius = data.getFieldAsFloat(AbilityFields.AREA_OF_EFFECT + level, 0);
+		final War3ID primary = AbstractCAbilityTypeDefinition.getLightningId(data, level, 0);
+		final War3ID secondary = AbstractCAbilityTypeDefinition.getLightningId(data, level, 1);
+		this.primaryBolt = War3ID.NONE.equals(primary) ? PRIMARY_BOLT : primary;
+		this.secondaryBolt = War3ID.NONE.equals(secondary) ? SECONDARY_BOLT : secondary;
+		if (CTargetType.parseTargetTypeSet(data.getFieldAsList(AbilityFields.TARGETS_ALLOWED + level)).isEmpty()) {
+			getTargetsAllowed().addAll(CTargetType.parseTargetTypeSet(data.getFieldAsList(AbilityFields.TARGETS_ALLOWED)));
 		}
-		this.healPerTarget = worldEditorAbility.getFieldAsFloat(AbilityFields.DATA_A + level, 0);
-		this.numberOfTargetsHit = worldEditorAbility.getFieldAsInteger(AbilityFields.DATA_B + level, 0);
-		this.healReductionPerTarget = worldEditorAbility.getFieldAsFloat(AbilityFields.DATA_C + level, 0);
-		this.areaOfEffect = worldEditorAbility.getFieldAsFloat(AbilityFields.AREA_OF_EFFECT + level, 0);
-		if (this.areaOfEffect <= 0) {
-			this.areaOfEffect = 500;
-		}
-	}
-
-	static void heal(final CSimulation simulation, final CUnit unit, final float amount) {
-		unit.setLife(simulation, Math.min(unit.getMaximumLife(), unit.getLife() + amount));
 	}
 
 	@Override
-	public boolean doEffect(final CSimulation simulation, final CUnit caster, final AbilityTarget target) {
-		final CUnit targetUnit = target.visit(AbilityTargetVisitor.UNIT);
-		if (targetUnit != null) {
-			final SimulationRenderComponentLightning lightning = simulation.createLightning(caster,
-					this.lightningIdPrimary, targetUnit);
-			simulation.createTemporarySpellEffectOnUnit(targetUnit, getAlias(), CEffectType.TARGET);
-			heal(simulation, targetUnit, this.healPerTarget);
-			final float multiplier = 1.0f - this.healReductionPerTarget;
-			final Set<CUnit> previousTargets = new HashSet<>();
-			previousTargets.add(targetUnit);
-			simulation.registerEffect(new CEffectHealingWaveBolt(simulation.getGameTurnTick(),
-					this.healPerTarget * multiplier, multiplier, caster, targetUnit, lightning, getAlias(),
-					this.lightningIdSecondary, getTargetsAllowed(), this.areaOfEffect, this.numberOfTargetsHit - 1,
-					previousTargets));
+	protected void innerCheckCanTargetSpell(final CSimulation game, final CUnit caster, final int orderId,
+			final CWidget target, final AbilityTargetCheckReceiver<CWidget> receiver) {
+		if (target instanceof CUnit) receiver.targetOk(target);
+		else receiver.orderIdNotAccepted();
+	}
+
+	@Override
+	public boolean doEffect(final CSimulation game, final CUnit caster, final AbilityTarget target) {
+		if (target instanceof CUnit) {
+			final CUnit unit = (CUnit) target;
+			heal(game, caster, unit, getAlias(), this.primaryBolt, this.healing);
+			if (this.targetLimit > 1) {
+				new Bounce(caster, unit, getAlias(), this.secondaryBolt, getTargetsAllowed(), this.bounceRadius,
+						this.targetLimit - 1, this.healing * this.remainingFraction, this.remainingFraction).start(game);
+			}
 		}
 		return false;
 	}
 
-	private static int ticks(final float seconds) {
-		return (int) StrictMath.ceil(seconds / WarsmashConstants.SIMULATION_STEP_TIME);
+	private static void heal(final CSimulation game, final CUnit from, final CUnit to, final War3ID alias,
+			final War3ID bolt, final float amount) {
+		game.createLightning(from, bolt, to, BOLT_DURATION);
+		game.createTemporarySpellEffectOnUnit(to, alias, CEffectType.TARGET);
+		to.heal(game, amount);
 	}
 
-	private static final class CEffectHealingWaveBolt implements CEffect {
-		private final int boltLifetimeEndTick;
-		private int jumpDelayEndTick;
-		private final float remainingHeal;
-		private final float multiplier;
+	private static final class Bounce extends CTimer {
 		private final CUnit caster;
-		private final CUnit targetUnit;
-		private final SimulationRenderComponentLightning boltFx;
-		private final War3ID abilityId;
-		private final War3ID jumpLightningId;
-		private final EnumSet<CTargetType> targetsAllowed;
-		private final float jumpRadius;
-		private final int remainingJumps;
-		private final Set<CUnit> previousTargets;
+		private final War3ID alias;
+		private final War3ID bolt;
+		private final EnumSet<CTargetType> allowed;
+		private final float radius;
+		private final float remainingFraction;
+		private final Set<CUnit> visited = new HashSet<>();
+		private int remainingTargets;
+		private float amount;
+		private CUnit previous;
 
-		CEffectHealingWaveBolt(final int startTick, final float remainingHeal, final float multiplier,
-				final CUnit caster, final CUnit targetUnit, final SimulationRenderComponentLightning boltFx,
-				final War3ID abilityId, final War3ID jumpLightningId, final EnumSet<CTargetType> targetsAllowed,
-				final float jumpRadius, final int remainingJumps, final Set<CUnit> previousTargets) {
-			this.boltLifetimeEndTick = startTick + ticks(BOLT_LIFETIME_SECONDS);
-			this.jumpDelayEndTick = startTick + ticks(SECONDS_BETWEEN_JUMPS);
-			this.remainingHeal = remainingHeal;
-			this.multiplier = multiplier;
+		private Bounce(final CUnit caster, final CUnit first, final War3ID alias, final War3ID bolt,
+				final EnumSet<CTargetType> allowed, final float radius, final int remainingTargets,
+				final float amount, final float remainingFraction) {
 			this.caster = caster;
-			this.targetUnit = targetUnit;
-			this.boltFx = boltFx;
-			this.abilityId = abilityId;
-			this.jumpLightningId = jumpLightningId;
-			this.targetsAllowed = targetsAllowed;
-			this.jumpRadius = jumpRadius;
-			this.remainingJumps = remainingJumps;
-			this.previousTargets = previousTargets;
+			this.alias = alias;
+			this.bolt = bolt;
+			this.allowed = EnumSet.copyOf(allowed);
+			this.radius = radius;
+			this.remainingTargets = remainingTargets;
+			this.amount = amount;
+			this.remainingFraction = remainingFraction;
+			this.previous = first;
+			this.visited.add(first);
+			setTimeoutTime(BOUNCE_DELAY);
 		}
 
 		@Override
-		public boolean update(final CSimulation game) {
-			final int gameTurnTick = game.getGameTurnTick();
-			if ((gameTurnTick >= this.jumpDelayEndTick) && (this.remainingJumps > 0)) {
-				final CUnit[] best = { null };
-				game.getWorldCollision().enumUnitsInRange(this.targetUnit.getX(), this.targetUnit.getY(),
-						this.jumpRadius, (enumUnit) -> {
-							if (!enumUnit.isDead() && !this.previousTargets.contains(enumUnit)
-									&& (enumUnit.getLife() < enumUnit.getMaximumLife())
-									&& enumUnit.canBeTargetedBy(game, this.caster, this.targetsAllowed)) {
-								if ((best[0] == null) || ((enumUnit.getLife() / enumUnit.getMaximumLife()) < (best[0]
-										.getLife() / best[0].getMaximumLife()))) {
-									best[0] = enumUnit;
-								}
-							}
-							return false;
-						});
-				final CUnit next = best[0];
-				if (next != null) {
-					final SimulationRenderComponentLightning lightning = game.createLightning(this.targetUnit,
-							this.jumpLightningId, next);
-					game.createTemporarySpellEffectOnUnit(next, this.abilityId, CEffectType.TARGET);
-					heal(game, next, this.remainingHeal);
-					this.previousTargets.add(next);
-					game.registerEffect(new CEffectHealingWaveBolt(gameTurnTick, this.remainingHeal * this.multiplier,
-							this.multiplier, this.caster, next, lightning, this.abilityId, this.jumpLightningId,
-							this.targetsAllowed, this.jumpRadius, this.remainingJumps - 1, this.previousTargets));
+		public void onFire(final CSimulation game) {
+			final CUnit[] closest = { null };
+			game.getWorldCollision().enumUnitsInRange(this.previous.getX(), this.previous.getY(), this.radius, unit -> {
+				if (!unit.isDead() && !unit.isHidden() && unit.getLife() < unit.getMaximumLife()
+						&& !this.visited.contains(unit) && unit.canBeTargetedBy(game, this.caster, this.allowed)
+						&& (closest[0] == null || this.previous.distanceSquaredNoCollision(unit)
+								< this.previous.distanceSquaredNoCollision(closest[0]))) {
+					closest[0] = unit;
 				}
-				this.jumpDelayEndTick = Integer.MAX_VALUE;
-			}
-			final boolean done = gameTurnTick >= this.boltLifetimeEndTick;
-			if (done && (this.boltFx != null)) {
-				this.boltFx.remove();
-			}
-			return done;
+				return false;
+			});
+			final CUnit next = closest[0];
+			if (next == null) return;
+			heal(game, this.previous, next, this.alias, this.bolt, this.amount);
+			this.visited.add(next);
+			this.previous = next;
+			this.amount *= this.remainingFraction;
+			if (--this.remainingTargets > 0) start(game);
 		}
 	}
 }

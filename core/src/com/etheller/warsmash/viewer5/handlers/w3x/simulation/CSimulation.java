@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation;
 
+import com.etheller.warsmash.util.JavaCompat;
 import com.etheller.warsmash.util.geom.Point2D;
 import com.etheller.warsmash.util.image.PixelImage;
 import java.util.ArrayList;
@@ -14,6 +15,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.ObjIntConsumer;
 
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.math.Rectangle;
@@ -36,6 +38,12 @@ import com.etheller.warsmash.viewer5.handlers.w3x.TextTag;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid;
 import com.etheller.warsmash.viewer5.handlers.w3x.environment.PathingGrid.RemovablePathingMapInstance;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityAttack;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbilityMove;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.cargohold.CAbilityMeatWagonCargo;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.hero.CAbilityHero;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.nightelf.CAbilityTreeOfLifeUpgradeEffects;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.util.CBuffTimedLife;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityPointTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.targeting.AbilityTarget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.behaviors.CBehaviorMove;
@@ -65,6 +73,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CMapControl
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerColor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerJass;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerScore;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerState;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayerUnitOrderExecutor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CRace;
@@ -155,6 +164,7 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 	private boolean fogEnabled = true;
 	private final List<Runnable> postUpdateCallbacks = new ArrayList<>();
 	private final List<Runnable> runningPostUpdateCallbacks = new ArrayList<>();
+	private final List<ObjIntConsumer<CUnit>> spellManaListeners = new ArrayList<>();
 	private final ObjectPool<Set<CTimer>> timerSetPool = new ObjectPool<>(2, HashSet::new);
 	/** The player that triggered the most recent CustomVictory call, or null. */
 	private CPlayer winningPlayer = null;
@@ -307,11 +317,13 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 	}
 
 	public void registerTimer(final CTimer timer) {
-		this.addedTimers.add(timer);
+		this.removedTimers.remove(timer);
+		if (!this.addedTimers.contains(timer)) this.addedTimers.add(timer);
 	}
 
 	public void unregisterTimer(final CTimer timer) {
-		this.removedTimers.add(timer);
+		this.addedTimers.remove(timer);
+		if (!this.removedTimers.contains(timer)) this.removedTimers.add(timer);
 	}
 
 	private void internalRegisterTimer(final CTimer timer) {
@@ -380,6 +392,37 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 			}
 		}
 		return createdUnit;
+	}
+
+	public CUnit createIllusion(final CUnit original, final float x, final float y, final float damageDealt,
+			final float damageTaken, final float duration, final War3ID buffId) {
+		final CUnit image = this.simulationRenderController.createUnit(this, original.getTypeId(),
+				original.getPlayerIndex(), x, y, original.getFacing());
+		if (image == null) return null;
+		image.markIllusion(original, damageDealt, damageTaken);
+		setupCreatedUnit(image);
+		for (final CAbility ability : JavaCompat.listCopyOf(image.getAbilities())) {
+			if (!(ability instanceof CAbilityAttack || ability instanceof CAbilityMove || ability instanceof CAbilityHero)) {
+				image.remove(this, ability);
+			}
+		}
+		if (image.getHeroData() != null && original.getHeroData() != null) {
+			image.getHeroData().copyIllusionIdentity(this, image, original.getHeroData());
+		}
+		image.getClassifications().add(CUnitClassification.SUMMONED);
+		image.setRaisable(false);
+		image.setDecays(false);
+		image.setMaximumLife(original.getMaximumLife());
+		image.setLife(this, original.getLife());
+		image.setMaximumMana(original.getMaximumMana());
+		image.setMana(original.getMana());
+		image.setSpeed(original.getSpeed());
+		image.setTemporaryDefenseBonus(original.getDefense() - image.getDefense());
+		image.add(this, new CBuffTimedLife(this.handleIdAllocator.createId(), buffId, duration, true));
+		if (image.getCollisionRectangle() == null) this.worldCollision.addUnit(image);
+		image.setPointAndCheckUnstuck(x, y, this);
+		image.performDefaultBehavior(this);
+		return image;
 	}
 
 	public CUnit createUnitSimple(final War3ID typeId, final int playerIndex, final float x, final float y,
@@ -534,8 +577,7 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 				allowSmoothing, queueItem);
 	}
 
-	public void removeFromPathfindingQueue(final CBehaviorMove behaviorMove) {
-		final int playerIndex = behaviorMove.getUnit().getPlayerIndex();
+	public void removeFromPathfindingQueue(final CBehaviorMove behaviorMove, final int playerIndex) {
 		this.pathfindingProcessors[playerIndex].removeFromPathfindingQueue(behaviorMove);
 	}
 
@@ -726,6 +768,7 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 	}
 
 	public void removeUnit(final CUnit unit) {
+		unit.detachFromTransport(this);
 		unit.setHidden(true);
 		final CPlayer player = this.getPlayer(unit.getPlayerIndex());
 		if (unit.getFoodMade() != 0) {
@@ -735,6 +778,10 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 			player.setUnitFoodUsed(unit, 0);
 		}
 		this.removedUnits.add(unit);
+	}
+
+	public boolean containsUnit(final CUnit unit) {
+		return unit != null && this.handleIdToUnit.get(unit.getHandleId()) == unit && !this.removedUnits.contains(unit);
 	}
 
 	private void finishAddingNewUnits() {
@@ -792,6 +839,24 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 		return this.worldCollision;
 	}
 
+	public void enumUsableCorpsesInRect(final CUnit caster, final Rectangle area, final CUnitEnumFunction callback) {
+		final boolean[] finished = { false };
+		this.worldCollision.enumCorpsesInRect(area, unit -> {
+			finished[0] = callback.call(unit);
+			return finished[0];
+		});
+		if (finished[0]) return;
+		this.worldCollision.enumUnitsInRect(area, wagon -> {
+			if (wagon.getCargoData() instanceof CAbilityMeatWagonCargo cargo) {
+				for (int index = 0; index < cargo.getCargoCount(); index++) {
+					final CUnit corpse = cargo.getUnit(index);
+					if (CAbilityMeatWagonCargo.canUseStoredCorpse(this, caster, corpse) && callback.call(corpse)) return true;
+				}
+			}
+			return false;
+		});
+	}
+
 	public CRegionManager getRegionManager() {
 		return this.regionManager;
 	}
@@ -823,9 +888,12 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 
 	public void unitUpgradingEvent(final CUnit cUnit, final War3ID upgradeIdType) {
 		this.simulationRenderController.unitUpgradingEvent(cUnit, upgradeIdType);
+		final var effect = cUnit.getFirstAbilityOfType(CAbilityTreeOfLifeUpgradeEffects.class);
+		if (effect != null) effect.beginUpgrade(this, cUnit);
 	}
 
 	public void unitCancelUpgradingEvent(final CUnit cUnit, final War3ID upgradeIdType) {
+		endUpgradeEffects(cUnit);
 		this.simulationRenderController.unitCancelUpgradingEvent(cUnit, upgradeIdType);
 	}
 
@@ -854,11 +922,18 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 	}
 
 	public void unitConstructFinishEvent(final CUnit constructedStructure) {
+		getPlayer(constructedStructure.getPlayerIndex()).recordMissionScore(CPlayerScore.STRUCT_BUILT, 1);
 		this.simulationRenderController.spawnUnitConstructionFinishSound(constructedStructure);
 	}
 
 	public void unitUpgradeFinishEvent(final CUnit constructedStructure) {
+		endUpgradeEffects(constructedStructure);
 		this.simulationRenderController.spawnUnitUpgradeFinishSound(constructedStructure);
+	}
+
+	private void endUpgradeEffects(final CUnit unit) {
+		final var effect = unit.getFirstAbilityOfType(CAbilityTreeOfLifeUpgradeEffects.class);
+		if (effect != null) effect.endUpgrade();
 	}
 
 	public void createDeathExplodeEffect(final CUnit cUnit, final War3ID explodesOnDeathBuffId) {
@@ -919,6 +994,15 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 	}
 
 	public void unitGainLevelEvent(final CUnit unit, boolean showEffect) {
+		final CAbilityHero original = unit.getHeroData();
+		if (original != null) {
+			for (final CUnit image : getUnitsIncludingPending()) {
+				if (!image.isDead() && image.isIllusionOf(unit) && image.getHeroData() != null) {
+					image.getHeroData().copyIllusionIdentity(this, image, original);
+					if (showEffect) this.simulationRenderController.spawnGainLevelEffect(image);
+				}
+			}
+		}
 		this.players.get(unit.getPlayerIndex()).fireHeroLevelEvents(unit);
 		if (showEffect) {
 			this.simulationRenderController.spawnGainLevelEffect(unit);
@@ -975,6 +1059,10 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 
 	public void createEffectOnUnit(final CUnit unit, final String effectPath) {
 		this.simulationRenderController.spawnEffectOnUnit(unit, effectPath);
+	}
+
+	public SimulationRenderComponent createPersistentEffectOnUnit(final CUnit unit, final String effectPath) {
+		return this.simulationRenderController.spawnPersistentEffectOnUnit(unit, effectPath);
 	}
 
 	public void createTemporarySpellEffectOnUnit(final CUnit unit, final War3ID alias, final CEffectType effectType) {
@@ -1101,10 +1189,15 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 	 * Fires all triggers registered for the given game-level event.
 	 */
 	public void fireGameEvent(final JassGameEventsWar3 eventType) {
+		fireGameEvent(eventType, null);
+	}
+
+	public void fireGameEvent(final JassGameEventsWar3 eventType, final String saveBasicFilename) {
 		final List<CGlobalEvent> eventList = getEventList(eventType);
 		if (eventList != null) {
 			for (final CGlobalEvent event : new ArrayList<>(eventList)) {
-				event.fire(null, null);
+				if (event instanceof CGlobalGameEvent gameEvent) gameEvent.fireGameEvent(saveBasicFilename);
+				else event.fire(null, null);
 			}
 		}
 	}
@@ -1326,6 +1419,13 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 
 	public com.etheller.warsmash.parsers.jass.JassAIEnvironment getAiEnvironment(final int player) { return this.aiEnvironments.get(player); }
 
+	public void commandAi(final int player, final int command, final int data) {
+		final var environment = getAiEnvironment(player);
+		if (environment != null) {
+			environment.pushCommand(command, data);
+		}
+	}
+
 	public int getActiveProjectileCount() { return this.projectiles.size() + this.newProjectiles.size(); }
 
 	public void removeAiGlobalScope(final GlobalScope aiScope) {
@@ -1489,6 +1589,25 @@ public class CSimulation implements CPlayerAPI, CFogMaskSettings {
 						unit.checkDisabledAbilities(CSimulation.this, disable);
 					}
 				}
+			}
+		});
+	}
+
+	public void addSpellManaListener(final ObjIntConsumer<CUnit> listener) {
+		this.spellManaListeners.add(listener);
+	}
+
+	public void removeSpellManaListener(final ObjIntConsumer<CUnit> listener) {
+		this.spellManaListeners.remove(listener);
+	}
+
+	void notifySpellManaSpent(final CUnit caster, final int mana) {
+		if (mana <= 0 || this.spellManaListeners.isEmpty()) return;
+		final var listeners = JavaCompat.listCopyOf(this.spellManaListeners);
+		// Resolve retaliation after the cast has updated its behavior and applied its effect.
+		this.postUpdateCallbacks.add(() -> {
+			for (final var listener : listeners) {
+				if (this.spellManaListeners.contains(listener)) listener.accept(caster, mana);
 			}
 		});
 	}

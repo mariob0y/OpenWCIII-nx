@@ -34,6 +34,10 @@ if [ ! -f ../third_party/jars/gson-2.10.jar ]; then
 fi
 W=../..
 JAVAC=("$J/javac" -encoding UTF-8 -nowarn -proc:none -source 8 -target 8 -Xlint:-options -Xmaxerrs 10000)
+# Warsmash's own sources: OpenWCIII is written in Java 17 (var, instanceof patterns, switch rules).
+# ../scripts/Javac8Plus.java is javac with those syntax-only features allowed at -source 8; they
+# lower to plain Java 8 bytecode, so the upstream sources stay as they are (records excepted).
+JAVAC_W=("$J/java" --add-opens jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED ../scripts/Javac8Plus.java "${JAVAC[@]:1}")
 
 if [ "$RT" -nt "$TRANSPILER" ]; then
 	echo "runtime jar is newer than the transpiler jar: run ./gradlew --offline :runtime:jar :transpiler:shadowJar" >&2
@@ -59,12 +63,14 @@ CP="$(printf '%s;' "${LIBS[@]}")"
 
 find $W/core/src $W/shared/src $W/jassparser/src $W/jassparser/build/generated-src $W/fdfparser/src \
 	$W/fdfparser/build/generated-src shims/src launcher/src -name "*.java" \
-	| grep -v -E "/core/src/com/etheller/warsmash/viewer5/handlers/w3x/ui/(CampaignPlaythroughProbe|Human02PlaythroughProbe|HumanCampaignPlaythroughProbe|CampaignPersistenceProbe|MissionResumeProbe|MissionBattleProbe|MissionEconomyProbe)\.java$" \
+	| grep -v -E "/core/src/com/etheller/warsmash/viewer5/handlers/w3x/ui/(CampaignPlaythroughProbe|Human02PlaythroughProbe|HumanCampaignPlaythroughProbe|CampaignPersistenceProbe|MissionResumeProbe|MissionBattleProbe|MissionEconomyProbe|(FrozenThrone|HumanExpansion|NightElf|Orc|Rexxar|Undead)[A-Za-z0-9]*Probe|MovieAudioPlayback)\.java$" \
+	| grep -v -E "/core/src/com/etheller/warsmash/viewer5/handlers/w3x/simulation/sound/(CMIDISound|MidiSoundbankReader)\.java$" \
 	| grep -v -E "/core/src/com/etheller/warsmash/(viewer5/handlers/w3x/simulation/save/EngineBinaryDigest|util/FileSync)\.java$" \
 	> build/sources.txt
 # ^ PC-only OpenWCIII code, replaced by stand-ins in shims/src: the QA probes (Java 16 desktop audits),
+#   CMIDISound/MidiSoundbankReader (javax.sound.midi), MovieAudioPlayback (ffmpeg ProcessBuilder),
 #   EngineBinaryDigest (hashes the engine's class files) and FileSync (FileOutputStream.getFD().sync())
-"${JAVAC[@]}" -bootclasspath "$BOOT" -cp "${CP}build/classes-backend;build/switchgdx.jar" -d build/classes @build/sources.txt \
+"${JAVAC_W[@]}" -bootclasspath "$BOOT" -cp "${CP}build/classes-backend;build/switchgdx.jar" -d build/classes @build/sources.txt \
 	> build/javac-warsmash.log 2>&1 || { tail -40 build/javac-warsmash.log; exit 1; }
 echo "classes: switchgdx $(find build/classes-switchgdx -name '*.class' | wc -l), backend $(find build/classes-backend -name '*.class' | wc -l), warsmash $(find build/classes -name '*.class' | wc -l)"
 [ "${1:-}" = "--javac" ] && exit 0

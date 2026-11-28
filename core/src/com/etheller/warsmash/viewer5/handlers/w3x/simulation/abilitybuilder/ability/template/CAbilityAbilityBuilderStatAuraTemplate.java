@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.ability.template;
 
+import com.etheller.warsmash.util.JavaCompat;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashSet;
@@ -19,12 +20,14 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.buff
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.core.ABLocalStoreKeys;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.template.MeleeRangeTargetOverride;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.template.StatBuffFromDataField;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.parser.template.StatBuffType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilitybuilder.types.impl.CAbilityTypeAbilityBuilderLevelData;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.CTargetType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.CUnitTypeJass;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.NonStackingStatBuff;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.unit.NonStackingStatBuffType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.CWidgetAbilityTargetCheckReceiver;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponent;
 
 public class CAbilityAbilityBuilderStatAuraTemplate extends AbilityGenericSingleIconPassiveAbility {
@@ -51,6 +54,8 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbilityGenericSingle
 	private String auraStackingKey;
 
 	private List<StatBuffFromDataField> statBuffDataFields;
+	private final boolean grantsAttackDamage;
+	private float researchDamageBonus;
 
 	private final int LEAVE_GROUP_TICKS = (int) (3 / WarsmashConstants.SIMULATION_STEP_TIME);
 	private final int ENTER_GROUP_TICKS = (int) (0.4 / WarsmashConstants.SIMULATION_STEP_TIME);
@@ -62,15 +67,22 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbilityGenericSingle
 	private final CUnitEnumFunction enterAuraEnumFunction = new CUnitEnumFunction() {
 		@Override
 		public boolean call(final CUnit enumUnit) {
-			if (tickUnit.canReach(enumUnit, range) && enumUnit.canBeTargetedBy(tickGame, tickUnit, targetsAllowed)
-					&& !auraGroup.contains(enumUnit)
-					&& ((targetMelee && enumUnit.isUnitType(CUnitTypeJass.MELEE_ATTACKER)
-							|| (targetRange && enumUnit.isUnitType(CUnitTypeJass.RANGED_ATTACKER))))) {
+			if (!auraGroup.contains(enumUnit) && isEligible(tickGame, tickUnit, enumUnit)) {
 				addUnitToAura(tickGame, enumUnit);
 			}
 			return false;
 		}
 	};
+
+	private boolean isEligible(final CSimulation game, final CUnit source, final CUnit target) {
+		final boolean weaponRestricted = this.grantsAttackDamage || this.rangeOverride != null;
+		return source.canReach(target, this.range)
+				&& (!weaponRestricted
+						|| this.targetMelee && target.isUnitType(CUnitTypeJass.MELEE_ATTACKER)
+						|| this.targetRange && target.isUnitType(CUnitTypeJass.RANGED_ATTACKER))
+				&& target.canBeTargetedBy(game, source, weaponRestricted, this.targetsAllowed,
+						CWidgetAbilityTargetCheckReceiver.INSTANCE.reset());
+	}
 
 	public CAbilityAbilityBuilderStatAuraTemplate(int handleId, War3ID code, War3ID alias,
 			List<CAbilityTypeAbilityBuilderLevelData> levelData, Map<String, Object> localStore,
@@ -81,12 +93,13 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbilityGenericSingle
 		this.rangeOverride = meleeRangeTargetOverride;
 		this.targetsAllowed = levelData.get(getLevel() - 1).getTargetsAllowed();
 		this.range = levelData.get(getLevel() - 1).getArea();
-		this.auraStackingKey = "";
+		this.auraStackingKey = code.asStringValue();
 
 		this.statBuffDataFields = new ArrayList<>();
 		for (StatBuffFromDataField statBuff : statBuffDataFields) {
 			this.statBuffDataFields.add(new StatBuffFromDataField(statBuff));
 		}
+		this.grantsAttackDamage = JavaCompat.anyMatch(this.statBuffDataFields, statBuff -> statBuff.getType() == StatBuffType.ATK);
 
 		if (!this.levelData.get(getLevel() - 1).getBuffs().isEmpty()) {
 			buffId = this.levelData.get(getLevel() - 1).getBuffs().get(0);
@@ -124,6 +137,7 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbilityGenericSingle
 	private void createNewBuffs(StatBuffFromDataField parsedBuff) {
 		NonStackingStatBuffType type = parsedBuff.convertToNonStackingType(levelData.get(getLevel() - 1));
 		NonStackingStatBuff newBuff = null;
+		parsedBuff.setSecondAtkBuff(null);
 		switch (type) {
 		case RNGDATK:
 		case RNGDATKPCT:
@@ -250,6 +264,25 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbilityGenericSingle
 			this.targetMelee = this.rangeOverride.isTargetMelee();
 			this.targetRange = this.rangeOverride.isTargetRange();
 		}
+		updateAttackBuffAmounts();
+	}
+
+	private void updateAttackBuffAmounts() {
+		for (final StatBuffFromDataField statBuff : this.statBuffDataFields) {
+			if (statBuff.getType() != StatBuffType.ATK) continue;
+			final float amount = Float.parseFloat(this.levelData.get(getLevel() - 1).getData()
+					.get(statBuff.getDataField().getIndex())) + this.researchDamageBonus;
+			final NonStackingStatBuff first = statBuff.getBuff();
+			final NonStackingStatBuff second = statBuff.getSecondAtkBuff();
+			first.setValue(amount);
+			if (second != null) second.setValue(amount);
+			if (this.auraGroup != null) {
+				for (final CUnit target : this.auraGroup) {
+					target.computeDerivedFields(first.getBuffType());
+					if (second != null) target.computeDerivedFields(second.getBuffType());
+				}
+			}
+		}
 	}
 
 	@Override
@@ -274,12 +307,20 @@ public class CAbilityAbilityBuilderStatAuraTemplate extends AbilityGenericSingle
 		if (loopTick % LEAVE_GROUP_TICKS == 0) {
 			List<CUnit> unitList = new ArrayList<>(auraGroup);
 			for (CUnit iter : unitList) {
-				if (!(iter.canBeTargetedBy(game, unit, targetsAllowed) && unit.canReach(iter, range))) {
+				if (!isEligible(game, unit, iter)) {
 					removeUnitFromAura(game, iter);
 				}
 			}
 		}
 		if (loopTick % ENTER_GROUP_TICKS == 0) {
+			if (this.grantsAttackDamage) {
+				final float bonus = game.getUpgradeData().getAuraDamageBonus(unit.getUnitType(),
+						game.getPlayer(unit.getPlayerIndex()), getAlias(), getCode());
+				if (bonus != this.researchDamageBonus) {
+					this.researchDamageBonus = bonus;
+					updateAttackBuffAmounts();
+				}
+			}
 			recycleRect.set(unit.getX() - range, unit.getY() - range, range * 2, range * 2);
 
 			// ⚡ Bolt: Explicitly set parameters for cached callback and clear after to prevent memory leak

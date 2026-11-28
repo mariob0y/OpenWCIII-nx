@@ -1,5 +1,6 @@
 package com.etheller.warsmash.viewer5.handlers.w3x;
 
+import com.etheller.warsmash.util.JavaCompat;
 import com.etheller.warsmash.util.image.PixelImage;
 import java.io.BufferedReader;
 import java.io.File;
@@ -16,6 +17,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -27,6 +29,8 @@ import com.etheller.warsmash.util.image.ImageDecoders;
 
 import org.apache.commons.compress.utils.IOUtils;
 import org.apache.commons.compress.utils.SeekableInMemoryByteChannel;
+
+import com.hiveworkshop.rms.parsers.mdlx.MdlxModel;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
@@ -139,6 +143,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.CUni
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.CUnitAttackListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.attacks.CUnitAttackMissile;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.CAbilityCollisionProjectileListener;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.skills.undead.CAbilitySpiderAttack;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.CAbilityProjectile;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.CAbilityProjectileListener;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.CAttackProjectile;
@@ -148,10 +153,12 @@ import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.C
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.combat.projectile.CPsuedoProjectile;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.config.War3MapConfig;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CMapFlag;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CPlayer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.vision.CPlayerFogOfWar;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.timers.CTimer;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CEffectType;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.trigger.enumtypes.CGameSpeed;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponent;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentLightning;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.util.SimulationRenderComponentLightningMovable;
@@ -271,9 +278,12 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	private final Map<String, TextTagConfig> keyToTextTagConfig = new HashMap<>();
 	private DataTable unitGlobalStrings;
 	public DataTable uiSoundsTable;
+	private DataTable additionalScriptSoundsTable;
+	private DataTable midiSoundsTable;
 	private DataTable lightningDataTable;
 	private Map<War3ID, LightningEffectModel> lightningTypeToModel;
 	private MdxComplexInstance confirmationInstance;
+	private MdxModel invisibleMarkerModel;
 	public MdxComplexInstance dncUnit;
 	public MdxComplexInstance dncTerrain;
 	public MdxComplexInstance dncTarget;
@@ -332,6 +342,25 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	private final War3MapConfig mapConfig;
 
 	private GameTurnManager gameTurnManager;
+	private boolean localGamePaused;
+	private boolean localMenuPaused;
+	private CGameSpeed localGameSpeed;
+	private final List<Vector2> recentAlerts = new ArrayList<>(8);
+	private int nextAlertIndex;
+	private final int campaignAuditTicksPerFrame = campaignAuditTicksPerFrame();
+
+	private static int campaignAuditTicksPerFrame() {
+		int ticks = 0;
+		for (final String audit : JavaCompat.listOf("undeadOpeningAudit", "humanCampaignAudit", "nightElfEscapeAudit",
+				"nightElfAwakeningAudit", "nightElfBarrowOpeningAudit", "orcOpeningAudit", "orcMarchAudit",
+				"orcSettlementAudit", "orcLumberAudit", "orcWyvernAudit", "orcOracleAudit", "orcFinaleAudit", "nightElfOpeningAudit",
+				"frozenThroneOpeningAudit", "humanExpansionOpeningAudit", "rexxarOpeningAudit")) {
+			if (JavaCompat.getBoolean("warsmash." + audit)) {
+				ticks = Math.max(ticks, Integer.getInteger("warsmash." + audit + "TicksPerFrame", 0));
+			}
+		}
+		return Math.min(8, ticks);
+	}
 
 	private War3MapW3i lastLoadedMapInformation;
 
@@ -524,6 +553,22 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		try (InputStream miscDataTxtStream = this.dataSource.getResourceAsStream("UI\\SoundInfo\\AbilitySounds.slk")) {
 			this.uiSoundsTable.readSLK(miscDataTxtStream);
 		}
+		this.additionalScriptSoundsTable = new DataTable(worldEditStrings);
+		for (final String table : JavaCompat.listOf("AnimSounds", "DialogSounds")) {
+			try (InputStream stream = this.dataSource.getResourceAsStream("UI\\SoundInfo\\" + table + ".slk")) {
+				if (stream != null) this.additionalScriptSoundsTable.readSLK(stream);
+			}
+		}
+		this.midiSoundsTable = new DataTable(worldEditStrings);
+		try (InputStream stream = this.dataSource.getResourceAsStream("UI\\SoundInfo\\MIDISounds.slk")) {
+			if (stream != null) {
+				this.midiSoundsTable.readSLK(stream);
+			}
+		}
+	}
+
+	public Element getMidiSoundLabel(final String label) {
+		return this.midiSoundsTable == null ? null : this.midiSoundsTable.get(label);
 	}
 
 	private TextTagConfig getTextTagConfig(final String key) {
@@ -870,7 +915,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	}
 
 	private void loadSounds() {
-		this.uiSounds = new KeyedSounds(this.uiSoundsTable, this.mapMpq);
+		this.uiSounds = new KeyedSounds(this::getScriptSoundLabel, this.mapMpq);
 	}
 
 	/**
@@ -1020,7 +1065,14 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		final MdxModel model = getDoodadModel(doodadVariation, row);
 
 		final String portraitModelPath = row.readSLKTag("portraitmodel");
-		final MdxModel portraitModel = loadModelMdx(portraitModelPath);
+		MdxModel portraitModel = null;
+		if (portraitModelPath != null && !portraitModelPath.isEmpty() && !"_".equals(portraitModelPath)) {
+			final String portraitMdx = mdx(portraitModelPath);
+			// A numbered destructible can point its portrait at the unnumbered body path.
+			portraitModel = portraitMdx.equalsIgnoreCase(mdx(row.readSLKTag("file")))
+					&& !this.dataSource.has(portraitMdx) && !this.dataSource.has(mdl(portraitMdx))
+							? model : loadModelMdx(portraitModelPath);
+		}
 
 		final float maxPitch = row.readSLKTagFloat("maxPitch");
 		final float maxRoll = row.readSLKTagFloat("maxRoll");
@@ -1407,13 +1459,19 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			this.successfulFrames++;
 			final boolean discardFrameTime = this.simulation.getMissionCheckpoint() != null && this.simulation.getMissionCheckpoint().shouldDiscardFrameTime();
 			if (discardFrameTime) this.simulation.getMissionCheckpoint().consumeDiscardFrameTime();
-			final float deltaTime = discardFrameTime ? 0 : Gdx.graphics.getDeltaTime();
+			final boolean paused = this.localGamePaused || this.localMenuPaused;
+			final boolean freezeTime = discardFrameTime || paused;
+			final float frameTime = Gdx.graphics.getDeltaTime()
+					* (this.localGameSpeed == null ? 1 : this.localGameSpeed.getTimeScale());
+			final float deltaTime = freezeTime ? 0 : frameTime;
 			this.terrain.update(deltaTime);
 
-			super.update();
+			super.update(paused ? 0 : frameTime);
 
-			final float rawDeltaTime = discardFrameTime ? 0 : Gdx.graphics.getDeltaTime();
-			this.updateTime += rawDeltaTime * NX_SPEED; // warsmash-nx: PC test runs can play faster (env NX_SPEED)
+			int auditTicks = freezeTime ? 0 : this.campaignAuditTicksPerFrame;
+			if (this.campaignAuditTicksPerFrame == 0) {
+				this.updateTime += deltaTime * NX_SPEED; // warsmash-nx: PC test runs can play faster (env NX_SPEED)
+			}
 
 			final Iterator<TextTag> textTagIterator = this.textTags.iterator();
 			while (textTagIterator.hasNext()) {
@@ -1425,28 +1483,30 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			// campaign map) every frame it is drawn (its animation only advances then, and a tree
 			// hit or killed on screen reacts at once) and otherwise one frame in eight, which still
 			// catches deaths, damage and blight off screen. Before, every tree ran every frame.
-			final int frame = ++this.widgetFrame;
-			final int slice = this.destructableSlice = (this.destructableSlice + 1) & 7;
-			int destructableIndex = 0;
-			final List<RenderWidget> widgetList = this.widgets;
-			for (int i = 0, l = widgetList.size(); i < l; i++) {
-				final RenderWidget widget = widgetList.get(i);
-				if (widget instanceof RenderDestructable) {
-					if ((destructableIndex++ & 7) == slice) {
-						updateDestructableOnce((RenderDestructable) widget, frame);
+			if (!paused) {
+				final int frame = ++this.widgetFrame;
+				final int slice = this.destructableSlice = (this.destructableSlice + 1) & 7;
+				int destructableIndex = 0;
+				final List<RenderWidget> widgetList = this.widgets;
+				for (int i = 0, l = widgetList.size(); i < l; i++) {
+					final RenderWidget widget = widgetList.get(i);
+					if (widget instanceof RenderDestructable) {
+						if ((destructableIndex++ & 7) == slice) {
+							updateDestructableOnce((RenderDestructable) widget, frame);
+						}
+					}
+					else {
+						widget.updateAnimations(this);
 					}
 				}
-				else {
-					widget.updateAnimations(this);
-				}
+				updateDrawnDestructables(this.worldScene.instances, this.worldScene.currentInstance, frame);
+				updateDrawnDestructables(this.worldScene.batchedInstances, this.worldScene.currentBatchedInstance, frame);
 			}
-			updateDrawnDestructables(this.worldScene.instances, this.worldScene.currentInstance, frame);
-			updateDrawnDestructables(this.worldScene.batchedInstances, this.worldScene.currentBatchedInstance, frame);
 			this.treeOcclusion.update(this, deltaTime);
 			final Iterator<RenderEffect> projectileIterator = this.projectiles.iterator();
 			while (projectileIterator.hasNext()) {
 				final RenderEffect projectile = projectileIterator.next();
-				if (projectile.updateAnimations(this, Gdx.graphics.getDeltaTime())) {
+				if (!paused && projectile.updateAnimations(this, frameTime)) {
 					projectileIterator.remove();
 				}
 			}
@@ -1466,27 +1526,31 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				restartDrawnDoodadSequences(doodadScene.batchedInstances, doodadScene.currentBatchedInstance);
 			}
 
-			if (SIMULATE_AFTER_RENDER) {
+			if (this.simulation.getMissionCheckpoint() != null && this.simulation.getMissionCheckpoint().isRestoring()) {
+				this.updateTime = 0;
+				this.simulation.getMissionCheckpoint().replayFrame();
+			}
+			else if (SIMULATE_AFTER_RENDER && !paused && auditTicks == 0) {
 				this.simulationPending = true;
 			}
-			else {
-				runSimulationTicks();
+			else if (!paused) {
+				runSimulationTicks(auditTicks);
 			}
 			if (this.dncTerrain != null) {
 				this.dncTerrain.setFrameByRatio(
 						this.simulation.getGameTimeOfDay() / this.simulation.getGameplayConstants().getGameDayHours());
-				this.dncTerrain.update(rawDeltaTime, null);
+				this.dncTerrain.update(deltaTime, null);
 			}
 			if (this.dncUnit != null) {
 				this.dncUnit.setFrameByRatio(
 						this.simulation.getGameTimeOfDay() / this.simulation.getGameplayConstants().getGameDayHours());
-				this.dncUnit.update(rawDeltaTime, null);
+				this.dncUnit.update(deltaTime, null);
 			}
 
 			if (this.dncTarget != null) {
 				this.dncTarget.setFrameByRatio(
 						this.simulation.getGameTimeOfDay() / this.simulation.getGameplayConstants().getGameDayHours());
-				this.dncTarget.update(rawDeltaTime, null);
+				this.dncTarget.update(deltaTime, null);
 			}
 			if (this.skyInstance != null) {
 				// Sky domes are authored around the origin; keep the dome centered
@@ -1500,7 +1564,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			// warsmash-nx: fade and upload fog-of-war texture at most once per rendered frame (~33 Hz),
 			// before render(), rather than inside simulation ticks.
 			if (this.fogGpuUpdateReady) {
-				this.fogGpuUpdateElapsed += rawDeltaTime;
+				this.fogGpuUpdateElapsed += deltaTime;
 				if (this.fogGpuUpdateElapsed >= 0.03f) {
 					this.fogGpuUpdateElapsed = this.fogGpuUpdateElapsed >= 0.06f ? 0f : (this.fogGpuUpdateElapsed - 0.03f);
 					final boolean terrainChanged = this.terrain.reloadFogOfWarDataToGPU(this.simulation);
@@ -1522,19 +1586,19 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 			// warsmash-nx: kick the queued frame to the GPU before running CPU simulation ticks so
 			// GPU rasterization overlaps with simulation work.
 			Gdx.gl.glFlush();
-			runSimulationTicks();
+			runSimulationTicks(0);
 		}
 	}
 
 	/** The simulation's ticks for the time update() added (none while a checkpoint is restored). */
-	private void runSimulationTicks() {
+	private void runSimulationTicks(int auditTicks) {
 		final long start = System.nanoTime();
 		if (this.simulation.getMissionCheckpoint() != null && this.simulation.getMissionCheckpoint().isRestoring()) {
 			this.updateTime = 0;
 			this.simulation.getMissionCheckpoint().replayFrame();
 		}
-		else for (int ticks = 0; this.updateTime >= WarsmashConstants.SIMULATION_STEP_TIME; ) {
-			if (ticks >= MAX_TICKS_PER_FRAME) {
+		else for (int ticks = 0; auditTicks > 0 || this.updateTime >= WarsmashConstants.SIMULATION_STEP_TIME; ) {
+			if (auditTicks == 0 && ticks >= MAX_TICKS_PER_FRAME) {
 				// warsmash-nx: after a long frame (a load, a hitch) the game time it missed is dropped
 				// instead of caught up: catching up made the next frame run up to 5 ticks (~110 ms on
 				// the console), a second hitch right after the first.
@@ -1542,7 +1606,12 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 				break;
 			}
 			if (this.gameTurnManager.getLatestCompletedTurn() >= this.simulation.getGameTurnTick()) {
-				this.updateTime -= WarsmashConstants.SIMULATION_STEP_TIME;
+				if (auditTicks > 0) {
+					auditTicks--;
+				}
+				else {
+					this.updateTime -= WarsmashConstants.SIMULATION_STEP_TIME;
+				}
 				ticks++;
 				final long simStart = this.simulationBudgetTracker.beginTick();
 				this.simulation.update();
@@ -2223,6 +2292,15 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		return this.uiSounds;
 	}
 
+	public Element getScriptSoundLabel(final String label) {
+		for (final DataTable table : JavaCompat.listOf(this.uiSoundsTable, this.additionalScriptSoundsTable,
+				this.unitAckSoundsTable, this.unitCombatSoundsTable)) {
+			final Element row = table.get(label);
+			if (row != null) return row;
+		}
+		return null;
+	}
+
 	public Warcraft3MapRuntimeObjectData getAllObjectData() {
 		return this.allObjectData;
 	}
@@ -2358,6 +2436,52 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 		this.gameTurnManager = gameTurnManager;
 	}
 
+	public boolean isLocalGamePaused() {
+		return this.localGamePaused;
+	}
+
+	public void recordMapAlert(final float x, final float y) {
+		if (!JavaCompat.isFinite(x) || !JavaCompat.isFinite(y)) return;
+		this.nextAlertIndex = 0;
+		if (!this.recentAlerts.isEmpty()) {
+			final Vector2 latest = this.recentAlerts.get(0);
+			if (latest.x == x && latest.y == y) return;
+		}
+		if (this.recentAlerts.size() == 8) this.recentAlerts.remove(7);
+		this.recentAlerts.add(0, new Vector2(x, y));
+	}
+
+	public Vector2 nextMapAlert() {
+		if (this.recentAlerts.isEmpty()) return null;
+		final Vector2 alert = this.recentAlerts.get(this.nextAlertIndex);
+		this.nextAlertIndex = (this.nextAlertIndex + 1) % this.recentAlerts.size();
+		return alert;
+	}
+
+	public void setLocalGamePaused(final boolean paused) {
+		this.localGamePaused = paused;
+	}
+
+	public void setLocalMenuPaused(final boolean paused) {
+		this.localMenuPaused = paused;
+	}
+
+	public CGameSpeed getDisplayedGameSpeed() {
+		if (this.localGameSpeed != null) return this.localGameSpeed;
+		final CGameSpeed configuredSpeed = this.mapConfig.getGameSpeed();
+		return configuredSpeed == null ? CGameSpeed.NORMAL : configuredSpeed;
+	}
+
+	public void setLocalGameSpeed(final CGameSpeed preferredSpeed) {
+		final CGameSpeed configuredSpeed = this.mapConfig.getGameSpeed();
+		if (preferredSpeed != null && !this.mapConfig.isMapFlagSet(CMapFlag.MAP_LOCK_SPEED)) {
+			this.localGameSpeed = preferredSpeed;
+		}
+		else {
+			this.localGameSpeed = configuredSpeed == null ? CGameSpeed.NORMAL : configuredSpeed;
+		}
+	}
+
 	public RenderSpellEffect spawnSpellEffectOnUnitEx(final CWidget unit, final War3ID alias,
 			final CEffectType effectType, final int index) {
 		final EffectAttachmentUI effectAttachmentUI = getEffectAttachmentUI(alias, effectType, index);
@@ -2403,13 +2527,16 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 	public RenderSpellEffect spawnSpellEffectEx(final float x, final float y, final float facing, final War3ID alias,
 			final CEffectType effectType, final int index) {
 		final EffectAttachmentUI effectAttachmentUI = getEffectAttachmentUI(alias, effectType, index);
-		if (effectAttachmentUI == null) {
-			return null;
+		String modelPath = effectAttachmentUI == null ? null : effectAttachmentUI.getModelPath();
+		if ((modelPath == null || modelPath.isEmpty()) && effectType == CEffectType.AREA_EFFECT && index == 0) {
+			final var abilityType = this.simulation.getAbilityData().getAbilityType(alias);
+			if (abilityType != null && (War3ID.fromString("Aclf").equals(abilityType.getCode())
+					|| War3ID.fromString("AIfg").equals(abilityType.getCode()))) {
+				modelPath = "Abilities\\Spells\\Human\\CloudOfFog\\CloudOfFog.mdx";
+			}
 		}
-		final String modelPath = effectAttachmentUI.getModelPath();
-		final List<String> attachmentPoint = effectAttachmentUI.getAttachmentPoint();
-		final RenderSpellEffect specialEffect = addSpecialEffect(modelPath, x, y, (float) StrictMath.toRadians(facing));
-		return specialEffect;
+		return modelPath == null || modelPath.isEmpty() ? null
+				: addSpecialEffect(modelPath, x, y, (float) StrictMath.toRadians(facing));
 	}
 
 	public List<EffectAttachmentUI> getEffectAttachmentUIList(final War3ID alias, final CEffectType effectType) {
@@ -2628,23 +2755,53 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 	@Override
 	public MdxModel loadModelMdx(final String path) {
+		if (path != null && "Doodads\\Terrain\\LOSBlocker\\InvalidFileOnPurpose.mdx"
+				.equalsIgnoreCase(mdx(path).replace('/', '\\'))) {
+			return loadInvisibleMarkerModel();
+		}
 		return loadModelMdx(this.dataSource, this, path, this.mapPathSolver, this.solverParams);
+	}
+
+	private MdxModel loadInvisibleMarkerModel() {
+		if (this.invisibleMarkerModel == null) {
+			final MdxHandler handler = (MdxHandler) findHandler(".mdx")[0];
+			final MdxModel model = new MdxModel(handler, this, ".mdx", this.mapPathSolver, "");
+			try {
+				model.load(new MdlxModel());
+			}
+			catch (final IOException e) {
+				throw new IllegalStateException("Unable to initialize the invisible sight-blocking marker", e);
+			}
+			model.loaded = true;
+			model.ok = true;
+			this.invisibleMarkerModel = model;
+		}
+		return this.invisibleMarkerModel;
 	}
 
 	public static MdxModel loadModelMdx(final DataSource dataSource, final ModelViewer modelViewer, final String path,
 			final PathSolver pathSolver, final Object solverParams) {
-		if ("".equals(path)) {
+		if (path == null || path.isEmpty()) {
 			return null;
 		}
 		final String mdxPath = mdx(path);
 		if (dataSource.has(mdxPath)) {
 			return (MdxModel) modelViewer.load(mdxPath, pathSolver, solverParams);
 		}
-		else {
-			final String mdlPath = mdl(mdxPath);
-			if (dataSource.has(mdlPath)) {
-				return (MdxModel) modelViewer.load(mdlPath, pathSolver, solverParams);
-			}
+		final String mdlPath = mdl(mdxPath);
+		if (dataSource.has(mdlPath)) {
+			return (MdxModel) modelViewer.load(mdlPath, pathSolver, solverParams);
+		}
+		// Classic scripts and effect tables use these older asset paths.
+		final String archivePath = switch (mdxPath.replace('/', '\\').toLowerCase(Locale.ROOT)) {
+		case "objects\\spawnmodels\\nightelf\\nightelfblood\\nightelfbloodheromoonpriestess.mdx" ->
+			"Objects\\Spawnmodels\\NightElf\\NightElfBlood\\NightElfBloodMoonPriestess.mdx";
+		case "objects\\spawnmodels\\other\\npcblood\\npcbloodvillagerwoman.mdx" ->
+			"Objects\\Spawnmodels\\Other\\NPCBlood\\NPCbloodVillagerWoman\\NPCbloodVillagerWoman.mdx";
+		default -> null;
+		};
+		if (archivePath != null && dataSource.has(archivePath)) {
+			return (MdxModel) modelViewer.load(archivePath, pathSolver, solverParams);
 		}
 		return (MdxModel) modelViewer.load(mdxPath, pathSolver, solverParams);
 	}
@@ -2910,7 +3067,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 								final War3ID typeId = source.getTypeId();
 								final int projectileSpeed = unitAttack.getProjectileSpeed();
 								final float projectileArc = unitAttack.getProjectileArc();
-								final String missileArt = unitAttack.getProjectileArt();
+								final String missileArt = unitAttack.getProjectileArt(source);
 								final float projectileLaunchX = simulation.getUnitData().getProjectileLaunchX(typeId);
 								final float projectileLaunchY = simulation.getUnitData().getProjectileLaunchY(typeId);
 								final float projectileLaunchZ = simulation.getUnitData().getProjectileLaunchZ(typeId);
@@ -2960,10 +3117,10 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 								final War3ID typeId = source.getTypeId();
 								final AbilityUI spellDataUI = War3MapViewer.this.abilityDataUI.getUI(spellAlias);
 								final EffectAttachmentUIMissile abilityMissileArt = spellDataUI.getMissileArt(0);
-								final String modelPath = abilityMissileArt == null ? ""
-										: abilityMissileArt.getModelPath();
-								final float projectileArc = abilityMissileArt == null ? 0 : abilityMissileArt.getArc();
-								final String missileArt = abilityMissileArt == null ? ""
+								final boolean returningSpider = CAbilitySpiderAttack.CODE.equals(spellAlias);
+								final float projectileArc = returningSpider || abilityMissileArt == null ? 0 : abilityMissileArt.getArc();
+								final String missileArt = returningSpider ? "Abilities\\Weapons\\CryptFiendMissile\\CryptFiendMissile.mdx"
+										: abilityMissileArt == null ? ""
 										: abilityMissileArt.getModelPath();
 								final float projectileLaunchX = War3MapViewer.this.simulation.getUnitData()
 										.getProjectileLaunchX(typeId);
@@ -3143,7 +3300,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 									final CUnitAttackInstant unitAttack, final CWidget target) {
 								final War3ID typeId = source.getTypeId();
 
-								final String missileArt = unitAttack.getProjectileArt();
+								final String missileArt = unitAttack.getProjectileArt(source);
 								final float projectileLaunchX = War3MapViewer.this.simulation.getUnitData()
 										.getProjectileLaunchX(typeId);
 								final float projectileLaunchY = War3MapViewer.this.simulation.getUnitData()
@@ -3337,6 +3494,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 							@Override
 							public void spawnUnitConstructionFinishSound(final CUnit constructedStructure) {
+								if (constructedStructure.getPlayerIndex() == War3MapViewer.this.localPlayerIndex) {
+									recordMapAlert(constructedStructure.getX(), constructedStructure.getY());
+								}
 								final UnitSound constructingBuilding = War3MapViewer.this.uiSounds
 										.getSound(War3MapViewer.this.gameUI.getSkinField("JobDoneSound"));
 								final RenderUnit renderUnit = War3MapViewer.this.unitToRenderPeer
@@ -3351,6 +3511,9 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 
 							@Override
 							public void spawnUnitUpgradeFinishSound(final CUnit constructedStructure) {
+								if (constructedStructure.getPlayerIndex() == War3MapViewer.this.localPlayerIndex) {
+									recordMapAlert(constructedStructure.getX(), constructedStructure.getY());
+								}
 								final UnitSound constructingBuilding = War3MapViewer.this.uiSounds
 										.getSound(War3MapViewer.this.gameUI.getSkinField("UpgradeComplete"));
 								final RenderUnit renderUnit = War3MapViewer.this.unitToRenderPeer
@@ -3402,14 +3565,16 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 							public void spawnDeathExplodeEffect(final CUnit source,
 									final War3ID explodesOnDeathBuffId) {
 								final RenderUnit renderUnit = War3MapViewer.this.unitToRenderPeer.get(source);
+								if (renderUnit == null) return;
 								MdxComplexInstance modelInstance = null;
 								if (explodesOnDeathBuffId != null) {
 									final EffectAttachmentUI effectAttachmentUI = getEffectAttachmentUI(
 											explodesOnDeathBuffId, CEffectType.EFFECT, 0);
-									final String modelPath = effectAttachmentUI.getModelPath();
-									final MdxModel spawnedEffectModel = loadModelMdx(modelPath);
-									if (spawnedEffectModel != null) {
-										modelInstance = (MdxComplexInstance) spawnedEffectModel.addInstance();
+									if (effectAttachmentUI != null) {
+										final MdxModel spawnedEffectModel = loadModelMdx(effectAttachmentUI.getModelPath());
+										if (spawnedEffectModel != null) {
+											modelInstance = (MdxComplexInstance) spawnedEffectModel.addInstance();
+										}
 									}
 								}
 								if ((modelInstance == null) && (renderUnit.specialArtModel != null)) {
@@ -3465,6 +3630,14 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 								if (spellEffect != null) {
 									spellEffect.setKillWhenDone(true);
 								}
+							}
+
+							@Override
+							public SimulationRenderComponent spawnPersistentEffectOnUnit(final CUnit unit,
+									final String effectPath) {
+								final RenderSpellEffect effect = addSpecialEffectTarget(effectPath, unit, "");
+								return effect == null ? SimulationRenderComponent.DO_NOTHING
+										: () -> effect.setAnimations(RenderSpellEffect.DEATH_ONLY, true);
 							}
 
 							@Override
@@ -3597,6 +3770,7 @@ public class War3MapViewer extends AbstractMdxModelViewer implements MdxAssetLoa
 							@Override
 							public void spawnUnitReadySound(final CUnit trainedUnit) {
 								if (trainedUnit.getPlayerIndex() == War3MapViewer.this.localPlayerIndex) {
+									recordMapAlert(trainedUnit.getX(), trainedUnit.getY());
 									final RenderUnit renderPeer = War3MapViewer.this.unitToRenderPeer.get(trainedUnit);
 									renderPeer.soundset.ready
 											.playUnitResponse(War3MapViewer.this.worldScene.audioContext, renderPeer);

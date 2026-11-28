@@ -1,5 +1,7 @@
 package com.etheller.warsmash.parsers.w3x;
 
+import com.etheller.warsmash.util.JavaCompat;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -8,6 +10,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.SeekableByteChannel;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.zip.Checksum;
 
 import org.apache.commons.compress.utils.IOUtils;
@@ -35,6 +39,9 @@ import mpq.MPQException;
  */
 public class War3Map implements DataSource, AutoCloseable {
 
+	private static final int PRELOAD_LIMIT_BYTES = 8 * 1024 * 1024;
+	private final Map<String, byte[]> preloadedResources = new HashMap<>();
+	private int preloadedBytes;
 	private CompoundDataSource baseDataSource;
 	private DataSource dataSource;
 	private DataSource internalMpqContentsDataSource;
@@ -160,7 +167,27 @@ public class War3Map implements DataSource, AutoCloseable {
 
 	@Override
 	public InputStream getResourceAsStream(final String filepath) throws IOException {
+		final byte[] preloaded = this.preloadedResources.get(filepath);
+		if (preloaded != null) {
+			return new ByteArrayInputStream(preloaded);
+		}
 		return this.dataSource.getResourceAsStream(filepath);
+	}
+
+	public void preloadResource(final String filepath) throws IOException {
+		final int remainingBytes = PRELOAD_LIMIT_BYTES - this.preloadedBytes;
+		if (remainingBytes == 0 || this.preloadedResources.containsKey(filepath) || !has(filepath)) {
+			return;
+		}
+		try (InputStream stream = this.dataSource.getResourceAsStream(filepath)) {
+			if (stream != null) {
+				final byte[] bytes = JavaCompat.readNBytes(stream, remainingBytes + 1);
+				if (bytes.length > 0 && bytes.length <= remainingBytes) {
+					this.preloadedResources.put(filepath, bytes);
+					this.preloadedBytes += bytes.length;
+				}
+			}
+		}
 	}
 
 	@Override
@@ -190,6 +217,8 @@ public class War3Map implements DataSource, AutoCloseable {
 
 	@Override
 	public void close() throws IOException {
+		this.preloadedResources.clear();
+		this.preloadedBytes = 0;
 		// The game archives belong to the caller and are reused by later chapters.
 		this.internalMpqContentsDataSource.close();
 	}
@@ -204,6 +233,8 @@ public class War3Map implements DataSource, AutoCloseable {
 	}
 
 	public void setDataSource(DataSource tilesetSource) {
+		this.preloadedResources.clear();
+		this.preloadedBytes = 0;
 		this.dataSource = tilesetSource;
 	}
 

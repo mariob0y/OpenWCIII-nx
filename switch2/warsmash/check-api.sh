@@ -22,7 +22,9 @@ find $W/core/src $W/shared/src $W/jassparser/src $W/jassparser/build/generated-s
 	$W/fdfparser/build/generated-src shims/src -name "*.java" > build/sources.txt
 CP="$(ls ../third_party/jars/*.jar | tr '\n' ';')"
 set +e
-"$J/javac" -encoding UTF-8 -nowarn -proc:none -source 8 -target 8 -Xlint:-options -Xmaxerrs 10000 \
+# Javac8Plus: javac taking OpenWCIII's Java 17 syntax at -source 8 (see build-java.sh).
+"$J/java" --add-opens jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED ../scripts/Javac8Plus.java \
+	-encoding UTF-8 -nowarn -proc:none -source 8 -target 8 -Xlint:-options -Xmaxerrs 10000 \
 	-XDshould-stop.ifNoError=FLOW -XDshould-stop.ifError=FLOW \
 	-bootclasspath "$(pwd -W)/build/overlay-classes;$RT" -cp "$CP" -d build/classes-cw-check @build/sources.txt \
 	> build/cw-check.log 2>&1

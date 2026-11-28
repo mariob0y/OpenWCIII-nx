@@ -52,6 +52,9 @@ public class CAbilityChainLightning extends CAbilityTargetSpellBase {
 		this.damageReductionPerTarget = worldEditorAbility.getFieldAsFloat(AbilityFields.DATA_C + level, 0);
 		this.numberOfTargetsHit = worldEditorAbility.getFieldAsInteger(AbilityFields.DATA_B + level, 0);
 		this.areaOfEffect = worldEditorAbility.getFieldAsFloat(AbilityFields.AREA_OF_EFFECT + level, 0);
+		if (CTargetType.parseTargetTypeSet(worldEditorAbility.getFieldAsList(AbilityFields.TARGETS_ALLOWED + level)).isEmpty()) {
+			getTargetsAllowed().addAll(CTargetType.parseTargetTypeSet(worldEditorAbility.getFieldAsList(AbilityFields.TARGETS_ALLOWED)));
+		}
 	}
 
 	@Override

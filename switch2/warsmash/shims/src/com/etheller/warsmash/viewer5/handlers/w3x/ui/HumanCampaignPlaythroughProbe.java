@@ -11,6 +11,10 @@ public final class HumanCampaignPlaythroughProbe {
 	private HumanCampaignPlaythroughProbe() {
 	}
 
+	public static void observeHeroRestore(final String missionKey, final String heroKey,
+			final com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit unit) {
+	}
+
 	public static void afterMapRender(final War3MapViewer viewer, final MeleeUI ui, final boolean initialized) {
 	}
 

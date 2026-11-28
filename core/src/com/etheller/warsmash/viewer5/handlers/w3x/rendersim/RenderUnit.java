@@ -27,6 +27,7 @@ import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.commandbuttons.Comma
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.commandbuttons.CommandCardPopulatingAbilityVisitor;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CSimulation;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.players.CAllianceType;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.CWidget;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.CAbility;
 import com.etheller.warsmash.viewer5.handlers.w3x.simulation.abilities.generic.AbilityGenericSingleIconPassiveAbility;
@@ -52,10 +53,13 @@ public class RenderUnit implements RenderWidget {
 	public SplatMover selectionPreviewHighlight;
 
 	private float facing;
+	private float baseModelScale;
+	private float appliedModelScale;
 
 	private boolean swimming;
 	private boolean working;
 	private boolean invisible;
+	private boolean showIllusionTint;
 
 	private boolean dead = false;
 
@@ -148,7 +152,6 @@ public class RenderUnit implements RenderWidget {
 			instance.move(heapZ);
 			final Vector3 tintingColor = typeData.getTintingColor();
 			this.currentColor = new float[] { tintingColor.x, tintingColor.y, tintingColor.z, 1.0f };
-			instance.uniformScale(scalingValue);
 
 			this.selectionScale = typeData.getSelectScale() * selectionCircleScaleFactor;
 			this.selectionHeight = typeData.getSelectHeight();
@@ -164,6 +167,8 @@ public class RenderUnit implements RenderWidget {
 		}
 
 		this.instance = instance;
+		this.appliedModelScale = Float.NaN;
+		setScriptedScale(scalingValue);
 		if (typeData != null) {
 			updateColor(map);
 		}
@@ -187,6 +192,7 @@ public class RenderUnit implements RenderWidget {
 
 	@Override
 	public void updateAnimations(final War3MapViewer map) {
+		updateModelScale();
 		final boolean wasHidden = this.instance.hidden();
 		if (this.simulationUnit.isHidden()
 				|| !this.simulationUnit.isVisible(map.simulation, map.getLocalPlayerIndex())) {
@@ -317,17 +323,12 @@ public class RenderUnit implements RenderWidget {
 		if (changedAnimationProperties) {
 			this.unitAnimationListenerImpl.forceResetCurrentAnimation();
 		}
-		boolean colorNeedsUpdate = false;
-		if (this.simulationUnit.isNxIllusion()) {
-			final int owner = this.simulationUnit.getPlayerIndex();
-			final int local = map.getLocalPlayerIndex();
-			final boolean tint = (owner == local)
-					|| map.simulation.getPlayer(local).hasAlliance(owner, CAllianceType.PASSIVE);
-			if (tint != this.illusionTint) {
-				this.illusionTint = tint;
-				colorNeedsUpdate = true;
-			}
-		}
+		final int owner = this.simulationUnit.getPlayerIndex();
+		final int local = map.getLocalPlayerIndex();
+		final boolean illusionTint = (this.simulationUnit.isIllusion() || this.simulationUnit.isNxIllusion())
+				&& ((owner == local) || map.simulation.getPlayer(local).hasAlliance(owner, CAllianceType.PASSIVE));
+		boolean colorNeedsUpdate = illusionTint != this.showIllusionTint;
+		this.showIllusionTint = illusionTint;
 		if (invisible && !this.invisible) {
 			// turn invisible instantly
 			colorNeedsUpdate = true;
@@ -556,7 +557,20 @@ public class RenderUnit implements RenderWidget {
 		this.unitAnimationListenerImpl.update();
 		if (!dead && this.simulationUnit.isConstructingOrUpgrading()) {
 			this.instance.setFrameByRatio(
-					this.simulationUnit.getConstructionProgress() / this.simulationUnit.getUnitType().getBuildTime());
+					this.simulationUnit.getConstructionProgress() / this.simulationUnit.getConstructionDuration());
+		}
+	}
+
+	public void setScriptedScale(final float scale) {
+		this.baseModelScale = scale;
+		updateModelScale();
+	}
+
+	private void updateModelScale() {
+		final float scale = this.baseModelScale * this.simulationUnit.getModelScaleMultiplier();
+		if (this.appliedModelScale != scale) {
+			this.instance.setUniformScale(scale);
+			this.appliedModelScale = scale;
 		}
 	}
 
@@ -787,12 +801,8 @@ public class RenderUnit implements RenderWidget {
 				finalAlpha *= (fadeAmount * 0.5f) + 0.5f;
 			}
 		}
-		if (this.illusionTint) {
-			this.instance.setVertexColor(this.currentColor[0] * 0.35f, this.currentColor[1] * 0.55f,
-					this.currentColor[2], finalAlpha);
-			return;
-		}
-		this.instance.setVertexColor(this.currentColor[0], this.currentColor[1], this.currentColor[2], finalAlpha);
+		this.instance.setVertexColor(this.currentColor[0] * (this.showIllusionTint ? 0.50f : 1f),
+				this.currentColor[1] * (this.showIllusionTint ? 0.70f : 1f), this.currentColor[2], finalAlpha);
 	}
 
 	public float[] getVertexColoring() {

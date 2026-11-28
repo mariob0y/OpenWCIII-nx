@@ -36,7 +36,7 @@ public class CPathfindingProcessor {
 	private static final int[] DIR_DY = { 1, 1, 1, 0, -1, -1, -1, 0 };
 	private static final double SQRT2 = Math.sqrt(2.0);
 	private static final double[] DIR_LEN = { SQRT2, 1.0, SQRT2, 1.0, SQRT2, 1.0, SQRT2, 1.0 };
-
+	private static final double DIAGONAL_STEP_EXTRA = SQRT2 - 1.0;
 	private final PathingGrid pathingGrid;
 	private final CWorldCollision worldCollision;
 	private final LinkedList<PathfindingJob> moveQueue = new LinkedList<>();
@@ -52,6 +52,7 @@ public class CPathfindingProcessor {
 	private int totalIterations = 0;
 	private int totalJobLoops = 0;
 	private final int pathingGridCellCount;
+	private final int searchIterationLimit;
 
 	// warsmash-nx: lazy primitive A* scratch buffers (transient so MissionStateFingerprint skips them)
 	private transient int[] cellStamp;
@@ -82,6 +83,11 @@ public class CPathfindingProcessor {
 		this.cornerNodes = cornerNodes;
 		this.sharedJobId = sharedJobId;
 		this.pathingGridCellCount = pathingGrid.getWidth() * pathingGrid.getHeight();
+		// warsmash-nx: the fine search stops at a fixed cap, whatever the map's size; a detour longer than
+		// that is found by the coarse search (planCoarseDetour). OpenWCIII raised the cap with the map's
+		// size (up to 80,000) for long detours, which costs up to 4x more on every unreachable order on
+		// the console before the closest-point fallback.
+		this.searchIterationLimit = MAX_ITERATIONS;
 	}
 
 	private void ensureSearchBuffers() {
@@ -258,7 +264,7 @@ public class CPathfindingProcessor {
 	}
 
 	public double f(final Node n) {
-		return n.g + h(n);
+		return n.f;
 	}
 
 	public double g(final Node n) {
@@ -270,20 +276,21 @@ public class CPathfindingProcessor {
 	}
 
 	private float heuristicWorld(final float x, final float y) {
-		float bestDistSq = 0f;
+		double bestDistance = Double.POSITIVE_INFINITY;
 		final int count = this.activeGoalCount;
 		final float[] gx = this.goalWorldX;
 		final float[] gy = this.goalWorldY;
 		for (int i = 0; i < count; i++) {
-			final float dx = x - gx[i];
-			final float dy = y - gy[i];
-			final float distSq = (dx * dx) + (dy * dy);
-			if (distSq > bestDistSq) {
-				bestDistSq = distSq;
+			final float dx = Math.abs(x - gx[i]);
+			final float dy = Math.abs(y - gy[i]);
+			// On the eight-direction grid, take diagonal steps before straight steps.
+			final double dist = Math.max(dx, dy) + (DIAGONAL_STEP_EXTRA * Math.min(dx, dy));
+			if (dist < bestDistance) {
+				bestDistance = dist;
 			}
 		}
 		// warsmash-nx: mildly weighted A* (paths at most 20% longer, far fewer cells searched on long trips)
-		return (float) Math.sqrt(bestDistSq) * 1.2f;
+		return (float) (bestDistance * 1.2);
 	}
 
 	private boolean isGoalCell(final int cellIdx) {
@@ -436,6 +443,12 @@ public class CPathfindingProcessor {
 				workIterations += 5; // setup of job predicted cost
 				job.goalX = job.goal.x;
 				job.goalY = job.goal.y;
+				if (!this.pathingGrid.contains(job.startX, job.startY)
+						|| !this.pathingGrid.contains(job.goalX, job.goalY)) {
+					job.queueItem.pathFound(Collections.emptyList(), simulation);
+					this.moveQueue.poll();
+					continue JobsLoop;
+				}
 				job.weightForHittingWalls = 1E9f;
 				if (!this.pathingGrid.isPathable(job.goalX, job.goalY, job.movementType, job.collisionSize)
 						|| !isPathableDynamically(job.goalX, job.goalY, job.ignoreIntersectionsWithThisUnit,
@@ -755,7 +768,7 @@ public class CPathfindingProcessor {
 				workIterations++;
 				if (NXSTAT) nxstatIters++;
 				this.totalIterations++;
-				if (this.totalIterations > MAX_ITERATIONS) {
+				if (this.totalIterations >= this.searchIterationLimit) {
 					break;
 				}
 				if (workIterations >= WORK_BUDGET_PER_TICK) {
@@ -766,7 +779,7 @@ public class CPathfindingProcessor {
 			}
 			// warsmash-nx: the iteration cap on a long trip: a coarse search finds the way round (a detour
 			// past the cap), and the fine search starts again toward a waypoint a little way along it
-			if ((this.totalIterations > MAX_ITERATIONS) && !job.coarseTried) {
+			if ((this.totalIterations >= this.searchIterationLimit) && !job.coarseTried) {
 				job.coarseTried = true;
 				if (planCoarseDetour(job)) {
 					job.jobStarted = false;

@@ -747,6 +747,12 @@ public final class GlobalScope {
 	public void queueTrigger(final TriggerBooleanExpression filter, final TriggerExecutionScope filterScope,
 			final Trigger trigger, final TriggerExecutionScope evaluateScope,
 			final TriggerExecutionScope executeScope) {
+		queueTrigger(filter, filterScope, trigger, evaluateScope, executeScope, false);
+	}
+
+	public void queueTrigger(final TriggerBooleanExpression filter, final TriggerExecutionScope filterScope,
+			final Trigger trigger, final TriggerExecutionScope evaluateScope,
+			final TriggerExecutionScope executeScope, final boolean immediate) {
 		if (trigger.isEnabled()) {
 			try {
 				if (filter != null) {
@@ -754,8 +760,9 @@ public final class GlobalScope {
 						return;
 					}
 				}
-				if (trigger.evaluate(this, evaluateScope)) {
-					trigger.executeFromEvent(this, executeScope);
+				if (trigger.evaluate(this, evaluateScope) && trigger.isEnabled()) {
+					if (immediate) trigger.executeImmediately(this, executeScope);
+					else trigger.executeFromEvent(this, executeScope);
 				}
 			}
 			catch (final Exception exc) {

@@ -15,6 +15,8 @@ import com.etheller.warsmash.viewer5.AudioContext;
 import com.etheller.warsmash.viewer5.AudioPanner;
 import com.etheller.warsmash.viewer5.gl.Extensions;
 import com.etheller.warsmash.viewer5.handlers.w3x.rendersim.RenderUnit;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSound;
+import com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename;
 import com.etheller.warsmash.viewer5.handlers.w3x.ui.OptionsSettingsStore;
 
 public final class UnitSound {
@@ -24,6 +26,8 @@ public final class UnitSound {
 	private final List<Sound> sounds = new ArrayList<>();
 	private final List<String> soundPaths = new ArrayList<>();
 	private DataSource dataSource;
+	private com.badlogic.gdx.Audio audio;
+	private final List<CSoundFilename> activeLoops = new ArrayList<>();
 	private final float volume;
 	private final float pitch;
 	private final float pitchVariance;
@@ -36,7 +40,10 @@ public final class UnitSound {
 
 	public static UnitSound create(final DataSource dataSource, final DataTable unitAckSounds, final String soundName,
 			final String soundType) {
-		final Element row = unitAckSounds.get(soundName + soundType);
+		return create(dataSource, unitAckSounds.get(soundName + soundType));
+	}
+
+	public static UnitSound create(final DataSource dataSource, final Element row) {
 		if (row == null) {
 			return SILENT;
 		}
@@ -45,15 +52,16 @@ public final class UnitSound {
 		if ((directoryBase.length() > 1) && !directoryBase.endsWith("\\")) {
 			directoryBase += "\\";
 		}
-		final float volume = row.getFieldFloatValue("Volume") / 127f;
-		final float pitch = row.getFieldFloatValue("Pitch");
+		final float volume = row.getField("Volume").trim().isEmpty() ? 1 : row.getFieldFloatValue("Volume") / 127f;
+		final float pitch = row.getField("Pitch").trim().isEmpty() ? 1 : row.getFieldFloatValue("Pitch");
 		float pitchVariance = row.getFieldFloatValue("PitchVariance");
 		if (pitchVariance == 1.0f) {
 			pitchVariance = 0.0f;
 		}
-		final float minDistance = row.getFieldFloatValue("MinDistance");
-		final float maxDistance = row.getFieldFloatValue("MaxDistance");
-		final float distanceCutoff = row.getFieldFloatValue("DistanceCutoff");
+		final float minDistance = row.getField("MinDistance").trim().isEmpty() ? 99999 : row.getFieldFloatValue("MinDistance");
+		final float maxDistance = row.getField("MaxDistance").trim().isEmpty() ? 99999 : row.getFieldFloatValue("MaxDistance");
+		final float distanceCutoff = row.getField("DistanceCutoff").trim().isEmpty() ? 99999
+				: row.getFieldFloatValue("DistanceCutoff");
 		final String[] flags = row.getField("Flags").split(",");
 		boolean looping = false;
 		for (final String flag : flags) {
@@ -66,6 +74,7 @@ public final class UnitSound {
 		// warsmash-nx: only find the files here; each is decoded the first time it plays (sound()). A new
 		// unit type used to decode its whole soundset (15-25 files) in one frame: 135-500 ms hitches.
 		sound.dataSource = dataSource;
+		sound.audio = Gdx.audio;
 		for (final String fileName : fileNames.split(",")) {
 			final String loadPath = resolveSoundPath(dataSource, directoryBase + fileName);
 			if (loadPath != null) {
@@ -74,6 +83,17 @@ public final class UnitSound {
 			}
 		}
 		return sound;
+	}
+
+	public static void applyLabelSettings(final CSound sound, final Element row) {
+		if (row == null) return;
+		if (!row.getField("Volume").trim().isEmpty()) sound.setVolume(row.getFieldValue("Volume"));
+		if (!row.getField("Pitch").trim().isEmpty()) sound.setPitch(row.getFieldFloatValue("Pitch"));
+		if (!row.getField("MinDistance").trim().isEmpty()) sound.setMinDistance(row.getFieldFloatValue("MinDistance"));
+		if (!row.getField("MaxDistance").trim().isEmpty()) sound.setMaxDistance(row.getFieldFloatValue("MaxDistance"));
+		if (!row.getField("DistanceCutoff").trim().isEmpty()) {
+			sound.setDistanceCutoff(row.getFieldFloatValue("DistanceCutoff"));
+		}
 	}
 
 	/** The file a sound path loads from (extension replaced by .wav or .mp3), or null if there is none. */
@@ -91,9 +111,10 @@ public final class UnitSound {
 		return null;
 	}
 
-	private static Sound loadSound(final DataSource dataSource, final String loadPath) {
+	private static Sound loadSound(final com.badlogic.gdx.Audio audio, final DataSource dataSource, final String loadPath) {
 		try {
-			return Gdx.audio.newSound(new DataSourceFileHandle(dataSource, loadPath));
+			final com.badlogic.gdx.Audio backend = audio != null ? audio : Gdx.audio;
+			return backend == null ? null : backend.newSound(new DataSourceFileHandle(dataSource, loadPath));
 		}
 		catch (final Exception exc) {
 			exc.printStackTrace();
@@ -103,14 +124,14 @@ public final class UnitSound {
 
 	public static Sound createSound(final DataSource dataSource, final String filePath) {
 		final String loadPath = resolveSoundPath(dataSource, filePath);
-		return loadPath == null ? null : loadSound(dataSource, loadPath);
+		return loadPath == null ? null : loadSound(Gdx.audio, dataSource, loadPath);
 	}
 
 	/** The decoded sound at an index, decoding it on first use; null if it does not decode. */
 	private Sound sound(final int index) {
 		Sound sound = this.sounds.get(index);
-		if ((sound == null) && (this.soundPaths.get(index) != null)) {
-			sound = loadSound(this.dataSource, this.soundPaths.get(index));
+		if ((sound == null) && (index < this.soundPaths.size()) && (this.soundPaths.get(index) != null)) {
+			sound = loadSound(this.audio, this.dataSource, this.soundPaths.get(index));
 			if (sound == null) {
 				this.soundPaths.set(index, null); // do not try again
 			}
@@ -180,12 +201,25 @@ public final class UnitSound {
 		if (buffer == null) {
 			return -1;
 		}
+		final boolean loop = loopOverride == null ? this.looping : loopOverride;
+		this.lastPlayedSound = buffer;
+		if (loop) {
+			final CSoundFilename playback = createPlayback(buffer, audioContext, true, true, true, 0, 0);
+			playback.setPosition(x, y, z);
+			playback.start();
+			if (playback.isPlaying()) {
+				com.etheller.warsmash.util.JavaCompat.removeIf(this.activeLoops, active -> !active.isPlaying());
+				this.activeLoops.add(playback);
+			}
+			return playback.getPlaybackId();
+		}
 		final AudioPanner panner = audioContext.createPanner();
 		final AudioBufferSource source = audioContext.createBufferSource();
 
 		// Panner settings
 		panner.setPosition(x, y, z);
-		panner.setDistances(this.distanceCutoff, this.minDistance);
+		panner.setDistances(this.maxDistance, this.minDistance);
+		panner.setDistanceCutoff(this.distanceCutoff);
 		panner.connect(audioContext.destination);
 
 		// Source.
@@ -193,34 +227,33 @@ public final class UnitSound {
 		source.connect(panner);
 
 		// Make a sound.
-		long soundId = -1;
-		if (loopOverride == null) {
-			soundId = source.start(0, this.volume,
-					(this.pitch + ((float) Math.random() * this.pitchVariance * 2)) - this.pitchVariance, this.looping);
-		}
-		else {
-			soundId = source.start(0, this.volume,
-					(this.pitch + ((float) Math.random() * this.pitchVariance * 2)) - this.pitchVariance, loopOverride);
-		}
-		this.lastPlayedSound = source.buffer;
-		return soundId;
+		return source.start(0, this.volume, randomizedPitch(), false);
 	}
 
 	/** Creates a script-owned voice without borrowing this label's global last-played state. */
-	public com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename createPlayback(
+	public CSoundFilename createPlayback(
 			final AudioContext context, final boolean loop, final boolean spatial, final boolean stopOutOfRange,
 			final int fadeIn, final int fadeOut) {
 		if (this.sounds.isEmpty()) return null;
 		final Sound buffer = sound((int) (Math.random() * this.sounds.size()));
 		if (buffer == null) return null;
-		final com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename playback = new com.etheller.warsmash.viewer5.handlers.w3x.simulation.sound.CSoundFilename(
-				buffer, context, loop, stopOutOfRange, fadeIn, fadeOut, "");
+		return createPlayback(buffer, context, loop, spatial, stopOutOfRange, fadeIn, fadeOut);
+	}
+
+	private CSoundFilename createPlayback(final Sound buffer, final AudioContext context, final boolean loop,
+			final boolean spatial, final boolean stopOutOfRange, final int fadeIn, final int fadeOut) {
+		final CSoundFilename playback = new CSoundFilename(buffer, context, loop, stopOutOfRange, fadeIn, fadeOut, "");
 		playback.setNormalizedVolume(this.volume);
-		playback.setPitch(this.pitch + ((float) Math.random() * 2 - 1) * this.pitchVariance);
+		playback.setPitch(randomizedPitch());
 		playback.setMinDistance(this.minDistance);
+		playback.setMaxDistance(this.maxDistance);
 		playback.setDistanceCutoff(this.distanceCutoff);
 		playback.setSpatial(spatial);
 		return playback;
+	}
+
+	private float randomizedPitch() {
+		return this.pitch + ((float) Math.random() * 2 - 1) * this.pitchVariance;
 	}
 
 	public int getSoundCount() {
@@ -232,6 +265,10 @@ public final class UnitSound {
 	}
 
 	public void stop() {
+		for (final CSoundFilename playback : this.activeLoops) {
+			playback.stop();
+		}
+		this.activeLoops.clear();
 		for (final Sound sound : this.sounds) {
 			if (sound != null) {
 				sound.stop();
@@ -240,9 +277,15 @@ public final class UnitSound {
 	}
 
 	public void stop(long soundId) {
-		// This may misbehave if called for a list longer than 1, due to the random
-		// index used when starting?
-		// Not sure if IDs are unique per source
+		if (com.etheller.warsmash.util.JavaCompat.removeIf(this.activeLoops, playback -> {
+			if (playback.getPlaybackId() != soundId) {
+				return false;
+			}
+			playback.stop();
+			return true;
+		})) {
+			return;
+		}
 		for (final Sound sound : this.sounds) {
 			if (sound != null) {
 				sound.stop(soundId);

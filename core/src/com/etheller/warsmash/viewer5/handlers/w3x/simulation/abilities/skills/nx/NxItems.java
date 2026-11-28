@@ -75,7 +75,7 @@ public final class NxItems {
 
 	private static void put(final Map<War3ID, CAbilityTypeDefinition> map, final String code,
 			final CAbilityTypeDefinitionSpellBase.AbilityConstructor constructor) {
-		map.put(War3ID.fromString(code), new CAbilityTypeDefinitionSpellBase(constructor));
+		map.putIfAbsent(War3ID.fromString(code), new CAbilityTypeDefinitionSpellBase(constructor));
 	}
 
 	static void register(final Map<War3ID, CAbilityTypeDefinition> map) {

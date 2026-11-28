@@ -529,8 +529,10 @@ public abstract class ModelViewer {
 	public float maxFrameDelta = Float.MAX_VALUE;
 
 	public void update() {
-		final float dt = Math.min(Gdx.graphics.getDeltaTime(), this.maxFrameDelta);
+		update(Math.min(Gdx.graphics.getDeltaTime(), this.maxFrameDelta));
+	}
 
+	protected void update(final float dt) {
 		this.frame += 1;
 
 		this.visibleCells = 0;

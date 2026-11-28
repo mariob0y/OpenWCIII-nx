@@ -113,24 +113,25 @@ public class MdxModel extends com.etheller.warsmash.viewer5.Model<MdxHandler> {
 			String path = texture.getPath();
 			final int replaceableId = texture.getReplaceableId();
 
-			if (replaceableId != 0) {
+			final String replaceablePath = ReplaceableIds.getPathString(replaceableId);
+			if ((replaceablePath != null) && !replaceablePath.isEmpty()) {
 				// TODO This uses dumb, stupid, terrible, no-good hardcoded replaceable IDs
 				// instead of the real system, because currently MdxSimpleInstance is not
 				// supporting it correctly.
 				final String idString = ((replaceableId == 1) || (replaceableId == 2)) ? ReplaceableIds.getIdString(0)
 						: "";
-				path = "ReplaceableTextures\\" + ReplaceableIds.getPathString(replaceableId) + idString + ".blp";
+				path = "ReplaceableTextures\\" + replaceablePath + idString + ".blp";
 			}
 
-			if ((texture.reforged || reforged) && !path.endsWith(".dds")) {
+			if (path.isEmpty()) {
+				path = "Textures\\white.blp";
+			}
+			else if ((texture.reforged || reforged) && (path.length() >= 4) && !path.endsWith(".dds")) {
 				final String ddsPath = path.substring(0, path.length() - 4) + ".dds";
 				if (dataSource.has(ddsPath.replace("\\", "/")) || dataSource.has(ddsPath.replace("/", "\\"))
 						|| path.endsWith(".tif")) {
 					path = ddsPath;
 				}
-			}
-			else if ("".equals(path)) {
-				path = "Textures\\white.blp";
 			}
 			resolvedTexturePaths.add(path);
 		}

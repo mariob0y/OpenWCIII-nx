@@ -46,13 +46,15 @@ public class CBehaviorNoTargetSpellBase implements CBehavior {
 			boolean wasChanneling = this.channeling;
 			if (!wasEffectDone) {
 				this.doneEffect = true;
-				if (!this.unit.chargeMana(this.ability.getManaCost())) {
+				if (!this.unit.chargeManaForSpell(simulation, this.ability.getManaCost())) {
 					simulation.getCommandErrorListener().showInterfaceError(this.unit.getPlayerIndex(), CommandStringErrorKeys.NOT_ENOUGH_MANA);
 					return this.unit.pollNextOrderBehavior(simulation);
 				}
 				this.unit.beginCooldown(simulation, this.ability.getCooldownId(), this.ability.getCooldown());
 				// warsmash-nx: a spell cast from an item uses up its charge only now, when it takes effect
-				CAbilityInventory.useItemCharge(simulation, this.unit, this.ability.getItem());
+				if (!this.ability.consumesItemChargeOnEffect()) {
+					CAbilityInventory.useItemCharge(simulation, this.unit, this.ability.getItem());
+				}
 				this.channeling = this.ability.doEffect(simulation, this.unit, null);
 				if (this.channeling) {
 					simulation.unitLoopSoundEffectEvent(this.unit, this.ability.getAlias());
@@ -62,6 +64,7 @@ public class CBehaviorNoTargetSpellBase implements CBehavior {
 			}
 			this.channeling = this.channeling && this.ability.doChannelTick(simulation, this.unit, null);
 			if (wasEffectDone && wasChanneling && !this.channeling) {
+				this.ability.doChannelEnd(simulation, this.unit, null, false);
 				simulation.unitStopSoundEffectEvent(this.unit, this.ability.getAlias());
 			}
 		}
@@ -77,6 +80,11 @@ public class CBehaviorNoTargetSpellBase implements CBehavior {
 
 	@Override
 	public void end(final CSimulation game, final boolean interrupted) {
+		if (this.doneEffect && this.channeling) {
+			this.channeling = false;
+			this.ability.doChannelEnd(game, this.unit, null, interrupted);
+			game.unitStopSoundEffectEvent(this.unit, this.ability.getAlias());
+		}
 	}
 
 	@Override

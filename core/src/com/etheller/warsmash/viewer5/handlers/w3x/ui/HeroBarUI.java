@@ -230,6 +230,7 @@ public class HeroBarUI {
 
 	private static boolean isBarHero(final CUnit unit, final int localPlayerIndex) {
 		return (unit.getHeroData() != null) && (unit.getPlayerIndex() == localPlayerIndex) && !unit.isNxIllusion()
+				&& !unit.isIllusion()
 				&& (!unit.isHidden() || unit.isDead());
 	}
 

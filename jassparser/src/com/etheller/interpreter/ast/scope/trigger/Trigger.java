@@ -78,9 +78,10 @@ public class Trigger implements CHandle {
 	}
 
 	public boolean evaluate(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
-		if (!this.enabled) {
-			return false;
-		}
+		return this.enabled && evaluateConditions(globalScope, triggerScope);
+	}
+
+	public boolean evaluateConditions(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
 		for (final TriggerBooleanExpression condition : this.conditions) {
 			if (!condition.evaluate(globalScope, triggerScope)) {
 				return false;
@@ -90,12 +91,16 @@ public class Trigger implements CHandle {
 	}
 
 	public void execute(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
-		execute(globalScope, triggerScope, false, false);
+		if (this.enabled) {
+			execute(globalScope, triggerScope, false, false);
+		}
 	}
 
 	/** warsmash-nx: an event's execution: its queued threads do not start if the trigger is disabled first. */
 	public void executeFromEvent(final GlobalScope globalScope, final TriggerExecutionScope triggerScope) {
-		execute(globalScope, triggerScope, false, true);
+		if (this.enabled) {
+			execute(globalScope, triggerScope, false, true);
+		}
 	}
 
 	/** Explicit TriggerExecute calls run their actions before the caller continues, up to a sleep. */
@@ -105,9 +110,6 @@ public class Trigger implements CHandle {
 
 	private void execute(final GlobalScope globalScope, final TriggerExecutionScope triggerScope,
 			final boolean immediate, final boolean fromEvent) {
-		if (!this.enabled) {
-			return;
-		}
 		this.execCount++;
 		for (final JassFunction action : this.actions) {
 			try {
